@@ -308,6 +308,11 @@ shared instead and a warning is logged. Single operations on shared objects are 
 `catx run file.cx [args]`, `catx check [--json] files...`, `catx fmt [--check] files...`, `catx repl`,
 `catx lsp`, `catx test dir` (runs `*.cx` programs and compares against `*.out`).
 
+`catx fmt` rewrites files in place (`catx fmt -` filters stdin to stdout). It keeps comments and the
+program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
+`{ ... }` block across lines when its line would exceed 100 columns. `--check` lists the files that
+would change and exits with status 1 if there are any. Files with syntax errors are left untouched.
+
 `check --json` prints `{"diagnostics": [...]}` where each diagnostic has `code`, `severity`, `message`,
 `file`, `span` (`start`/`end` as `{line, col, offset}`, 1-based lines and columns), `notes`, and `fixes`
 (each a list of `{span, replacement}` edits).

@@ -118,15 +118,23 @@ pub struct Token {
     pub space_before: bool,
 }
 
+/// A `#` comment (or the `#!` shebang line), collected for tooling such as the formatter.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Comment {
+    pub span: Span,
+    /// The comment text including the leading `#`, without the line terminator.
+    pub text: String,
+}
+
 /// Operators, longest first.
-const SYMBOLS: &[&str] = &[
+pub(crate) const SYMBOLS: &[&str] = &[
     "...", "<=>", "**=", "<<=", ">>=", "??=", "||=", "&&=", "==", "!=", "<=", ">=", "&&", "||", "??", "?.", "->",
     "=>", "..", "+=", "-=", "*=", "/=", "%=", "|=", "&=", "^=", "<<", ">>", "**", "::", "+", "-", "*", "/", "%",
     "=", "<", ">", "!", "?", ".", ",", ":", ";", "(", ")", "[", "]", "{", "}", "|", "&", "^", "~", "@",
 ];
 
 /// Tokens after which a newline does not end the statement.
-fn continues_line(t: &Tok) -> bool {
+pub(crate) fn continues_line(t: &Tok) -> bool {
     match t {
         Tok::Sym(s) => matches!(
             *s,
@@ -149,12 +157,14 @@ pub struct Lexer<'a> {
     out: Vec<Token>,
     brackets: Vec<u8>,
     pub diags: Vec<Diagnostic>,
+    /// Comments seen so far, in source order. The parser ignores them.
+    pub comments: Vec<Comment>,
 }
 
 impl<'a> Lexer<'a> {
     /// Lexes `src`, whose first byte sits at offset `base` of file `file`.
     pub fn new(src: &'a str, file: u32, base: u32) -> Self {
-        Lexer { src, bytes: src.as_bytes(), pos: 0, file, base, out: Vec::new(), brackets: Vec::new(), diags: Vec::new() }
+        Lexer { src, bytes: src.as_bytes(), pos: 0, file, base, out: Vec::new(), brackets: Vec::new(), diags: Vec::new(), comments: Vec::new() }
     }
 
     fn span(&self, start: usize, end: usize) -> Span {
@@ -182,10 +192,29 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn tokenize(mut self) -> (Vec<Token>, Vec<Diagnostic>) {
+        self.run();
+        (self.out, self.diags)
+    }
+
+    /// Like [`Lexer::tokenize`], but also returns the comments.
+    pub fn tokenize_with_comments(mut self) -> (Vec<Token>, Vec<Diagnostic>, Vec<Comment>) {
+        self.run();
+        (self.out, self.diags, self.comments)
+    }
+
+    fn comment(&mut self) {
+        let start = self.pos;
+        while self.pos < self.bytes.len() && self.peek() != b'\n' {
+            self.pos += 1;
+        }
+        let text = self.src[start..self.pos].trim_end_matches('\r').to_string();
+        let span = self.span(start, start + text.len());
+        self.comments.push(Comment { span, text });
+    }
+
+    fn run(&mut self) {
         if self.src.starts_with("#!") {
-            while self.pos < self.bytes.len() && self.peek() != b'\n' {
-                self.pos += 1;
-            }
+            self.comment();
         }
         let mut space = true;
         loop {
@@ -206,11 +235,7 @@ impl<'a> Lexer<'a> {
                         self.pos += 1;
                         space = true;
                     }
-                    b'#' => {
-                        while self.pos < self.bytes.len() && self.peek() != b'\n' {
-                            self.pos += 1;
-                        }
-                    }
+                    b'#' => self.comment(),
                     b'\\' if self.peek_at(1) == b'\n' => {
                         // Explicit line continuation.
                         self.pos += 2;
@@ -236,7 +261,7 @@ impl<'a> Lexer<'a> {
                     self.out.push(Token { tok: Tok::Newline, span, space_before: true });
                 }
                 self.out.push(Token { tok: Tok::Eof, span, space_before: true });
-                break;
+                return;
             }
             let start = self.pos;
             let c = self.peek();
@@ -271,7 +296,6 @@ impl<'a> Lexer<'a> {
             }
             space = false;
         }
-        (self.out, self.diags)
     }
 
     fn number(&mut self, space: bool) {
@@ -488,6 +512,11 @@ pub fn lex(src: &str, file: u32) -> (Vec<Token>, Vec<Diagnostic>) {
     Lexer::new(src, file, 0).tokenize()
 }
 
+/// Lexes a whole file, keeping its comments.
+pub fn lex_with_comments(src: &str, file: u32) -> (Vec<Token>, Vec<Diagnostic>, Vec<Comment>) {
+    Lexer::new(src, file, 0).tokenize_with_comments()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,6 +543,15 @@ mod tests {
         assert_eq!(t[7], Tok::Int("255".into()));
         assert_eq!(t[8], Tok::Int("1000".into()));
         assert_eq!(t[9], Tok::Float(2000.0));
+    }
+
+    #[test]
+    fn collects_comments() {
+        let (toks, _, comments) = lex_with_comments("#!/usr/bin/env catx\nx = 1 # one\n# two\r\ny\n", 0);
+        let texts: Vec<&str> = comments.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(texts, ["#!/usr/bin/env catx", "# one", "# two"]);
+        assert_eq!(comments[1].span.start, 26);
+        assert_eq!(toks.iter().filter(|t| t.tok == Tok::Newline).count(), 2);
     }
 
     #[test]

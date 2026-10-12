@@ -1,5 +1,6 @@
 //! `catx`: the Catallaxy command-line tool.
 
+mod fmt_cmd;
 mod run;
 
 use std::path::PathBuf;
@@ -11,7 +12,7 @@ catx — the Catallaxy language
 USAGE:
     catx run [--promote-on-access] <file.cx> [args...]
     catx check [--json] <file.cx>...
-    catx fmt [--check] <file.cx>...
+    catx fmt [--check] <file.cx>...   (`catx fmt -` formats stdin to stdout)
     catx test [dir]
     catx repl
     catx lsp
@@ -29,6 +30,7 @@ fn main() -> ExitCode {
     let code = match cmd.as_str() {
         "run" => run::cmd_run(rest),
         "check" => run::cmd_check(rest),
+        "fmt" => fmt_cmd::cmd_fmt(rest),
         "disasm" => run::cmd_disasm(rest),
         "test" => run::cmd_test(rest),
         "version" | "--version" | "-V" => {
