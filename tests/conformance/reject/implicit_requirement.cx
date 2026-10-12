@@ -1,0 +1,3 @@
+# expect: E0342
+fn shout(x) { x.name.upcase }
+shout(42)

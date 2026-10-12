@@ -1,0 +1,4 @@
+# expect: E0615
+class Cell { v: Int }
+cells = [Cell.new(1)]
+cells.par_map { |c| c.v }

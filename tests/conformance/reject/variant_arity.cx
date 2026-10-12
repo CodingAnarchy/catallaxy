@@ -1,0 +1,3 @@
+# expect: E0339
+enum E { A(Int) }
+e = E.A(1, 2)

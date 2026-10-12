@@ -1,0 +1,5 @@
+# expect: E0300
+interface Shape { fn area(self) -> Float }
+class Sq { side: Float }
+fn total(s: Shape) -> Float { s.area() }
+total(Sq.new(2.0))

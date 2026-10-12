@@ -135,8 +135,16 @@ impl<'a> Parser<'a> {
         Expr { id: self.id(), kind, span }
     }
 
-    /// Skips to a plausible statement boundary after an error.
+    /// Skips to a plausible statement boundary after an error. Always makes progress.
     fn recover(&mut self) {
+        let start = self.pos;
+        self.recover_inner();
+        if self.pos == start && !self.at_eof() && !self.is_sym("}") {
+            self.bump();
+        }
+    }
+
+    fn recover_inner(&mut self) {
         let mut depth = 0i32;
         loop {
             match self.tok() {
@@ -190,9 +198,9 @@ impl<'a> Parser<'a> {
                 }
                 Err(()) => self.recover(),
             }
-            if self.is_sym("}") {
+            if self.is_sym("}") || self.is_sym(")") || self.is_sym("]") {
                 let span = self.span();
-                self.diags.push(Diagnostic::error("E0103", "unmatched `}`", span));
+                self.diags.push(Diagnostic::error("E0103", format!("unmatched {}", self.describe()), span));
                 self.bump();
             }
             self.skip_newlines();

@@ -1,0 +1,3 @@
+# expect: E0325
+const LIMIT = 10
+fn bump() { LIMIT = 11 }

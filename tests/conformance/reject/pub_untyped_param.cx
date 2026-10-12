@@ -1,0 +1,2 @@
+# expect: E0216
+pub fn twice(x) -> Int { x * 2 }

@@ -1,0 +1,4 @@
+# expect: E0608
+items = [1, 2, 3]
+t = spawn move { items.sum() }
+puts(items)

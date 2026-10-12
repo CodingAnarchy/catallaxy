@@ -1,0 +1,37 @@
+frozen class Point {
+  x: Int
+  y: Int
+  fn plus(self, o: Point) -> Point { Point.new(self.x + o.x, self.y + o.y) }
+}
+p = Point.new(1, 2).plus(Point.new(3, 4))
+puts(p.x + p.y)
+
+xs = freeze([1, 2, 3])
+puts(xs.map { |x| x + 1 })
+puts(xs.length)
+
+const PRIMES = [2, 3, 5, 7]
+puts(PRIMES.sum())
+
+shared class Stats {
+  hits: Atomic[Int] = Atomic.new(0)
+  log: Mutex[List[String]] = Mutex.new([])
+  total: Int = 0
+}
+stats = Stats.new()
+threads = (1..4).map { |i|
+  spawn {
+    stats.hits.add(1)
+    stats.log.lock { |l| l.push("t#{i}") }
+    with lock(stats) { stats.total = stats.total + i }
+  }
+}
+for t in threads { t.join() }
+puts(stats.hits.get())
+puts(stats.log.get().length)
+puts(stats.total)
+
+# Frozen data can be shared freely.
+config = freeze(["mode": "fast"])
+t = spawn { config["mode"] }
+puts(t.join().unwrap())

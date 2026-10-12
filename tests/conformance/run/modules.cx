@@ -1,0 +1,10 @@
+import lib.geometry
+import lib.geometry.{Vec2, dot}
+
+v = Vec2.new(3.0, 4.0)
+puts(v.length())
+puts(dot(v, geometry.Vec2.new(1.0, 0.0)))
+puts(geometry.ORIGIN_NAME)
+puts(geometry.answer())
+puts(geometry.Dir.North)
+puts("hi".bang())

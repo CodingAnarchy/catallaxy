@@ -1,0 +1,2 @@
+# expect: E0204
+import nowhere.at.all

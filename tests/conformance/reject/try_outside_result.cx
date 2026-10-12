@@ -1,0 +1,3 @@
+# expect: E0321
+fn parse(s: String) -> Result[Int, String] { Ok(1) }
+fn main() -> Int { parse("1")? }

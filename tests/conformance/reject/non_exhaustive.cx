@@ -1,0 +1,8 @@
+# expect: E0360
+enum Color { Red, Green, Blue }
+fn name(c: Color) -> String {
+  match c {
+    .Red => "red"
+    .Green => "green"
+  }
+}

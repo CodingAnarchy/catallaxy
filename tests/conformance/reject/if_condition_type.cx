@@ -1,0 +1,2 @@
+# expect: E0300
+if 1 { puts("x") }

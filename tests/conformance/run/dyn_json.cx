@@ -1,0 +1,21 @@
+text = "{\"name\": \"Ada\", \"langs\": [\"en\", \"fr\"], \"age\": 36, \"admin\": true, \"score\": 9.5, \"boss\": null}"
+data = Json.parse(text).unwrap()
+name = (data["name"] as? String) ?? "anon"
+puts(name)
+puts(data["langs"][1])
+age = (data["age"] as? Int) ?? 0
+puts(age + 1)
+puts(data["admin"])
+puts(data.score)
+puts(data["boss"] == nil)
+puts(data["missing"] == nil)
+langs = data["langs"] as? List[Dyn]
+puts(langs?.length)
+bad = Json.parse("{oops")
+puts(bad.is_err())
+obj: Dyn = ["k": [1, 2, 3], "ok": true]
+puts(Json.stringify(obj))
+v: Dyn = 5
+puts(v + 1)
+s: Dyn = "x"
+puts((s as? Int) == nil)

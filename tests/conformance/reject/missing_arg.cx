@@ -1,0 +1,3 @@
+# expect: E0338
+fn add(a: Int, b: Int) -> Int { a + b }
+add(1)

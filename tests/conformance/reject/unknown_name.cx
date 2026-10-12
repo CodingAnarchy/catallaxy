@@ -1,0 +1,2 @@
+# expect: E0303
+puts(lenght)

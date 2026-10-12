@@ -1,0 +1,2 @@
+# expect: E0311
+puts(5.upcase())

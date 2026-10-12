@@ -1,0 +1,4 @@
+# expect: E0368
+fn biggest[T: Comparable](xs: List[T]) -> T? { xs.max() }
+class Blob { v: Int }
+biggest([Blob.new(1)])

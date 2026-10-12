@@ -1,0 +1,3 @@
+# expect: E0106
+a = 1
+puts(0 < a < 2)

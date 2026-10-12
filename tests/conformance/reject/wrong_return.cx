@@ -1,0 +1,2 @@
+# expect: E0301
+fn name() -> String { 42 }

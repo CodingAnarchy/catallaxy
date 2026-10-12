@@ -1594,6 +1594,8 @@ impl Checker {
         parallel: bool,
     ) -> (Vec<ArgSlot>, TyId) {
         let (params, ret) = self.instantiate_sig(m);
+        let inst = std::mem::take(&mut self.last_inst);
+        let inst_subst = std::mem::take(&mut self.last_inst_subst);
         let fname = self.fns[m.fid as usize].name.clone();
         // Early: use the expected result type to inform inference.
         if let Some(exp) = expected {
@@ -1705,7 +1707,33 @@ impl Checker {
                 self.check_move_arg(expr, t);
             }
         }
-        let _ = ok;
+        // Bounds of the function's own type parameters.
+        if ok {
+            for (p, v) in inst {
+                let bounds = self.params[p as usize].bounds.clone();
+                let actual = self.types.resolve(v);
+                if matches!(self.types.get(actual), Ty::Var(_) | Ty::Error) {
+                    continue;
+                }
+                for b in bounds {
+                    let b = self.types.subst(b, &inst_subst, Some(m.self_ty));
+                    if !self.assignable(actual, b) {
+                        let pname = self.params[p as usize].name.clone();
+                        let msg = format!(
+                            "`{}` does not satisfy the bound `{}` of type parameter `{pname}` in `{fname}`",
+                            self.show(actual),
+                            self.show(b)
+                        );
+                        let mut d = Diag::error("E0368", msg, call.span);
+                        let missing = self.missing_methods(actual, b);
+                        if !missing.is_empty() {
+                            d = d.note(format!("missing: {}", missing.iter().map(|x| format!("`{x}`")).collect::<Vec<_>>().join(", ")));
+                        }
+                        self.emit(d);
+                    }
+                }
+            }
+        }
         let slots = slots.into_iter().map(|s| s.unwrap_or(ArgSlot::Missing)).collect();
         (slots, ret)
     }

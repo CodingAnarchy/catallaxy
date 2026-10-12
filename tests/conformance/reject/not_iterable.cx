@@ -1,0 +1,2 @@
+# expect: E0359
+for x in 42 { puts(x) }

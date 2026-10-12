@@ -1,0 +1,3 @@
+# expect: E0300
+fn f(s: String) -> Int { s.length }
+f(42)

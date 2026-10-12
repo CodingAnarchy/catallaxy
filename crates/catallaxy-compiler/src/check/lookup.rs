@@ -59,7 +59,7 @@ impl Checker {
 
     pub fn ensure_signature(&mut self, fid: FnId) {
         let f = &self.fns[fid as usize];
-        if f.ret_annotated || f.is_native || f.state != CheckState::Unchecked {
+        if f.ret_annotated || f.is_native || f.state == CheckState::Done {
             return;
         }
         if matches!(f.synth, Synth::Main(_)) {
@@ -73,10 +73,13 @@ impl Checker {
         self.ensure_signature(m.fid);
         let f = self.fns[m.fid as usize].clone();
         let mut sub = m.subst.clone();
+        self.last_inst.clear();
         for &tp in &f.type_params {
             let v = self.types.fresh_var();
             sub.insert(tp, v);
+            self.last_inst.push((tp, v));
         }
+        self.last_inst_subst = sub.clone();
         let params: Vec<PInfo> = f
             .params
             .iter()

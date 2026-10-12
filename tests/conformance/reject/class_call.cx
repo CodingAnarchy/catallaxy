@@ -1,0 +1,3 @@
+# expect: E0331
+class Point { x: Int }
+p = Point(1)

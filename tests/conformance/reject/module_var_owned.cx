@@ -1,0 +1,2 @@
+# expect: E0601
+var cache: List[Int] = []

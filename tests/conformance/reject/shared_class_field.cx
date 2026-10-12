@@ -1,0 +1,2 @@
+# expect: E0603
+shared class Registry { names: List[String] }

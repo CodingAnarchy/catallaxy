@@ -1,0 +1,8 @@
+# exit: 101
+puts("before")
+xs = [1, 2, 3]
+fn get(i: Int) -> Int { xs_global()[i] }
+fn xs_global() -> List[Int] { [1, 2, 3] }
+puts(get(1))
+puts(get(10))
+puts("never")

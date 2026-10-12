@@ -1,0 +1,6 @@
+# expect: E0232
+class Acct {
+  owner: String
+  balance: Int
+  fn init(self, owner: String) { self.owner = owner }
+}

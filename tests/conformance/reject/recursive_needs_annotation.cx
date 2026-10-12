@@ -1,0 +1,3 @@
+# expect: E0230
+fn count(n: Int) { if n == 0 { 0 } else { 1 + count(n - 1) } }
+count(3)

@@ -1,0 +1,2 @@
+# expect: E0602
+frozen class Bag { items: List[Int] }

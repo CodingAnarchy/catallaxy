@@ -1,0 +1,4 @@
+# expect: E0612
+ch: Channel[List[Int]] = Channel.new()
+batch = [1, 2]
+ch.send(batch)

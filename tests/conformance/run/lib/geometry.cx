@@ -1,0 +1,18 @@
+pub class Vec2 {
+  x: Float
+  y: Float
+  fn length(self) -> Float { Math.hypot(self.x, self.y) }
+}
+
+pub fn dot(a: Vec2, b: Vec2) -> Float { a.x * b.x + a.y * b.y }
+
+pub const ORIGIN_NAME = "origin"
+
+fn helper() -> Int { 42 }
+pub fn answer() -> Int { helper() }
+
+pub enum Dir { North, South }
+
+pub extend String {
+  fn bang(self) -> String { self + "!" }
+}

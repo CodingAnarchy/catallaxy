@@ -1,0 +1,3 @@
+# expect: E0609
+n = 0
+t = spawn { n = 1 }

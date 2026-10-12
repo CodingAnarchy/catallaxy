@@ -1,0 +1,4 @@
+# expect: E0611
+frozen class P { x: Int }
+p = P.new(1)
+p.x = 2
