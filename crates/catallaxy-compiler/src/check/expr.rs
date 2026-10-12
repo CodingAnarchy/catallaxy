@@ -110,7 +110,7 @@ impl Checker {
                 self.types.string
             }
             ExprKind::Ident(name) => self.check_ident(e, name),
-            ExprKind::SelfValue => match self.self_local() {
+            ExprKind::SelfValue => match self.self_local().and_then(|_| self.lookup_local("self")) {
                 Some(l) => {
                     self.names.insert(e.id, NameRes::Local(l));
                     self.local_ty(l)

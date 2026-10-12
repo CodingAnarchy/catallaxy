@@ -35,6 +35,8 @@ pub struct Frame {
     pub closure: Value,
     /// Identity for non-local exits (0 until requested).
     pub serial: u64,
+    /// One past the highest live register of this frame and every frame below it.
+    pub top: usize,
 }
 
 pub struct Vm {
@@ -61,6 +63,8 @@ impl RootSource for VmRoots {
     fn trace_roots(&self, t: &mut Tracer) {
         // SAFETY: called only while the owning thread is stopped.
         let vm = unsafe { &*self.0 };
+        // A callee's frame can end below its caller's higher registers, which stay live: scan
+        // up to the highest register of any frame, not just the top one.
         let top = vm.stack_top();
         for i in 0..top {
             ops_mark(t, unsafe { *vm.stack.add(i) });
@@ -145,11 +149,9 @@ impl Vm {
         self.m.tid
     }
 
+    /// First stack slot above every live register of every frame.
     fn stack_top(&self) -> usize {
-        match self.frames.last() {
-            Some(f) => f.base + f.func.nregs,
-            None => 0,
-        }
+        self.frames.last().map(|f| f.top).unwrap_or(0)
     }
 
     #[inline(always)]
@@ -215,7 +217,8 @@ impl Vm {
             self.set_reg(base + i, Value::NIL);
         }
         let stop = self.frames.len();
-        self.frames.push(Frame { func: f, pc: 0, base, ret: base, closure, serial: 0 });
+        let top = (base + f.nregs).max(self.stack_top());
+        self.frames.push(Frame { func: f, pc: 0, base, ret: base, closure, serial: 0, top });
         catallaxy_gc::safepoint(&self.m.rec);
         self.execute(stop)
     }
@@ -374,7 +377,8 @@ impl Vm {
                     unsafe { *self.stack.add(base + i) = Value::NIL };
                 }
                 save!();
-                self.frames.push(Frame { func: f, pc: 0, base, ret: $ret, closure: $closure, serial: 0 });
+                let top = (base + f.nregs).max(fr.top);
+                self.frames.push(Frame { func: f, pc: 0, base, ret: $ret, closure: $closure, serial: 0, top });
                 if catallaxy_gc::is_gc_requested() {
                     catallaxy_gc::safepoint_slow(&self.m.rec);
                 }
