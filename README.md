@@ -93,9 +93,26 @@ All `unsafe` code lives in `catallaxy-gc` and `catallaxy-runtime`.
 
 ## Status
 
-Catallaxy 0.1 implements the v1 design: the full static type system, the object and memory model,
-parallel threads with ownership checking, and the tooling above. See `docs/design.md` for what comes
-after v1 (thread-local young collection, fibers, a JIT experiment).
+Catallaxy 0.1 implements the v1 design (`docs/design.md`, phases 1–4 without fibers):
+
+- the full static type system: inference, structural interfaces with default methods, implicit
+  generics, nullables, unions, exhaustive `match`, `Result` and `?`, extensions, frozen types,
+  concurrency capabilities checked at compile time;
+- the runtime: NaN-boxed values, fixed-layout objects, ownership states with runtime backstops,
+  `--promote-on-access`, a parallel mark-sweep collector with thread-local allocation and lazy sweep;
+- threads, channels, `Mutex`, `Atomic`, `with lock`, `par_map`/`par_each`/`par_reduce` on a
+  work-stealing pool;
+- tooling: `check --json`, formatter, REPL, language server, Rust extension API.
+
+Validation: a conformance suite of 109 programs (run + reject), 42 example programs with checked
+output, Miri (Tree Borrows) and ThreadSanitizer on the collector and runtime, Loom models of the
+object-lock and mark protocols, continuous fuzzing of the compiler front end, and a GC stress mode
+(`CATX_GC_STRESS=1`) that the whole corpus passes. On an Apple M-series machine Catallaxy runs the
+`bench/` programs 1.5–7× faster than CPython 3.13 and type-checks 8,000 lines in about 20 ms.
+
+Differences from the design worth knowing: `Dyn` records (parsed JSON objects) are dictionaries
+rather than hidden-class objects, and reads of *shared* lists take the object's lock. Post-v1 work:
+thread-local young collection, fibers, a seqlock dict fast path, superinstructions.
 
 ## License
 
