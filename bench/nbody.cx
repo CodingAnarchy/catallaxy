@@ -1,0 +1,60 @@
+class Body {
+  x: Float
+  y: Float
+  z: Float
+  vx: Float
+  vy: Float
+  vz: Float
+  m: Float
+}
+fn energy(bodies: List[Body]) -> Float {
+  e = 0.0
+  n = bodies.length
+  for i in 0...n {
+    b = bodies[i]
+    e += 0.5 * b.m * (b.vx * b.vx + b.vy * b.vy + b.vz * b.vz)
+    for j in (i + 1)...n {
+      c = bodies[j]
+      dx = b.x - c.x
+      dy = b.y - c.y
+      dz = b.z - c.z
+      e -= b.m * c.m / (dx * dx + dy * dy + dz * dz).sqrt
+    }
+  }
+  e
+}
+fn advance(bodies: List[Body], dt: Float) {
+  n = bodies.length
+  for i in 0...n {
+    b = bodies[i]
+    for j in (i + 1)...n {
+      c = bodies[j]
+      dx = b.x - c.x
+      dy = b.y - c.y
+      dz = b.z - c.z
+      d2 = dx * dx + dy * dy + dz * dz
+      mag = dt / (d2 * d2.sqrt)
+      b.vx -= dx * c.m * mag
+      b.vy -= dy * c.m * mag
+      b.vz -= dz * c.m * mag
+      c.vx += dx * b.m * mag
+      c.vy += dy * b.m * mag
+      c.vz += dz * b.m * mag
+    }
+  }
+  for b in bodies {
+    b.x += dt * b.vx
+    b.y += dt * b.vy
+    b.z += dt * b.vz
+  }
+}
+bodies = [
+  Body.new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 39.47),
+  Body.new(4.84, -1.16, -0.10, 0.60, 2.81, -0.02, 0.037),
+  Body.new(8.34, 4.12, -0.40, -1.01, 1.82, 0.008, 0.011),
+  Body.new(12.89, -15.11, -0.22, 1.08, 0.86, -0.01, 0.0017),
+  Body.new(15.37, -25.91, 0.17, 0.97, 0.59, -0.03, 0.002)
+]
+puts(energy(bodies).round_to(6))
+for _ in 0...200000 { advance(bodies, 0.01) }
+puts(energy(bodies).round_to(6))

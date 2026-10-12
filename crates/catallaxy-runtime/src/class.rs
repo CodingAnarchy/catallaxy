@@ -55,8 +55,9 @@ pub struct Class {
     pub capability: Capability,
     pub superclass: Option<&'static Class>,
     pub field_names: Vec<Sym>,
-    /// Method name → function id, including inherited methods.
-    pub methods: FxHashMap<Sym, u32>,
+    /// Method name → function id, including inherited methods. Builtin classes get their
+    /// methods after registration (when the prelude loads), so the table is swapped atomically.
+    methods: AtomicPtr<FxHashMap<Sym, u32>>,
     /// Virtual method table (function ids), for overridable methods of user classes.
     pub vtable: Vec<u32>,
     /// For enum variant classes: the variant's index within its enum.
@@ -72,7 +73,12 @@ impl Class {
     }
 
     pub fn lookup(&self, name: Sym) -> Option<u32> {
-        self.methods.get(&name).copied()
+        self.methods().get(&name).copied()
+    }
+
+    pub fn methods(&self) -> &FxHashMap<Sym, u32> {
+        // SAFETY: method tables are leaked and never freed or mutated after publication.
+        unsafe { &*self.methods.load(Ordering::Acquire) }
     }
 
     /// True if `self` is `other` or inherits from it.
@@ -151,7 +157,7 @@ pub fn register_class(spec: ClassSpec) -> &'static Class {
         capability: spec.capability,
         superclass: spec.superclass,
         field_names: spec.field_names,
-        methods: spec.methods,
+        methods: AtomicPtr::new(Box::into_raw(Box::new(spec.methods))),
         vtable: spec.vtable,
         variant_tag: spec.variant_tag,
         enum_id: spec.enum_id,
@@ -161,14 +167,10 @@ pub fn register_class(spec: ClassSpec) -> &'static Class {
     cls
 }
 
-/// Replaces the method tables of a builtin class (done once, while loading the prelude, before
-/// any other thread exists). Builtin classes are registered before their methods are compiled.
-///
-/// # Safety
-/// No other thread may be reading `cls` concurrently.
-pub unsafe fn set_methods(cls: &'static Class, methods: FxHashMap<Sym, u32>) {
-    let p = cls as *const Class as *mut Class;
-    (*p).methods = methods;
+/// Replaces a class's method table (builtin classes get their methods when the prelude loads).
+/// The previous table is leaked, so concurrent readers stay valid.
+pub fn set_methods(cls: &'static Class, methods: FxHashMap<Sym, u32>) {
+    cls.methods.store(Box::into_raw(Box::new(methods)), Ordering::Release);
 }
 
 pub fn class_by_id(id: u32) -> &'static Class {

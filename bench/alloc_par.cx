@@ -1,0 +1,14 @@
+fn work(seed: Int) -> Int {
+  total = 0
+  for i in 0...15000 {
+    xs: List[String] = []
+    for j in 0...200 { xs.push("s#{j + seed}") }
+    total += xs.length
+  }
+  total
+}
+n = (Env.get("N") ?? "8").to_i ?? 8
+threads = (1..n).map { |s| spawn { work(s) } }
+total = 0
+for t in threads { total += t.join().unwrap() }
+puts(total)

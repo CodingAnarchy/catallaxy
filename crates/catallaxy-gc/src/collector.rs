@@ -353,7 +353,7 @@ fn collect(me: &ThreadRecord) {
     POOL.live_color.store(color, Ordering::SeqCst);
     POOL.sweep_large(color);
     POOL.mark_all_unswept();
-    stats::after_collection(GLOBAL.mark.marked_bytes.load(Ordering::SeqCst));
+    stats::after_collection(GLOBAL.mark.marked_bytes.load(Ordering::SeqCst), threads.len());
 
     // 5. Resume the world.
     for t in threads.iter() {

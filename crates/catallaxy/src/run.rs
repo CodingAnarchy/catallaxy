@@ -98,6 +98,14 @@ fn run_program(program: &Program) -> i32 {
         }
     }
     catallaxy_stdlib::flush();
+    if std::env::var_os("CATX_GC_STATS").is_some() {
+        eprintln!(
+            "gc: {} collections, {:.1} MB heap, {:.1} MB live after last",
+            catallaxy_gc::stats::collections(),
+            catallaxy_gc::total_heap_bytes() as f64 / 1e6,
+            catallaxy_gc::stats::live_bytes() as f64 / 1e6
+        );
+    }
     0
 }
 

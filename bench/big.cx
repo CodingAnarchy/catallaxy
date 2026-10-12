@@ -1,0 +1,7999 @@
+class Item0 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process0(items: List[Item0]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item1 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process1(items: List[Item1]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item2 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process2(items: List[Item2]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item3 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process3(items: List[Item3]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item4 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process4(items: List[Item4]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item5 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process5(items: List[Item5]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item6 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process6(items: List[Item6]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item7 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process7(items: List[Item7]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item8 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process8(items: List[Item8]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item9 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process9(items: List[Item9]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item10 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process10(items: List[Item10]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item11 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process11(items: List[Item11]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item12 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process12(items: List[Item12]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item13 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process13(items: List[Item13]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item14 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process14(items: List[Item14]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item15 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process15(items: List[Item15]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item16 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process16(items: List[Item16]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item17 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process17(items: List[Item17]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item18 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process18(items: List[Item18]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item19 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process19(items: List[Item19]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item20 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process20(items: List[Item20]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item21 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process21(items: List[Item21]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item22 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process22(items: List[Item22]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item23 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process23(items: List[Item23]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item24 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process24(items: List[Item24]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item25 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process25(items: List[Item25]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item26 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process26(items: List[Item26]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item27 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process27(items: List[Item27]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item28 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process28(items: List[Item28]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item29 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process29(items: List[Item29]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item30 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process30(items: List[Item30]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item31 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process31(items: List[Item31]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item32 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process32(items: List[Item32]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item33 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process33(items: List[Item33]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item34 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process34(items: List[Item34]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item35 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process35(items: List[Item35]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item36 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process36(items: List[Item36]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item37 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process37(items: List[Item37]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item38 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process38(items: List[Item38]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item39 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process39(items: List[Item39]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item40 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process40(items: List[Item40]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item41 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process41(items: List[Item41]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item42 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process42(items: List[Item42]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item43 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process43(items: List[Item43]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item44 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process44(items: List[Item44]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item45 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process45(items: List[Item45]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item46 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process46(items: List[Item46]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item47 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process47(items: List[Item47]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item48 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process48(items: List[Item48]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item49 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process49(items: List[Item49]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item50 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process50(items: List[Item50]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item51 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process51(items: List[Item51]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item52 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process52(items: List[Item52]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item53 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process53(items: List[Item53]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item54 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process54(items: List[Item54]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item55 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process55(items: List[Item55]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item56 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process56(items: List[Item56]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item57 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process57(items: List[Item57]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item58 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process58(items: List[Item58]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item59 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process59(items: List[Item59]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item60 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process60(items: List[Item60]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item61 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process61(items: List[Item61]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item62 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process62(items: List[Item62]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item63 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process63(items: List[Item63]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item64 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process64(items: List[Item64]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item65 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process65(items: List[Item65]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item66 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process66(items: List[Item66]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item67 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process67(items: List[Item67]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item68 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process68(items: List[Item68]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item69 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process69(items: List[Item69]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item70 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process70(items: List[Item70]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item71 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process71(items: List[Item71]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item72 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process72(items: List[Item72]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item73 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process73(items: List[Item73]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item74 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process74(items: List[Item74]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item75 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process75(items: List[Item75]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item76 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process76(items: List[Item76]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item77 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process77(items: List[Item77]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item78 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process78(items: List[Item78]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item79 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process79(items: List[Item79]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item80 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process80(items: List[Item80]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item81 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process81(items: List[Item81]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item82 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process82(items: List[Item82]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item83 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process83(items: List[Item83]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item84 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process84(items: List[Item84]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item85 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process85(items: List[Item85]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item86 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process86(items: List[Item86]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item87 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process87(items: List[Item87]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item88 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process88(items: List[Item88]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item89 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process89(items: List[Item89]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item90 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process90(items: List[Item90]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item91 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process91(items: List[Item91]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item92 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process92(items: List[Item92]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item93 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process93(items: List[Item93]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item94 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process94(items: List[Item94]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item95 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process95(items: List[Item95]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item96 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process96(items: List[Item96]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item97 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process97(items: List[Item97]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item98 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process98(items: List[Item98]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item99 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process99(items: List[Item99]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item100 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process100(items: List[Item100]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item101 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process101(items: List[Item101]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item102 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process102(items: List[Item102]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item103 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process103(items: List[Item103]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item104 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process104(items: List[Item104]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item105 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process105(items: List[Item105]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item106 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process106(items: List[Item106]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item107 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process107(items: List[Item107]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item108 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process108(items: List[Item108]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item109 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process109(items: List[Item109]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item110 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process110(items: List[Item110]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item111 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process111(items: List[Item111]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item112 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process112(items: List[Item112]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item113 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process113(items: List[Item113]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item114 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process114(items: List[Item114]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item115 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process115(items: List[Item115]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item116 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process116(items: List[Item116]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item117 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process117(items: List[Item117]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item118 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process118(items: List[Item118]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item119 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process119(items: List[Item119]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item120 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process120(items: List[Item120]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item121 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process121(items: List[Item121]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item122 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process122(items: List[Item122]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item123 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process123(items: List[Item123]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item124 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process124(items: List[Item124]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item125 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process125(items: List[Item125]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item126 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process126(items: List[Item126]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item127 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process127(items: List[Item127]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item128 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process128(items: List[Item128]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item129 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process129(items: List[Item129]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item130 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process130(items: List[Item130]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item131 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process131(items: List[Item131]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item132 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process132(items: List[Item132]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item133 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process133(items: List[Item133]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item134 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process134(items: List[Item134]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item135 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process135(items: List[Item135]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item136 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process136(items: List[Item136]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item137 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process137(items: List[Item137]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item138 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process138(items: List[Item138]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item139 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process139(items: List[Item139]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item140 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process140(items: List[Item140]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item141 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process141(items: List[Item141]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item142 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process142(items: List[Item142]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item143 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process143(items: List[Item143]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item144 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process144(items: List[Item144]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item145 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process145(items: List[Item145]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item146 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process146(items: List[Item146]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item147 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process147(items: List[Item147]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item148 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process148(items: List[Item148]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item149 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process149(items: List[Item149]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item150 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process150(items: List[Item150]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item151 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process151(items: List[Item151]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item152 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process152(items: List[Item152]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item153 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process153(items: List[Item153]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item154 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process154(items: List[Item154]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item155 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process155(items: List[Item155]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item156 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process156(items: List[Item156]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item157 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process157(items: List[Item157]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item158 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process158(items: List[Item158]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item159 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process159(items: List[Item159]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item160 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process160(items: List[Item160]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item161 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process161(items: List[Item161]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item162 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process162(items: List[Item162]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item163 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process163(items: List[Item163]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item164 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process164(items: List[Item164]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item165 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process165(items: List[Item165]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item166 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process166(items: List[Item166]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item167 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process167(items: List[Item167]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item168 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process168(items: List[Item168]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item169 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process169(items: List[Item169]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item170 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process170(items: List[Item170]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item171 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process171(items: List[Item171]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item172 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process172(items: List[Item172]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item173 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process173(items: List[Item173]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item174 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process174(items: List[Item174]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item175 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process175(items: List[Item175]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item176 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process176(items: List[Item176]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item177 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process177(items: List[Item177]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item178 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process178(items: List[Item178]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item179 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process179(items: List[Item179]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item180 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process180(items: List[Item180]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item181 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process181(items: List[Item181]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item182 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process182(items: List[Item182]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item183 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process183(items: List[Item183]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item184 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process184(items: List[Item184]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item185 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process185(items: List[Item185]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item186 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process186(items: List[Item186]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item187 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process187(items: List[Item187]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item188 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process188(items: List[Item188]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item189 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process189(items: List[Item189]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item190 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process190(items: List[Item190]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item191 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process191(items: List[Item191]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item192 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process192(items: List[Item192]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item193 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process193(items: List[Item193]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item194 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process194(items: List[Item194]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item195 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process195(items: List[Item195]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item196 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process196(items: List[Item196]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item197 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process197(items: List[Item197]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item198 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process198(items: List[Item198]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item199 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process199(items: List[Item199]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item200 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process200(items: List[Item200]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item201 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process201(items: List[Item201]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item202 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process202(items: List[Item202]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item203 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process203(items: List[Item203]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item204 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process204(items: List[Item204]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item205 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process205(items: List[Item205]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item206 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process206(items: List[Item206]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item207 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process207(items: List[Item207]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item208 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process208(items: List[Item208]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item209 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process209(items: List[Item209]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item210 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process210(items: List[Item210]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item211 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process211(items: List[Item211]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item212 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process212(items: List[Item212]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item213 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process213(items: List[Item213]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item214 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process214(items: List[Item214]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item215 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process215(items: List[Item215]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item216 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process216(items: List[Item216]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item217 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process217(items: List[Item217]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item218 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process218(items: List[Item218]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item219 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process219(items: List[Item219]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item220 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process220(items: List[Item220]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item221 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process221(items: List[Item221]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item222 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process222(items: List[Item222]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item223 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process223(items: List[Item223]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item224 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process224(items: List[Item224]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item225 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process225(items: List[Item225]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item226 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process226(items: List[Item226]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item227 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process227(items: List[Item227]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item228 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process228(items: List[Item228]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item229 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process229(items: List[Item229]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item230 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process230(items: List[Item230]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item231 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process231(items: List[Item231]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item232 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process232(items: List[Item232]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item233 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process233(items: List[Item233]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item234 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process234(items: List[Item234]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item235 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process235(items: List[Item235]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item236 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process236(items: List[Item236]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item237 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process237(items: List[Item237]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item238 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process238(items: List[Item238]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item239 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process239(items: List[Item239]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item240 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process240(items: List[Item240]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item241 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process241(items: List[Item241]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item242 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process242(items: List[Item242]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item243 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process243(items: List[Item243]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item244 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process244(items: List[Item244]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item245 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process245(items: List[Item245]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item246 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process246(items: List[Item246]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item247 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process247(items: List[Item247]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item248 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process248(items: List[Item248]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item249 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process249(items: List[Item249]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item250 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process250(items: List[Item250]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item251 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process251(items: List[Item251]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item252 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process252(items: List[Item252]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item253 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process253(items: List[Item253]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item254 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process254(items: List[Item254]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item255 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process255(items: List[Item255]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item256 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process256(items: List[Item256]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item257 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process257(items: List[Item257]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item258 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process258(items: List[Item258]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item259 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process259(items: List[Item259]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item260 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process260(items: List[Item260]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item261 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process261(items: List[Item261]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item262 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process262(items: List[Item262]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item263 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process263(items: List[Item263]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item264 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process264(items: List[Item264]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item265 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process265(items: List[Item265]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item266 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process266(items: List[Item266]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item267 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process267(items: List[Item267]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item268 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process268(items: List[Item268]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item269 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process269(items: List[Item269]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item270 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process270(items: List[Item270]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item271 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process271(items: List[Item271]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item272 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process272(items: List[Item272]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item273 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process273(items: List[Item273]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item274 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process274(items: List[Item274]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item275 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process275(items: List[Item275]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item276 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process276(items: List[Item276]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item277 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process277(items: List[Item277]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item278 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process278(items: List[Item278]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item279 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process279(items: List[Item279]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item280 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process280(items: List[Item280]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item281 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process281(items: List[Item281]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item282 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process282(items: List[Item282]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item283 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process283(items: List[Item283]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item284 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process284(items: List[Item284]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item285 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process285(items: List[Item285]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item286 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process286(items: List[Item286]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item287 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process287(items: List[Item287]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item288 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process288(items: List[Item288]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item289 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process289(items: List[Item289]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item290 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process290(items: List[Item290]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item291 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process291(items: List[Item291]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item292 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process292(items: List[Item292]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item293 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process293(items: List[Item293]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item294 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process294(items: List[Item294]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item295 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process295(items: List[Item295]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item296 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process296(items: List[Item296]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item297 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process297(items: List[Item297]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item298 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process298(items: List[Item298]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item299 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process299(items: List[Item299]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item300 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process300(items: List[Item300]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item301 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process301(items: List[Item301]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item302 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process302(items: List[Item302]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item303 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process303(items: List[Item303]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item304 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process304(items: List[Item304]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item305 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process305(items: List[Item305]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item306 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process306(items: List[Item306]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item307 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process307(items: List[Item307]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item308 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process308(items: List[Item308]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item309 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process309(items: List[Item309]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item310 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process310(items: List[Item310]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item311 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process311(items: List[Item311]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item312 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process312(items: List[Item312]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item313 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process313(items: List[Item313]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item314 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process314(items: List[Item314]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item315 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process315(items: List[Item315]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item316 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process316(items: List[Item316]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item317 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process317(items: List[Item317]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item318 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process318(items: List[Item318]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item319 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process319(items: List[Item319]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item320 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process320(items: List[Item320]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item321 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process321(items: List[Item321]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item322 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process322(items: List[Item322]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item323 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process323(items: List[Item323]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item324 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process324(items: List[Item324]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item325 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process325(items: List[Item325]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item326 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process326(items: List[Item326]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item327 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process327(items: List[Item327]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item328 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process328(items: List[Item328]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item329 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process329(items: List[Item329]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item330 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process330(items: List[Item330]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item331 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process331(items: List[Item331]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item332 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process332(items: List[Item332]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item333 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process333(items: List[Item333]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item334 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process334(items: List[Item334]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item335 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process335(items: List[Item335]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item336 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process336(items: List[Item336]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item337 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process337(items: List[Item337]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item338 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process338(items: List[Item338]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item339 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process339(items: List[Item339]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item340 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process340(items: List[Item340]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item341 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process341(items: List[Item341]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item342 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process342(items: List[Item342]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item343 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process343(items: List[Item343]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item344 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process344(items: List[Item344]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item345 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process345(items: List[Item345]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item346 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process346(items: List[Item346]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item347 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process347(items: List[Item347]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item348 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process348(items: List[Item348]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item349 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process349(items: List[Item349]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item350 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process350(items: List[Item350]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item351 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process351(items: List[Item351]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item352 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process352(items: List[Item352]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item353 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process353(items: List[Item353]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item354 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process354(items: List[Item354]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item355 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process355(items: List[Item355]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item356 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process356(items: List[Item356]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item357 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process357(items: List[Item357]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item358 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process358(items: List[Item358]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item359 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process359(items: List[Item359]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item360 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process360(items: List[Item360]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item361 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process361(items: List[Item361]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item362 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process362(items: List[Item362]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item363 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process363(items: List[Item363]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item364 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process364(items: List[Item364]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item365 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process365(items: List[Item365]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item366 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process366(items: List[Item366]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item367 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process367(items: List[Item367]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item368 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process368(items: List[Item368]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item369 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process369(items: List[Item369]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item370 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process370(items: List[Item370]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item371 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process371(items: List[Item371]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item372 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process372(items: List[Item372]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item373 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process373(items: List[Item373]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item374 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process374(items: List[Item374]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item375 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process375(items: List[Item375]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item376 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process376(items: List[Item376]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item377 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process377(items: List[Item377]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item378 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process378(items: List[Item378]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item379 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process379(items: List[Item379]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item380 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process380(items: List[Item380]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item381 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process381(items: List[Item381]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item382 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process382(items: List[Item382]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item383 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process383(items: List[Item383]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item384 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process384(items: List[Item384]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item385 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process385(items: List[Item385]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item386 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process386(items: List[Item386]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item387 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process387(items: List[Item387]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item388 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process388(items: List[Item388]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item389 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process389(items: List[Item389]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item390 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process390(items: List[Item390]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item391 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process391(items: List[Item391]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item392 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process392(items: List[Item392]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item393 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process393(items: List[Item393]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item394 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process394(items: List[Item394]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item395 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process395(items: List[Item395]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item396 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process396(items: List[Item396]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item397 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process397(items: List[Item397]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item398 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process398(items: List[Item398]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}
+
+class Item399 {
+  name: String
+  qty: Int
+  price: Float = 1.0
+  fn total(self) -> Float { self.qty.to_f * self.price }
+  fn label(self) -> String { "#{self.name} x#{self.qty}" }
+}
+
+fn process399(items: List[Item399]) -> Dict[String, Float] {
+  out: Dict[String, Float] = [:]
+  for it in items {
+    if it.qty > 0 {
+      out[it.label()] = it.total()
+    }
+  }
+  big = items.select { |x| x.total() > 10.0 }.map { |x| x.name }
+  puts(big.join(", "))
+  out
+}

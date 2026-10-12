@@ -1,0 +1,15 @@
+fn work(seed: Int) -> Int {
+  x = seed
+  acc = 0
+  for _ in 0...2000000 {
+    x = (x * 75 + 74) % 65537
+    acc = (acc + x) % 1000003
+  }
+  acc
+}
+n = (Env.get("N") ?? "8").to_i ?? 8
+seeds = (1..n).to_list()
+threads = seeds.map { |s| spawn { work(s) } }
+total = 0
+for t in threads { total += t.join().unwrap() }
+puts(total)

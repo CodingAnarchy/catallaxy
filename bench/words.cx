@@ -1,0 +1,9 @@
+counts: Dict[String, Int] = [:]
+words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
+for i in 0...2000000 {
+  w = words[i % 8]
+  counts[w] = (counts[w] ?? 0) + 1
+}
+sb = StringBuilder.new()
+for (k, v) in counts { sb.push("#{k}=#{v};") }
+puts(sb.to_s.length)

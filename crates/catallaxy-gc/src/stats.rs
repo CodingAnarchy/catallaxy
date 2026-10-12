@@ -35,11 +35,14 @@ pub fn note_allocated(bytes: usize) {
 
 pub(crate) fn note_freed(_bytes: usize) {}
 
-pub(crate) fn after_collection(live_bytes: usize) {
+pub(crate) fn after_collection(live_bytes: usize, mutators: usize) {
     LIVE_AFTER_GC.store(live_bytes, Ordering::Relaxed);
     ALLOCATED.store(0, Ordering::Relaxed);
     let floor = min_threshold();
-    let t = if floor < MIN_THRESHOLD { floor } else { live_bytes.max(MIN_THRESHOLD) };
+    // The allocation budget between collections grows with the live heap (heap growth factor
+    // 2) and with the number of allocating threads, so adding threads does not multiply pauses.
+    let per_thread = MIN_THRESHOLD * mutators.clamp(1, 32);
+    let t = if floor < MIN_THRESHOLD { floor } else { live_bytes.max(per_thread) };
     THRESHOLD.store(t, Ordering::Relaxed);
     COLLECTIONS.fetch_add(1, Ordering::Relaxed);
 }

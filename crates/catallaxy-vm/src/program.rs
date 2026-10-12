@@ -289,13 +289,12 @@ pub fn load(p: &Program, m: &mut Mutator, natives: &NativeLookup) -> Result<(), 
         }
         for (cid, methods) in per_class {
             let cls = class::class_by_id(cid);
-            let mut all = cls.methods.clone();
+            let mut all = cls.methods().clone();
             all.extend(methods);
-            // SAFETY: loading happens while no other thread runs program code.
-            unsafe { class::set_methods(cls, all) };
+            class::set_methods(cls, all);
             if cid == class::ids::INT {
                 let big = class::class_by_id(class::ids::BIGINT);
-                unsafe { class::set_methods(big, cls.methods.clone()) };
+                class::set_methods(big, cls.methods().clone());
             }
         }
         meta.loaded_builtin_methods = p.builtin_methods.len();
