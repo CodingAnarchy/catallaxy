@@ -233,9 +233,6 @@ impl Checker {
             (Ty::Inter(parts), _) => parts.into_iter().any(|p| self.trial(|c| c.assignable(p, d))),
             (_, Ty::Frozen(b)) => self.is_frozen_cap(s) && self.assignable(s, b),
             (Ty::Frozen(a), _) => self.is_frozen_cap(a) && self.assignable(a, d),
-            (Ty::Iface(i1, a1), Ty::Iface(i2, a2)) if i1 == i2 => {
-                a1.iter().zip(a2.iter()).all(|(&x, &y)| self.unify(x, y))
-            }
             _ => false,
         }
     }

@@ -1,2 +1,3 @@
+# crossbeam's deque and epoch use fences that ThreadSanitizer does not model.
 race:crossbeam_deque
 race:crossbeam_epoch

@@ -31,6 +31,7 @@ serde = "1"
 
 [features]
 # Document formatting in the language server; requires `catallaxy_compiler::fmt::format_source`.
+default = ["fmt"]
 fmt = []
 
 [dev-dependencies]

@@ -106,7 +106,7 @@ impl Vm {
     /// native state; the VM's roots are installed before this returns.
     pub fn new(rec: Arc<ThreadRecord>, stack_size: usize) -> Box<Vm> {
         let m = Mutator::new(rec);
-        let mut vm = Box::new(Vm {
+        let vm = Box::new(Vm {
             m,
             stack: alloc_stack(stack_size),
             stack_cap: stack_size,

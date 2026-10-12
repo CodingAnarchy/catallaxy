@@ -40,7 +40,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri, rust-src
-      - name: Miri (gc and runtime)
-        run: cargo miri test -p catallaxy-gc -p catallaxy-runtime --lib
-      - name: ThreadSanitizer (gc)
-        run: RUSTFLAGS="-Zsanitizer=thread" cargo test -p catallaxy-gc --target x86_64-unknown-linux-gnu -Zbuild-std
+      - name: Miri (gc and runtime, Tree Borrows)
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-permissive-provenance -Zmiri-tree-borrows -Zmiri-ignore-leaks
+        run: cargo miri test -p catallaxy-gc -p catallaxy-runtime
+      - name: ThreadSanitizer (gc and runtime)
+        env:
+          RUSTFLAGS: -Zsanitizer=thread
+          TSAN_OPTIONS: suppressions=${{ github.workspace }}/tsan.supp
+        run: cargo test -p catallaxy-gc -p catallaxy-runtime --lib --tests --target x86_64-unknown-linux-gnu -Zbuild-std
+      - name: Loom (object lock and mark protocol)
+        env:
+          RUSTFLAGS: --cfg loom
+        run: cargo test -p catallaxy-gc --test loom --release
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo install cargo-fuzz --locked
+      - name: Fuzz the compiler front end (2 minutes)
+        run: |
+          mkdir -p fuzz/corpus/check
+          cp tests/conformance/run/*.cx tests/conformance/reject/*.cx examples/*.cx fuzz/corpus/check/
+          cd fuzz && cargo fuzz run check -- -max_total_time=120 -max_len=4096 -timeout=10
