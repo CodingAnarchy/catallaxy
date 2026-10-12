@@ -158,6 +158,14 @@ impl Checker {
             Ty::Frozen(inner) => {
                 let mut m = self.lookup_method(inner, name, allow_getters)?;
                 m.frozen = true;
+                // Deep immutability: the receiver's type arguments are seen frozen too.
+                let keys: Vec<ParamId> = m.subst.keys().copied().collect();
+                for k in keys {
+                    let t = m.subst[&k];
+                    let ft = self.freeze_ty(t);
+                    m.subst.insert(k, ft);
+                }
+                m.self_ty = r;
                 Some(m)
             }
             Ty::Union(parts) => {

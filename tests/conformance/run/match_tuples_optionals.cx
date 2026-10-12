@@ -1,0 +1,43 @@
+enum A { X, Y }
+fn g(a: A, b: A) -> Int {
+  match (a, b) {
+    (.X, .X) => 1
+    (.X, .Y) => 2
+    (.Y, _) => 3
+  }
+}
+puts(g(A.X, A.Y))
+puts(g(A.Y, A.X))
+
+fn f(n: Int) -> (Int, Int)? { if n > 0 { (n, n) } else { nil } }
+for n in [1, 0] {
+  match f(n) {
+    nil => puts("none")
+    (a, b) => puts(a + b)
+  }
+}
+
+fn h(x: Int?) -> Int {
+  match x {
+    nil => 0
+    n => n + 1
+  }
+}
+puts(h(4))
+puts(h(nil))
+
+y: Int? = 3
+match y {
+  nil => puts("none")
+  n => puts(n)
+}
+
+fn kind(v: Int | String | Bool) -> String {
+  match v {
+    true => "yes"
+    false => "no"
+    Int => "int"
+    String => "string"
+  }
+}
+puts([kind(1), kind("s"), kind(false)])

@@ -193,6 +193,7 @@ pub struct LoadError(pub String);
 /// inputs).
 pub fn load(p: &Program, m: &mut Mutator, natives: &NativeLookup) -> Result<(), LoadError> {
     ROOTS_INSTALLED.call_once(|| catallaxy_gc::add_global_roots(Box::new(GlobalRoots)));
+    assert_eq!(ObjKind::Tuple as u8, KIND_TUPLE, "IsKind tuple operand out of date");
     let _nogc = catallaxy_gc::NoGcGuard::new();
     let mut meta = META.write();
     let _ = &*class::BUILTINS;

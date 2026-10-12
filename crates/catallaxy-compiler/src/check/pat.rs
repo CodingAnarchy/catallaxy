@@ -6,6 +6,11 @@ use super::*;
 use crate::ast::{Expr, ExprKind, MatchArm, Pattern, PatternKind};
 
 impl Checker {
+    /// The type a pattern was matched against (for codegen's runtime checks).
+    pub fn ty_of_pattern_subject(&self, p: &Pattern) -> TyId {
+        self.pattern_subjects.get(&p.id).copied().unwrap_or(self.types.error)
+    }
+
     /// Binds an irrefutable pattern (assignment targets, `for` variables, `let`).
     pub fn bind_irrefutable(&mut self, p: &Pattern, ty: TyId) {
         if !self.is_irrefutable(p, ty) {
@@ -33,6 +38,7 @@ impl Checker {
     /// Checks `p` against a subject of type `ty`, declaring its bindings in the current scope.
     pub fn check_pattern(&mut self, p: &Pattern, ty: TyId, irrefutable_ctx: bool) {
         let ty = self.types.shallow_resolve(ty);
+        self.pattern_subjects.insert(p.id, ty);
         match &p.kind {
             PatternKind::Wildcard => {
                 self.pats.insert(p.id, PatRes::Wildcard);
@@ -62,20 +68,20 @@ impl Checker {
                 }
                 self.pats.insert(p.id, PatRes::Literal);
             }
-            PatternKind::Tuple(ps) => match self.types.get(ty).clone() {
-                Ty::Tuple(ts) if ts.len() == ps.len() => {
+            PatternKind::Tuple(ps) => match self.tuple_in(ty, ps.len()) {
+                Some(ts) => {
                     for (sp, t) in ps.iter().zip(ts) {
                         self.check_pattern(sp, t, irrefutable_ctx);
                     }
                     self.pats.insert(p.id, PatRes::Wildcard);
                 }
-                Ty::Dyn | Ty::Error => {
+                None if matches!(self.types.get(ty), Ty::Dyn | Ty::Error) => {
                     for sp in ps {
                         self.check_pattern(sp, ty, irrefutable_ctx);
                     }
                     self.pats.insert(p.id, PatRes::Wildcard);
                 }
-                _ => {
+                None => {
                     let msg = format!("tuple pattern cannot match `{}`", self.show(ty));
                     self.err("E0362", msg, p.span);
                 }
@@ -207,6 +213,19 @@ impl Checker {
         self.emit(d);
     }
 
+    /// The element types of a tuple type of arity `n` inside `ty` (directly or as a union member).
+    fn tuple_in(&self, ty: TyId, n: usize) -> Option<Vec<TyId>> {
+        let ty = self.types.shallow_resolve(ty);
+        let members = match self.types.get(ty) {
+            Ty::Union(p) => p.clone(),
+            _ => vec![ty],
+        };
+        members.into_iter().find_map(|m| match self.types.get(self.types.shallow_resolve(m)) {
+            Ty::Tuple(ts) if ts.len() == n => Some(ts.clone()),
+            _ => None,
+        })
+    }
+
     fn overlaps(&mut self, a: TyId, b: TyId) -> bool {
         let members: Vec<TyId> = match self.types.get(self.types.shallow_resolve(a)) {
             Ty::Union(p) => p.clone(),
@@ -241,9 +260,11 @@ impl Checker {
             _ => None,
         };
         let mut tys = Vec::new();
+        // What the subject can still be after the arms so far.
+        let mut remaining = st;
         for arm in arms {
             self.push_scope();
-            self.check_pattern(&arm.pattern, st, false);
+            self.check_pattern(&arm.pattern, remaining, false);
             // Narrow the subject variable inside the arm.
             if let Some(l) = subject_local {
                 if let Some(nt) = self.pattern_narrowing(&arm.pattern, st) {
@@ -260,6 +281,9 @@ impl Checker {
             self.record_ty(arm.body.id, t);
             tys.push(t);
             self.pop_scope();
+            if arm.guard.is_none() {
+                remaining = self.subtract_pattern(remaining, &arm.pattern);
+            }
         }
         self.check_exhaustive(e, st, arms);
         if arms.is_empty() {
@@ -277,6 +301,29 @@ impl Checker {
             }
         }
         self.join(&tys)
+    }
+
+    /// The subject type minus the values an unguarded arm with pattern `p` certainly matched.
+    fn subtract_pattern(&mut self, ty: TyId, p: &Pattern) -> TyId {
+        let removed: Option<TyId> = match (&p.kind, self.pats.get(&p.id).cloned()) {
+            (PatternKind::Literal(e), _) if matches!(e.kind, ExprKind::Nil) => Some(self.types.nil),
+            (PatternKind::Typed { ty: te, .. }, _) => Some(self.resolve_type(te, &mut self.type_scope())),
+            (PatternKind::Ctor { path, .. }, Some(PatRes::Type { .. })) => {
+                let te = ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
+                self.suppress_diags += 1;
+                let before = self.diags.len();
+                let t = self.resolve_type(&te, &mut self.type_scope());
+                self.diags.truncate(before);
+                self.suppress_diags -= 1;
+                Some(t)
+            }
+            _ => None,
+        };
+        let Some(r) = removed else { return ty };
+        match self.split_by_type(ty, r) {
+            (_, Some(rest)) => rest,
+            (_, None) => ty,
+        }
     }
 
     /// The type a variable has when `p` matches.
@@ -318,158 +365,220 @@ impl Checker {
         }
     }
 
-    /// Cases of `ty` not covered by `pats` (rendered as patterns).
+    /// Cases of `ty` not covered by `pats`, rendered as patterns.
     fn missing_cases(&mut self, ty: TyId, pats: &[&Pattern]) -> Vec<String> {
-        let ty = self.types.shallow_resolve(ty);
-        let flat: Vec<&Pattern> = pats
-            .iter()
-            .flat_map(|p| match &p.kind {
-                PatternKind::Or(alts) => alts.iter().collect::<Vec<_>>(),
-                _ => vec![*p],
-            })
-            .collect();
-        if flat.iter().any(|p| self.pattern_covers_all(p, ty)) {
-            return Vec::new();
-        }
-        match self.types.get(ty).clone() {
-            Ty::Enum(en, args) => {
-                let info = self.enums[en as usize].clone();
-                let subst: FxHashMap<ParamId, TyId> = info.params.iter().copied().zip(args).collect();
-                let mut missing = Vec::new();
-                for v in &info.variants {
-                    let for_v: Vec<&Pattern> = flat
-                        .iter()
-                        .copied()
-                        .filter(|p| matches!(self.pats.get(&p.id), Some(PatRes::Variant { class, .. }) if *class == v.class_id))
-                        .collect();
-                    let covered = for_v.iter().any(|p| match &p.kind {
-                        PatternKind::Ctor { args, .. } => args.is_empty() || args.iter().enumerate().all(|(i, a)| {
-                            let ft = v.fields.get(i).map(|&(_, t)| t).unwrap_or(self.types.error);
-                            let ft = self.types.subst(ft, &subst, None);
-                            self.pattern_covers_all(a, ft)
-                        }),
-                        _ => false,
-                    }) || (v.fields.len() == 1 && !for_v.is_empty() && {
-                        let ft = self.types.subst(v.fields[0].1, &subst, None);
-                        let subs: Vec<&Pattern> = for_v
-                            .iter()
-                            .filter_map(|p| match &p.kind {
-                                PatternKind::Ctor { args, .. } => args.first(),
-                                _ => None,
-                            })
-                            .collect();
-                        self.missing_cases(ft, &subs).is_empty()
-                    });
-                    if !covered {
-                        let shown = if v.fields.is_empty() {
-                            format!(".{}", v.name)
-                        } else {
-                            format!(".{}({})", v.name, vec!["_"; v.fields.len()].join(", "))
-                        };
-                        missing.push(if Some(en) == self.well_known.result { shown.trim_start_matches('.').to_string() } else { shown });
-                    }
-                }
-                missing
-            }
-            Ty::Class(builtin::BOOL, _) => {
-                let mut has = (false, false);
-                for p in &flat {
-                    if let PatternKind::Literal(e) = &p.kind {
-                        match e.kind {
-                            ExprKind::Bool(true) => has.0 = true,
-                            ExprKind::Bool(false) => has.1 = true,
-                            _ => {}
-                        }
-                    }
-                }
-                let mut m = Vec::new();
-                if !has.0 {
-                    m.push("true".to_string());
-                }
-                if !has.1 {
-                    m.push("false".to_string());
-                }
-                m
-            }
-            Ty::Union(members) => {
-                let mut missing = Vec::new();
-                for m in members {
-                    if m == self.types.nil {
-                        let has_nil = flat.iter().any(|p| matches!(&p.kind, PatternKind::Literal(e) if matches!(e.kind, ExprKind::Nil)))
-                            || flat.iter().any(|p| self.type_pattern_covers(p, m));
-                        if !has_nil {
-                            missing.push("nil".to_string());
-                        }
-                        continue;
-                    }
-                    if flat.iter().any(|p| self.type_pattern_covers(p, m)) {
-                        continue;
-                    }
-                    if matches!(self.types.get(m), Ty::Enum(..) | Ty::Class(builtin::BOOL, _)) {
-                        missing.extend(self.missing_cases(m, &flat));
-                        continue;
-                    }
-                    missing.push(self.show(m));
-                }
-                missing
-            }
-            Ty::Tuple(ts) => {
-                // Covered if some tuple pattern is irrefutable element-wise.
-                let ok = flat.iter().any(|p| match &p.kind {
-                    PatternKind::Tuple(ps) if ps.len() == ts.len() => {
-                        ps.iter().zip(ts.iter()).all(|(sp, &t)| self.pattern_covers_all(sp, t))
-                    }
-                    _ => false,
-                });
-                if ok {
-                    Vec::new()
-                } else {
-                    vec!["_".into()]
-                }
-            }
-            Ty::Error | Ty::Never => Vec::new(),
-            _ => vec!["_".into()],
-        }
+        let rows: Vec<Vec<AP>> = pats.iter().map(|p| vec![self.abstract_pat(p)]).collect();
+        let mut out: Vec<String> = self.uncovered(&[ty], rows, 0).into_iter().map(|mut w| w.remove(0)).collect();
+        out.dedup();
+        out.truncate(8);
+        out
     }
 
-    fn type_pattern_covers(&mut self, p: &Pattern, member: TyId) -> bool {
+    fn abstract_pat(&mut self, p: &Pattern) -> AP {
         match (&p.kind, self.pats.get(&p.id).cloned()) {
-            (PatternKind::Typed { ty: te, .. }, _) => {
-                let t = self.resolve_type(te, &mut self.type_scope());
-                self.trial(|c| c.assignable(member, t))
+            (PatternKind::Wildcard | PatternKind::Bind(_), _) => AP::Wild,
+            (PatternKind::Literal(e), _) => match e.kind {
+                ExprKind::Bool(b) => AP::Ctor(Key::Bool(b), vec![]),
+                ExprKind::Nil => AP::Ctor(Key::Nil, vec![]),
+                _ => AP::Lit,
+            },
+            (PatternKind::Range { .. }, _) => AP::Lit,
+            (PatternKind::Tuple(ps), _) => AP::Ctor(Key::Tuple(ps.len()), ps.iter().map(|x| self.abstract_pat(x)).collect()),
+            (PatternKind::Or(alts), _) => AP::Or(alts.iter().map(|x| self.abstract_pat(x)).collect()),
+            (PatternKind::Typed { ty, .. }, _) => {
+                let t = self.resolve_type(ty, &mut self.type_scope());
+                AP::Type(t)
+            }
+            (PatternKind::Ctor { args, has_parens, .. }, Some(PatRes::Variant { class, .. })) => {
+                let arity = self
+                    .variant_of_class
+                    .get(&class)
+                    .map(|&(e, t)| self.enums[e as usize].variants[t as usize].fields.len())
+                    .unwrap_or(0);
+                let sub = if *has_parens && args.len() == arity {
+                    args.iter().map(|x| self.abstract_pat(x)).collect()
+                } else {
+                    vec![AP::Wild; arity]
+                };
+                AP::Ctor(Key::Variant(class), sub)
             }
             (PatternKind::Ctor { path, .. }, Some(PatRes::Type { .. })) => {
                 let te = ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
                 self.suppress_diags += 1;
+                let before = self.diags.len();
                 let t = self.resolve_type(&te, &mut self.type_scope());
+                self.diags.truncate(before);
                 self.suppress_diags -= 1;
-                // `List` (without args) in a pattern covers any list.
-                let t = match (self.types.get(t).clone(), self.types.get(member).clone()) {
-                    (Ty::Error, _) => return false,
-                    (_, Ty::Class(c2, _)) if matches!(self.types.get(t), Ty::Class(c, _) if *c == c2) => return true,
-                    _ => t,
-                };
-                self.trial(|c| c.assignable(member, t))
+                AP::Type(t)
             }
-            _ => false,
+            _ => AP::Lit,
         }
     }
 
-    fn pattern_covers_all(&mut self, p: &Pattern, ty: TyId) -> bool {
-        match &p.kind {
-            PatternKind::Wildcard | PatternKind::Bind(_) => true,
-            PatternKind::Typed { .. } => self.type_pattern_covers(p, ty),
-            PatternKind::Tuple(ps) => match self.types.get(self.types.shallow_resolve(ty)).clone() {
-                Ty::Tuple(ts) if ts.len() == ps.len() => ps.iter().zip(ts).all(|(sp, t)| self.pattern_covers_all(sp, t)),
-                _ => false,
-            },
-            PatternKind::Or(alts) => alts.iter().any(|a| self.pattern_covers_all(a, ty)),
-            PatternKind::Ctor { .. } => {
-                matches!(self.pats.get(&p.id), Some(PatRes::Type { .. })) && self.type_pattern_covers(p, ty)
+    /// The constructors of a type for exhaustiveness: (key, field types, rendering), or None if
+    /// the type has too many values to enumerate (numbers, strings...).
+    fn constructors(&mut self, t: TyId) -> Option<Vec<(Key, Vec<TyId>, String)>> {
+        let t = self.types.shallow_resolve(t);
+        match self.types.get(t).clone() {
+            Ty::Enum(e, args) => {
+                let info = self.enums[e as usize].clone();
+                let subst: FxHashMap<ParamId, TyId> = info.params.iter().copied().zip(args).collect();
+                let is_result = Some(e) == self.well_known.result;
+                Some(
+                    info.variants
+                        .iter()
+                        .map(|v| {
+                            let fts = v.fields.iter().map(|&(_, ft)| self.types.subst(ft, &subst, None)).collect();
+                            let name = if is_result { v.name.clone() } else { format!(".{}", v.name) };
+                            (Key::Variant(v.class_id), fts, name)
+                        })
+                        .collect(),
+                )
             }
-            _ => false,
+            Ty::Class(builtin::BOOL, _) => {
+                Some(vec![(Key::Bool(true), vec![], "true".into()), (Key::Bool(false), vec![], "false".into())])
+            }
+            Ty::Class(builtin::NIL, _) => Some(vec![(Key::Nil, vec![], "nil".into())]),
+            Ty::Tuple(ts) => Some(vec![(Key::Tuple(ts.len()), ts, String::new())]),
+            Ty::Union(members) => {
+                let mut out = Vec::new();
+                for m in members {
+                    match self.constructors(m) {
+                        Some(cs) => out.extend(cs),
+                        _ => {
+                            let name = self.show(m);
+                            out.push((Key::Member(m), vec![], name));
+                        }
+                    }
+                }
+                Some(out)
+            }
+            _ => None,
         }
     }
+
+    /// The type a constructor's values have (for matching type patterns against it).
+    fn key_type(&mut self, k: &Key, scrutinee: TyId) -> TyId {
+        match k {
+            Key::Member(m) => *m,
+            Key::Nil => self.types.nil,
+            Key::Bool(_) => self.types.bool,
+            Key::Variant(c) => {
+                let (e, _) = self.variant_of_class[c];
+                // Use the enum as it appears in the scrutinee (with its arguments).
+                let sc = self.types.shallow_resolve(scrutinee);
+                let members = match self.types.get(sc) {
+                    Ty::Union(p) => p.clone(),
+                    _ => vec![sc],
+                };
+                members
+                    .into_iter()
+                    .find(|&m| matches!(self.types.get(m), Ty::Enum(x, _) if *x == e))
+                    .unwrap_or(self.types.error)
+            }
+            Key::Tuple(_) => scrutinee,
+        }
+    }
+
+    /// Pattern-matrix usefulness: witnesses (one string per column) of value vectors that no row
+    /// matches.
+    fn uncovered(&mut self, tys: &[TyId], rows: Vec<Vec<AP>>, depth: usize) -> Vec<Vec<String>> {
+        if tys.is_empty() {
+            return if rows.is_empty() { vec![vec![]] } else { vec![] };
+        }
+        if depth > 24 {
+            return vec![];
+        }
+        // Expand alternatives in the first column.
+        let mut expanded = Vec::new();
+        for r in rows {
+            match &r[0] {
+                AP::Or(alts) => {
+                    for a in alts {
+                        let mut nr = r.clone();
+                        nr[0] = a.clone();
+                        expanded.push(nr);
+                    }
+                }
+                _ => expanded.push(r),
+            }
+        }
+        let rows = expanded;
+        let t = tys[0];
+        let rest = &tys[1..];
+        // Only split on constructors when some row actually inspects this column; otherwise the
+        // default matrix suffices (and recursive types would expand forever).
+        let inspected = rows.iter().any(|r| matches!(r[0], AP::Ctor(..) | AP::Type(_)));
+        let ctors = if inspected || rows.is_empty() { self.constructors(t) } else { None };
+        match ctors {
+            Some(ctors) => {
+                let mut out = Vec::new();
+                for (key, fts, name) in ctors {
+                    let kt = self.key_type(&key, t);
+                    let mut spec = Vec::new();
+                    for r in &rows {
+                        let head = match &r[0] {
+                            AP::Wild => Some(vec![AP::Wild; fts.len()]),
+                            AP::Ctor(k, sub) if *k == key => Some(if sub.len() == fts.len() { sub.clone() } else { vec![AP::Wild; fts.len()] }),
+                            AP::Type(pt) => {
+                                let pt = *pt;
+                                if self.trial(|c| c.assignable(kt, pt)) {
+                                    Some(vec![AP::Wild; fts.len()])
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        };
+                        if let Some(mut h) = head {
+                            h.extend(r[1..].iter().cloned());
+                            spec.push(h);
+                        }
+                    }
+                    let mut sub_tys = fts.clone();
+                    sub_tys.extend_from_slice(rest);
+                    for w in self.uncovered(&sub_tys, spec, depth + 1) {
+                        let (fields, tail) = w.split_at(fts.len());
+                        let shown = match &key {
+                            Key::Tuple(_) => format!("({})", fields.join(", ")),
+                            _ if fields.is_empty() => name.clone(),
+                            _ => format!("{}({})", name, fields.join(", ")),
+                        };
+                        let mut v = vec![shown];
+                        v.extend(tail.iter().cloned());
+                        out.push(v);
+                        if out.len() >= 8 {
+                            return out;
+                        }
+                    }
+                }
+                out
+            }
+            None => {
+                let defaults: Vec<Vec<AP>> = rows
+                    .iter()
+                    .filter(|r| match &r[0] {
+                        AP::Wild => true,
+                        AP::Type(pt) => {
+                            let pt = *pt;
+                            self.trial(|c| c.assignable(t, pt))
+                        }
+                        _ => false,
+                    })
+                    .map(|r| r[1..].to_vec())
+                    .collect();
+                self.uncovered(rest, defaults, depth + 1)
+                    .into_iter()
+                    .map(|w| {
+                        let mut v = vec!["_".to_string()];
+                        v.extend(w);
+                        v
+                    })
+                    .collect()
+            }
+        }
+    }
+
 }
 
 fn path_expr(path: &[ast::Ident]) -> ExprKind {
@@ -485,4 +594,25 @@ fn path_expr(path: &[ast::Ident]) -> ExprKind {
         };
     }
     e
+}
+
+/// Abstract pattern for exhaustiveness checking.
+#[derive(Clone, Debug)]
+enum AP {
+    Wild,
+    Ctor(Key, Vec<AP>),
+    Type(TyId),
+    Or(Vec<AP>),
+    /// A literal or range: never covers a whole constructor.
+    Lit,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Key {
+    Variant(ClassId),
+    Bool(bool),
+    Nil,
+    Tuple(usize),
+    /// A union member type with no enumerable constructors.
+    Member(TyId),
 }

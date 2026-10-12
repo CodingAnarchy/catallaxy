@@ -182,6 +182,9 @@ pub enum Op {
     LoadEmpty,
 }
 
+/// `IsKind` operand for tuples (`catallaxy_runtime::ObjKind::Tuple as u8`, checked at load).
+pub const KIND_TUPLE: u8 = 7;
+
 pub const NUM_OPS: usize = Op::LoadEmpty as usize + 1;
 
 impl Op {

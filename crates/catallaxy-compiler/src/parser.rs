@@ -918,7 +918,8 @@ impl<'a> Parser<'a> {
                 )
                 .note("wrap the call in parentheses: `for x in (xs.map { |v| ... }) {`"),
             );
-            return false;
+            // Parse it as the block argument anyway so the rest of the header still makes sense.
+            return true;
         }
         !self.no_block && self.is_sym(BLOCK_START)
     }

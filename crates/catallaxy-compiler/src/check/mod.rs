@@ -122,6 +122,7 @@ pub struct Checker {
     /// Closures checked as parallel blocks (`spawn`, `par_*`): node → is_move.
     pub spawn_nodes: FxHashMap<NodeId, bool>,
     pub resolved_classes: FxHashSet<ClassId>,
+    pub pattern_subjects: FxHashMap<NodeId, TyId>,
     /// Type parameters instantiated by the last `instantiate_sig` (for bound checks).
     pub last_inst: Vec<(ParamId, TyId)>,
     pub last_inst_subst: FxHashMap<ParamId, TyId>,
@@ -200,6 +201,7 @@ impl Checker {
             frozen_calls: Vec::new(),
             spawn_nodes: FxHashMap::default(),
             resolved_classes: FxHashSet::default(),
+            pattern_subjects: FxHashMap::default(),
             last_inst: Vec::new(),
             last_inst_subst: FxHashMap::default(),
             pending_bounds: Vec::new(),

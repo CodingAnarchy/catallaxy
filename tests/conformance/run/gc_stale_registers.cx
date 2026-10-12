@@ -1,0 +1,24 @@
+fn rle_encode(s: String) -> String {
+  sb = StringBuilder.new()
+  chars = s.chars
+  i = 0
+  while i < chars.length {
+    j = i
+    while j < chars.length and chars[j] == chars[i] { j += 1 }
+    sb.push((j - i).to_s)
+    i = j
+  }
+  sb.to_s
+}
+fn rle_decode(s: String) -> Result[String, String] {
+  sb = StringBuilder.new()
+  Ok(sb.to_s)
+}
+stripes = "W" * 12 + "B" + "W" * 12 + "B" * 3 + "W" * 24 + "B" + "W" * 14
+for s in [stripes, "aaabccddd", "abc", ""] {
+  enc = rle_encode(s)
+  back = rle_decode(enc).unwrap()
+  puts("#{s.length} -> #{enc.length} chars: #{inspect(enc)} (round trip: #{back == s})")
+}
+codes: Dict[String, String] = [:]
+for sym in codes.keys { puts("#{sym}: #{codes[sym]!}") }

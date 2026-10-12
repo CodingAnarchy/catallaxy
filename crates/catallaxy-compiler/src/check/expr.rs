@@ -1188,10 +1188,6 @@ impl Checker {
                     self.decl_locals.insert(e.id, l);
                     self.names.insert(target.id, NameRes::Local(l));
                     self.assigns.insert(e.id, AssignRes::Local(l));
-                    let vt = self.ty_of(value.id);
-                    if self.trial(|c| c.assignable(vt, ty)) && vt != ty && !self.is_never(vt) && !self.types.has_vars(vt) {
-                        self.narrow(l, vt);
-                    }
                     return;
                 }
                 if let Some(l) = self.lookup_local(name) {
@@ -2686,6 +2682,7 @@ impl Checker {
             _ => None,
         });
         let mut ptys: Vec<TyId> = Vec::new();
+        let errors_before = self.diags.len();
         let mut destructure = false;
         let mut implicit_it = false;
         match &exp_fn {
@@ -2810,6 +2807,10 @@ impl Checker {
         let _ = n_params;
         self.closures.insert(e.id, ClosureInfo { fn_id: fid, captures, params: plocals, destructure, is_for_body: false });
         let fn_params = if destructure { vec![self.types.tuple(ptys)] } else { ptys };
+        // A reported parameter mismatch should not be repeated as an argument mismatch.
+        if self.diags[errors_before..].iter().any(|d| matches!(d.code, "E0355" | "E0356" | "E0357")) {
+            return self.types.error;
+        }
         self.types.func(fn_params, final_ret)
     }
 

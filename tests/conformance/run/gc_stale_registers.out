@@ -1,0 +1,4 @@
+67 -> 11 chars: "12112324114" (round trip: false)
+9 -> 4 chars: "3123" (round trip: false)
+3 -> 3 chars: "111" (round trip: false)
+0 -> 0 chars: "" (round trip: true)

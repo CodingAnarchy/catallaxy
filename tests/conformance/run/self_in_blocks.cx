@@ -1,0 +1,7 @@
+class C {
+  n: Int = 7
+  fn f(self) -> fn() -> Int { { || self.n } }
+  fn d(self) -> List[Int] { [1, 2].map { |i| i + self.n } }
+}
+puts(C.new().f()())
+puts(C.new().d())

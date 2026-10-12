@@ -193,6 +193,15 @@ Calls always use parentheses, except that a zero-argument method may be called a
 (`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. `return` inside a
 block or anonymous function returns from that block. Closures capture variables by reference.
 
+### 4.6 Collection literals
+
+- `[1, 2, 3]` is a `List`; `[]` an empty list (its element type is inferred from later use).
+- `["a": 1, "b": 2]` is a `Dict`; `[:]` an empty dict. A bare identifier before `:` is a **string
+  key**: `[host: "x"]` is `["host": "x"]`, even if a local named `host` exists. Use parentheses for a
+  computed key: `[(host): 1]`.
+- `(1, "a")` is a tuple; `(x,)` a one-element tuple.
+- Dicts and sets iterate in insertion order.
+
 ## 5. Classes, interfaces, enums, extensions
 
 ```
@@ -297,11 +306,16 @@ object panics with `OwnershipError`; under `catx run --promote-on-access` the ob
 shared instead and a warning is logged. Single operations on shared objects are atomic; compound ones
 (`d[k] += 1`) need `Mutex`, `Atomic` or `with lock`.
 
+### 8.1 Atomics and channels
+
+`Atomic.add(n)` returns the new value. `Channel.recv()` blocks until a value arrives and returns
+`nil` once the channel is closed and drained; `for x in ch` iterates until then.
+
 ## 9. Dyn
 
-`Dyn` values come from `std.json` and other dynamic sources. Any operation on `Dyn` (`d["k"]`, `d[0]`,
+`Dyn` values come from `Json.parse` and other dynamic sources. Any operation on `Dyn` (`d["k"]`, `d[0]`,
 `d.method(...)`, arithmetic) is checked at runtime and yields `Dyn`. Convert with `as?`:
-`name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`.
+`name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. `Json.stringify` writes object keys in sorted order.
 
 ## 10. Tooling
 

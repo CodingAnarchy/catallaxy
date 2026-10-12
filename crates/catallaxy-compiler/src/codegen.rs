@@ -1878,6 +1878,13 @@ impl<'a> Codegen<'a> {
                 fails.push(self.emit_jump(st, Op::JmpIfNot, b));
             }
             (PatternKind::Tuple(ps), _) => {
+                // The subject may be optional or a union: check it is a tuple first.
+                let is_tuple = matches!(ck.types.get(ck.types.shallow_resolve(ck.ty_of_pattern_subject(p))), Ty::Tuple(_));
+                if !is_tuple {
+                    let t = self.alloc(st);
+                    self.emit(st, encode(Op::IsKind, t, subj, KIND_TUPLE));
+                    fails.push(self.emit_jump(st, Op::JmpIfNot, t));
+                }
                 for (i, sp) in ps.iter().enumerate() {
                     let t = self.alloc(st);
                     self.emit(st, encode(Op::TupleGet, t, subj, i as u8));

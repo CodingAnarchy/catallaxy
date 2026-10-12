@@ -1,0 +1,4 @@
+# expect: E0614
+fn grow(xs: List[Int]) { xs.push(99) }
+grid = freeze([[1, 2], [3]])
+grid.each { |row| row.push(1) }

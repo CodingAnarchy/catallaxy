@@ -119,6 +119,10 @@ impl Checker {
         if let Some(prev) = self.mods[m as usize].items.get(&name.name) {
             if !matches!(prev, ScopeItem::Class(c) if *c < builtin::FIRST_USER) {
                 self.err("E0201", format!("`{}` is declared more than once in this module", name.name), name.span);
+                // The duplicate is never resolved; don't check its body either.
+                if let ScopeItem::Fn(f) = item {
+                    self.fns[f as usize].state = CheckState::Done;
+                }
                 return;
             }
         }

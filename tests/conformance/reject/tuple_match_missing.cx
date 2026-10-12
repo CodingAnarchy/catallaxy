@@ -1,0 +1,8 @@
+# expect: E0360
+enum A { X, Y }
+fn g(a: A, b: A) -> Int {
+  match (a, b) {
+    (.X, .X) => 1
+    (.Y, _) => 3
+  }
+}
