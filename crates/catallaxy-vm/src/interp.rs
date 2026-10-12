@@ -118,7 +118,7 @@ impl Vm {
         });
         let roots: Box<dyn RootSource> = Box::new(VmRoots(&*vm as *const Vm));
         let roots_ptr = Box::into_raw(roots);
-        let heap_ptr = &mut *vm.m.heap as *mut catallaxy_gc::LocalHeap;
+        let heap_ptr = vm.m.heap_ptr();
         unsafe { catallaxy_gc::install(&vm.m.rec, roots_ptr, heap_ptr) };
         // The root source box is leaked deliberately; it is tiny and lives as long as the thread.
         vm
@@ -135,8 +135,9 @@ impl Vm {
     /// Unregisters the thread. The VM must not be used afterwards.
     pub fn shutdown(&mut self) {
         catallaxy_gc::enter_native(&self.m.rec);
-        self.m.heap.release_pages();
+        // Unregister first so no collection can touch the heap while it is being released.
         catallaxy_gc::unregister_thread(&self.m.rec);
+        self.m.release_pages();
     }
 
     #[inline(always)]

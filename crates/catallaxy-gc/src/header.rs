@@ -16,6 +16,9 @@
 //! | 16..32 | owner thread id when owned; lock holder when shared and locked |
 //! | 32..64 | identity hash, lazily assigned (0 = unassigned) |
 
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+#[cfg(not(loom))]
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use crate::Tracer;
@@ -155,7 +158,8 @@ impl Header {
 
     /// Sets the mark color. Returns true if this call changed it (the caller then owns tracing).
     #[inline]
-    pub(crate) fn try_mark(&self, color: u8) -> bool {
+    #[doc(hidden)]
+    pub fn try_mark(&self, color: u8) -> bool {
         let want = (color as u64) << COLOR_SHIFT;
         let mut cur = self.meta.load(Ordering::Relaxed);
         loop {
@@ -177,8 +181,8 @@ impl Header {
         if h != 0 {
             return h;
         }
-        static NEXT: AtomicU64 = AtomicU64::new(0x9e37_79b9);
-        let mut fresh = (NEXT.fetch_add(0x6c07_8965, Ordering::Relaxed) as u32) ^ ((self as *const _ as u64 >> 4) as u32);
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x9e37_79b9);
+        let mut fresh = (NEXT.fetch_add(0x6c07_8965, std::sync::atomic::Ordering::Relaxed) as u32) ^ ((self as *const _ as u64 >> 4) as u32);
         if fresh == 0 {
             fresh = 1;
         }
@@ -235,6 +239,13 @@ impl Header {
             if cur & LOCK_BIT == 0 {
                 continue;
             }
+            #[cfg(loom)]
+            {
+                let _ = spins;
+                loom::thread::yield_now();
+                continue;
+            }
+            #[cfg(not(loom))]
             if spins < 64 {
                 spins += 1;
                 std::hint::spin_loop();
@@ -276,6 +287,7 @@ impl Header {
             return;
         }
         let prev = self.meta.fetch_and(!(LOCK_BIT | PARKED_BIT | OWNER_MASK), Ordering::Release);
+        #[cfg(not(loom))]
         if prev & PARKED_BIT != 0 {
             let key = self as *const _ as usize;
             // SAFETY: the key is this object's address, matching the park call.

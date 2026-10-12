@@ -242,7 +242,7 @@ impl<'a> Lexer<'a> {
             let c = self.peek();
             if c.is_ascii_digit() {
                 self.number(space);
-            } else if c == b'_' || c.is_ascii_alphabetic() || c >= 0x80 {
+            } else if c == b'_' || c.is_ascii_alphabetic() || (c >= 0x80 && self.src[self.pos..].chars().next().is_some_and(|ch| ch.is_alphabetic())) {
                 self.ident(space);
             } else if c == b'"' {
                 self.string(space);
@@ -514,6 +514,13 @@ mod tests {
         assert_eq!(t[7], Tok::Int("255".into()));
         assert_eq!(t[8], Tok::Int("1000".into()));
         assert_eq!(t[9], Tok::Float(2000.0));
+    }
+
+    #[test]
+    fn non_letter_unicode_is_an_error_not_a_hang() {
+        let (toks, diags) = lex("h\u{2e9}llo", 0);
+        assert_eq!(diags.len(), 1);
+        assert!(toks.len() >= 3);
     }
 
     #[test]

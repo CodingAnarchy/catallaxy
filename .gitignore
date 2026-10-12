@@ -5,3 +5,4 @@
 /fuzz/corpus
 /fuzz/artifacts
 /.claude/
+/bench/big.cx

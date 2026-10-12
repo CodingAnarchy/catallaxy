@@ -1,9 +1,11 @@
 //! Per-thread runtime context: identity, allocation, and the handle stack that roots values held
 //! by native code across calls back into the interpreter.
 
-use std::cell::UnsafeCell;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+
+// SAFETY: a Mutator is moved to the thread it serves before that thread runs.
+unsafe impl Send for Mutator {}
 
 use catallaxy_gc::{Header, LocalHeap, ObjState, ThreadRecord};
 use num_bigint::BigInt;
@@ -34,9 +36,12 @@ pub fn panic<T>(msg: impl Into<String>) -> RtResult<T> {
 pub struct Mutator {
     pub tid: u16,
     pub rec: Arc<ThreadRecord>,
-    pub heap: Box<LocalHeap>,
-    /// Values rooted by native code. Traced as roots.
-    pub handles: UnsafeCell<Vec<Value>>,
+    /// The thread's allocator. Shared with the collector (which retires its pages while the
+    /// thread is stopped), so it is only ever accessed through this raw pointer.
+    heap: *mut LocalHeap,
+    /// Values rooted by native code. Traced as roots by the collector, which reads them while
+    /// this thread is stopped, so they live in a separate allocation reached by raw pointer.
+    handles: *mut Vec<Value>,
 }
 
 /// An index into the handle stack, valid inside the [`Mutator::scope`] that created it.
@@ -46,8 +51,22 @@ pub struct Handle(usize);
 impl Mutator {
     /// Creates the context for an already-registered thread.
     pub fn new(rec: Arc<ThreadRecord>) -> Self {
-        let heap = Box::new(LocalHeap::new(rec.tid));
-        Mutator { tid: rec.tid, rec, heap, handles: UnsafeCell::new(Vec::new()) }
+        let heap = Box::into_raw(Box::new(LocalHeap::new(rec.tid)));
+        let handles = Box::into_raw(Box::new(Vec::new()));
+        Mutator { tid: rec.tid, rec, heap, handles }
+    }
+
+    /// Raw pointer to the allocator, for registration with the collector.
+    pub fn heap_ptr(&self) -> *mut LocalHeap {
+        self.heap
+    }
+
+    /// Returns the thread's pages to the global pool (on thread exit, in native state).
+    pub fn release_pages(&mut self) {
+        // SAFETY: the heap pointer is valid for the mutator's lifetime; the caller is in native
+        // state so the collector is not using it concurrently... except a collection may be
+        // running, which is why callers hold the thread out of `Running` via unregistration.
+        unsafe { (*self.heap).release_pages() }
     }
 
     // ---- handles ------------------------------------------------------------------------
@@ -56,33 +75,40 @@ impl Mutator {
     pub fn scope<R>(&mut self, f: impl FnOnce(&mut Mutator) -> R) -> R {
         let base = self.handles_len();
         let r = f(self);
-        self.handles.get_mut().truncate(base);
+        // SAFETY: only this thread mutates its handles, never during a collection.
+        unsafe { (*self.handles).truncate(base) };
         r
     }
     pub fn root(&mut self, v: Value) -> Handle {
-        let hs = self.handles.get_mut();
-        hs.push(v);
-        Handle(hs.len() - 1)
+        unsafe {
+            (*self.handles).push(v);
+            Handle((*self.handles).len() - 1)
+        }
     }
     pub fn get(&self, h: Handle) -> Value {
-        unsafe { (&*self.handles.get())[h.0] }
+        unsafe { (&(*self.handles))[h.0] }
     }
     pub fn set(&mut self, h: Handle, v: Value) {
-        self.handles.get_mut()[h.0] = v;
+        unsafe { (&mut (*self.handles))[h.0] = v };
     }
     fn handles_len(&self) -> usize {
-        unsafe { (&*self.handles.get()).len() }
+        unsafe { (*self.handles).len() }
     }
     /// Root values for the GC (called while this thread is stopped).
     pub fn handle_values(&self) -> &[Value] {
-        unsafe { &*self.handles.get() }
+        unsafe { &*self.handles }
+    }
+    /// Pointer to the handle stack, for root sources that must not borrow the mutator.
+    pub fn handles_ptr(&self) -> *const Vec<Value> {
+        self.handles
     }
 
     // ---- allocation ---------------------------------------------------------------------
 
     #[inline]
     pub fn alloc_raw(&mut self, size: usize, cls: &'static Class) -> *mut Header {
-        self.heap.alloc(size, &cls.gc as *const _)
+        // SAFETY: only this (running) thread touches its heap outside of collections.
+        unsafe { (*self.heap).alloc(size, &cls.gc as *const _) }
     }
 
     pub fn alloc_instance(&mut self, cls: &'static Class) -> Value {
