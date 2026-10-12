@@ -214,11 +214,11 @@ pub fn safepoint_slow(rec: &ThreadRecord) {
         return;
     }
     // Someone else is collecting: park and help mark.
-    let my_epoch = coord.epoch;
+    let mut my_epoch = coord.epoch;
     let mut joined_mark = 0u64;
     rec.state.store(ThreadState::Parked as u8, Ordering::SeqCst);
     GLOBAL.cv.notify_all();
-    while coord.epoch == my_epoch {
+    loop {
         if coord.marking && coord.mark_epoch != joined_mark {
             joined_mark = coord.mark_epoch;
             GLOBAL.mark.workers_in.fetch_add(1, Ordering::SeqCst);
@@ -229,8 +229,17 @@ pub fn safepoint_slow(rec: &ThreadRecord) {
             coord = GLOBAL.coord.lock();
             continue;
         }
+        if coord.epoch != my_epoch {
+            if !coord.collecting {
+                break;
+            }
+            // A new collection started before we resumed: it counts us as stopped (we are
+            // still parked), so stay parked for it too.
+            my_epoch = coord.epoch;
+        }
         GLOBAL.cv.wait(&mut coord);
     }
+    // Still holding the coordination lock: no collection can start until we are running.
     rec.state.store(ThreadState::Running as u8, Ordering::SeqCst);
 }
 

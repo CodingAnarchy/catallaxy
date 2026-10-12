@@ -24,6 +24,8 @@ jobs:
         run: cargo build --release --locked
       - name: Unit tests
         run: cargo test --release --locked
+      - name: Collector soak (parallel mutators, 50 runs)
+        run: for i in $(seq 1 50); do cargo test --release --locked -q -p catallaxy-gc --test gc || exit 1; done
       - name: Conformance suite
         run: ./target/release/catx test tests/conformance
       - name: Conformance suite under GC stress
