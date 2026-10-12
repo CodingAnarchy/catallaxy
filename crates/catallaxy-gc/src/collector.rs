@@ -183,6 +183,12 @@ impl Drop for NoGcGuard {
     }
 }
 
+/// True if a collection has been requested (the inline part of a safepoint poll).
+#[inline(always)]
+pub fn is_gc_requested() -> bool {
+    GC_REQUESTED.load(Ordering::Acquire)
+}
+
 /// The safepoint poll: one load and a predictable branch.
 #[inline(always)]
 pub fn safepoint(rec: &ThreadRecord) {

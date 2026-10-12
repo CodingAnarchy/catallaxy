@@ -207,7 +207,7 @@ pub struct StringBuilderObj {
 #[repr(C)]
 pub struct MutexObj {
     pub header: Header,
-    pub raw: parking_lot::Mutex<()>,
+    pub raw: parking_lot::ReentrantMutex<()>,
     pub value: AtomicU64,
 }
 
@@ -254,7 +254,7 @@ pub struct ThreadInner {
 #[repr(C)]
 pub struct ThreadObj {
     pub header: Header,
-    pub inner: Box<ThreadInner>,
+    pub inner: std::sync::Arc<ThreadInner>,
 }
 
 pub trait NativeData: std::any::Any + Send + Sync {

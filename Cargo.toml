@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/catallaxy-gc", "crates/catallaxy-runtime", "crates/catallaxy-compiler"]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"

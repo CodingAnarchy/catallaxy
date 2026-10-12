@@ -20,7 +20,7 @@ pub enum Trap {
     /// A panic: unwinds the current thread.
     Panic(String),
     /// Non-local control flow (break/return out of a block) unwinding to an interpreter frame.
-    Unwind { frame: usize, kind: u8, value: Value },
+    Unwind { frame: u64, kind: u8, value: Value },
     /// `exit(code)`.
     Exit(i32),
 }
@@ -188,7 +188,7 @@ impl Mutator {
     pub fn alloc_mutex(&mut self, v: Value) -> Value {
         let h = self.alloc_raw(std::mem::size_of::<MutexObj>(), BUILTINS.mutex);
         unsafe {
-            std::ptr::write(&mut (*(h as *mut MutexObj)).raw, parking_lot::Mutex::new(()));
+            std::ptr::write(&mut (*(h as *mut MutexObj)).raw, parking_lot::ReentrantMutex::new(()));
             (*(h as *mut MutexObj)).value = AtomicU64::new(v.0);
             (*h).set_state(ObjState::Shared);
         }
@@ -221,7 +221,7 @@ impl Mutator {
 
     pub fn alloc_thread(&mut self) -> Value {
         let h = self.alloc_raw(std::mem::size_of::<ThreadObj>(), BUILTINS.thread);
-        let inner = Box::new(ThreadInner {
+        let inner = std::sync::Arc::new(ThreadInner {
             outcome: parking_lot::Mutex::new(ThreadOutcome::Running),
             done: parking_lot::Condvar::new(),
             handle: parking_lot::Mutex::new(None),

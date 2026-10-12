@@ -1,0 +1,630 @@
+# Methods of builtin types.
+
+pub enum Result[T, E] {
+  Ok(T)
+  Err(E)
+
+  fn is_ok(self) -> Bool { match self { Ok(_) => true, Err(_) => false } }
+  fn is_err(self) -> Bool { not self.is_ok() }
+  fn ok(self) -> T? { match self { Ok(v) => v, Err(_) => nil } }
+  fn err(self) -> E? { match self { Ok(_) => nil, Err(e) => e } }
+  fn unwrap(self) -> T {
+    match self {
+      Ok(v) => v
+      Err(e) => panic("called unwrap on Err: #{e}")
+    }
+  }
+  fn unwrap_err(self) -> E {
+    match self {
+      Ok(v) => panic("called unwrap_err on Ok: #{v}")
+      Err(e) => e
+    }
+  }
+  fn expect(self, message: String) -> T {
+    match self {
+      Ok(v) => v
+      Err(e) => panic("#{message}: #{e}")
+    }
+  }
+  fn unwrap_or(self, default: T) -> T { match self { Ok(v) => v, Err(_) => default } }
+  fn unwrap_or_else(self, f: fn(E) -> T) -> T { match self { Ok(v) => v, Err(e) => f(e) } }
+  fn map[U](self, f: fn(T) -> U) -> Result[U, E] { match self { Ok(v) => Ok(f(v)), Err(e) => Err(e) } }
+  fn map_err[F](self, f: fn(E) -> F) -> Result[T, F] { match self { Ok(v) => Ok(v), Err(e) => Err(f(e)) } }
+  fn and_then[U](self, f: fn(T) -> Result[U, E]) -> Result[U, E] { match self { Ok(v) => f(v), Err(e) => Err(e) } }
+}
+
+extend Int {
+  native fn to_s(self) -> String
+  native fn hash(self) -> Int
+  fn <=>(self, other: Int) -> Int { if self < other { -1 } else if self > other { 1 } else { 0 } }
+  native fn to_f(self) -> Float
+  fn to_i(self) -> Int { self }
+  fn abs(self) -> Int { if self < 0 { -self } else { self } }
+  fn sign(self) -> Int { if self < 0 { -1 } else if self > 0 { 1 } else { 0 } }
+  fn is_even(self) -> Bool { self % 2 == 0 }
+  fn is_odd(self) -> Bool { self % 2 != 0 }
+  fn is_zero(self) -> Bool { self == 0 }
+  fn succ(self) -> Int { self + 1 }
+  fn pred(self) -> Int { self - 1 }
+  fn min(self, other: Int) -> Int { if self < other { self } else { other } }
+  fn max(self, other: Int) -> Int { if self > other { self } else { other } }
+  fn times(self, f: fn(Int)) {
+    i = 0
+    while i < self {
+      f(i)
+      i += 1
+    }
+  }
+  fn upto(self, limit: Int, f: fn(Int)) {
+    i = self
+    while i <= limit {
+      f(i)
+      i += 1
+    }
+  }
+  fn downto(self, limit: Int, f: fn(Int)) {
+    i = self
+    while i >= limit {
+      f(i)
+      i -= 1
+    }
+  }
+  fn gcd(self, other: Int) -> Int {
+    a = self.abs
+    b = other.abs
+    while b != 0 {
+      t = b
+      b = a % b
+      a = t
+    }
+    a
+  }
+  fn lcm(self, other: Int) -> Int {
+    if self == 0 or other == 0 { return 0 }
+    (self / self.gcd(other) * other).abs
+  }
+  fn pow(self, exp: Int) -> Int { self ** exp }
+  native fn to_s_radix(self, radix: Int) -> String
+  native fn chr(self) -> String
+  native fn sqrt(self) -> Int
+  fn digits(self) -> List[Int] {
+    n = self.abs
+    out: List[Int] = []
+    if n == 0 { return [0] }
+    while n > 0 {
+      out.push(n % 10)
+      n = n / 10
+    }
+    out
+  }
+  native fn bit_length(self) -> Int
+}
+
+extend Float {
+  native fn to_s(self) -> String
+  native fn hash(self) -> Int
+  fn <=>(self, other: Float) -> Int { if self < other { -1 } else if self > other { 1 } else { 0 } }
+  fn to_f(self) -> Float { self }
+  native fn to_i(self) -> Int
+  native fn floor(self) -> Int
+  native fn ceil(self) -> Int
+  native fn round(self) -> Int
+  native fn round_to(self, digits: Int) -> Float
+  native fn truncate(self) -> Int
+  fn abs(self) -> Float { if self < 0.0 { -self } else { self } }
+  native fn sqrt(self) -> Float
+  native fn cbrt(self) -> Float
+  native fn sin(self) -> Float
+  native fn cos(self) -> Float
+  native fn tan(self) -> Float
+  native fn asin(self) -> Float
+  native fn acos(self) -> Float
+  native fn atan(self) -> Float
+  native fn atan2(self, x: Float) -> Float
+  native fn exp(self) -> Float
+  native fn ln(self) -> Float
+  native fn log10(self) -> Float
+  native fn log2(self) -> Float
+  native fn is_nan(self) -> Bool
+  native fn is_infinite(self) -> Bool
+  native fn is_finite(self) -> Bool
+  fn min(self, other: Float) -> Float { if self < other { self } else { other } }
+  fn max(self, other: Float) -> Float { if self > other { self } else { other } }
+  native fn format(self, decimals: Int) -> String
+}
+
+extend Bool {
+  native fn to_s(self) -> String
+  native fn hash(self) -> Int
+}
+
+extend Nil {
+  fn to_s(self) -> String { "nil" }
+}
+
+extend String {
+  native fn to_s(self) -> String
+  native fn hash(self) -> Int
+  native fn <=>(self, other: String) -> Int
+  native fn +(self, other: String) -> String
+  native fn *(self, times: Int) -> String
+  native fn [](self, index: Int) -> String
+  native fn length(self) -> Int
+  native fn byte_length(self) -> Int
+  fn size(self) -> Int { self.length }
+  fn is_empty(self) -> Bool { self.byte_length == 0 }
+  native fn upcase(self) -> String
+  native fn downcase(self) -> String
+  native fn capitalize(self) -> String
+  native fn swapcase(self) -> String
+  native fn reverse(self) -> String
+  native fn strip(self) -> String
+  native fn lstrip(self) -> String
+  native fn rstrip(self) -> String
+  fn trim(self) -> String { self.strip }
+  native fn chomp(self) -> String
+  native fn split(self, sep: String = "") -> List[String]
+  native fn lines(self) -> List[String]
+  native fn chars(self) -> List[String]
+  native fn bytes(self) -> List[Int]
+  native fn starts_with(self, prefix: String) -> Bool
+  native fn ends_with(self, suffix: String) -> Bool
+  native fn contains(self, sub: String) -> Bool
+  fn include(self, sub: String) -> Bool { self.contains(sub) }
+  native fn index_of(self, sub: String, from: Int = 0) -> Int?
+  native fn rindex_of(self, sub: String) -> Int?
+  native fn replace(self, old: String, new: String) -> String
+  native fn replace_first(self, old: String, new: String) -> String
+  native fn slice(self, start: Int, len: Int) -> String
+  native fn substring(self, start: Int, end: Int) -> String
+  native fn count(self, sub: String) -> Int
+  native fn to_i(self) -> Int?
+  native fn to_f(self) -> Float?
+  native fn parse_int(self, radix: Int = 10) -> Int?
+  native fn ord(self) -> Int
+  native fn center(self, width: Int, pad: String = " ") -> String
+  native fn ljust(self, width: Int, pad: String = " ") -> String
+  native fn rjust(self, width: Int, pad: String = " ") -> String
+  native fn is_digit(self) -> Bool
+  native fn is_alpha(self) -> Bool
+  native fn is_alnum(self) -> Bool
+  native fn is_space(self) -> Bool
+  native fn is_upper(self) -> Bool
+  native fn is_lower(self) -> Bool
+  native fn delete_prefix(self, prefix: String) -> String
+  native fn delete_suffix(self, suffix: String) -> String
+  native fn squeeze(self) -> String
+  native fn tr(self, from: String, to: String) -> String
+  fn each_char(self, f: fn(String)) {
+    for c in self.chars { f(c) }
+  }
+  fn repeat(self, n: Int) -> String { self * n }
+}
+
+extend List[T] {
+  native fn new() -> List[T]
+  native fn with_capacity(n: Int) -> List[T]
+  native fn filled(n: Int, value: T) -> List[T]
+  native fn length(self) -> Int
+  fn size(self) -> Int { self.length }
+  fn is_empty(self) -> Bool { self.length == 0 }
+  native fn push(mut self, item: T)
+  fn append(mut self, item: T) { self.push(item) }
+  native fn pop(mut self) -> T?
+  native fn shift(mut self) -> T?
+  native fn unshift(mut self, item: T)
+  native fn insert(mut self, index: Int, item: T)
+  native fn remove_at(mut self, index: Int) -> T
+  native fn clear(mut self)
+  native fn concat(mut self, other: List[T])
+  native fn [](self, index: Int) -> T
+  native fn []=(mut self, index: Int, value: T)
+  native fn get(self, index: Int) -> T?
+  native fn slice(self, start: Int, len: Int) -> List[T]
+  native fn dup(self) -> List[T]
+  native fn reverse(self) -> List[T]
+  native fn reverse_in_place(mut self)
+  native fn swap(mut self, i: Int, j: Int)
+  native fn truncate(mut self, len: Int)
+  fn +(self, other: List[T]) -> List[T] {
+    out = self.dup()
+    out.concat(other)
+    out
+  }
+  fn first(self) -> T? { self.get(0) }
+  fn last(self) -> T? { self.get(-1) }
+  fn each(self, f: fn(T)) {
+    i = 0
+    while i < self.length {
+      f(self[i])
+      i += 1
+    }
+  }
+  fn each_with_index(self, f: fn(T, Int)) {
+    i = 0
+    while i < self.length {
+      f(self[i], i)
+      i += 1
+    }
+  }
+  fn each_index(self, f: fn(Int)) {
+    i = 0
+    while i < self.length {
+      f(i)
+      i += 1
+    }
+  }
+  fn map[U](self, f: fn(T) -> U) -> List[U] {
+    n = self.length
+    out: List[U] = List.with_capacity(n)
+    i = 0
+    while i < n {
+      out.push(f(self[i]))
+      i += 1
+    }
+    out
+  }
+  fn map_with_index[U](self, f: fn(T, Int) -> U) -> List[U] {
+    out: List[U] = List.with_capacity(self.length)
+    i = 0
+    while i < self.length {
+      out.push(f(self[i], i))
+      i += 1
+    }
+    out
+  }
+  fn select(self, f: fn(T) -> Bool) -> List[T] {
+    out: List[T] = []
+    i = 0
+    while i < self.length {
+      x = self[i]
+      if f(x) { out.push(x) }
+      i += 1
+    }
+    out
+  }
+  fn reject(self, f: fn(T) -> Bool) -> List[T] {
+    out: List[T] = []
+    i = 0
+    while i < self.length {
+      x = self[i]
+      if not f(x) { out.push(x) }
+      i += 1
+    }
+    out
+  }
+  fn reduce[U](self, init: U, f: fn(U, T) -> U) -> U {
+    acc = init
+    i = 0
+    while i < self.length {
+      acc = f(acc, self[i])
+      i += 1
+    }
+    acc
+  }
+  fn index_of(self, item: T) -> Int? {
+    i = 0
+    while i < self.length {
+      if self[i] == item { return i }
+      i += 1
+    }
+    nil
+  }
+  fn contains(self, item: T) -> Bool { self.index_of(item) != nil }
+  fn delete(mut self, item: T) -> Bool {
+    if let i = self.index_of(item) {
+      self.remove_at(i)
+      return true
+    }
+    false
+  }
+  fn delete_if(mut self, f: fn(T) -> Bool) {
+    kept = self.reject(f)
+    self.clear()
+    self.concat(kept)
+  }
+  fn fill(mut self, value: T) {
+    i = 0
+    while i < self.length {
+      self[i] = value
+      i += 1
+    }
+  }
+  fn rotate(self, n: Int = 1) -> List[T] {
+    len = self.length
+    if len == 0 { return [] }
+    k = n % len
+    self.slice(k, len - k) + self.slice(0, k)
+  }
+  fn chunk(self, size: Int) -> List[List[T]] {
+    out: List[List[T]] = []
+    i = 0
+    while i < self.length {
+      out.push(self.slice(i, size))
+      i += size
+    }
+    out
+  }
+  native fn sort_by_keys[K](self, keys: List[K]) -> List[T]
+  native fn sorted(self) -> List[T]
+  native fn sort_in_place(mut self)
+  fn sort_with(self, f: fn(T, T) -> Int) -> List[T] {
+    # Merge sort using the comparator.
+    if self.length <= 1 { return self.dup() }
+    mid = self.length / 2
+    left = self.slice(0, mid).sort_with(f)
+    right = self.slice(mid, self.length - mid).sort_with(f)
+    out: List[T] = List.with_capacity(self.length)
+    i = 0
+    j = 0
+    while i < left.length and j < right.length {
+      if f(left[i], right[j]) <= 0 {
+        out.push(left[i])
+        i += 1
+      } else {
+        out.push(right[j])
+        j += 1
+      }
+    }
+    while i < left.length {
+      out.push(left[i])
+      i += 1
+    }
+    while j < right.length {
+      out.push(right[j])
+      j += 1
+    }
+    out
+  }
+  native fn par_map[U](self, f: fn(T) -> U) -> List[U]
+  native fn par_each(self, f: fn(T))
+  native fn par_reduce(self, identity: T, f: fn(T, T) -> T) -> T
+  native fn par_select(self, f: fn(T) -> Bool) -> List[T]
+}
+
+extend List[List[U]] {
+  fn flatten(self) -> List[U] {
+    out: List[U] = []
+    for xs in self { out.concat(xs) }
+    out
+  }
+}
+
+extend Dict[K, V] {
+  native fn new() -> Dict[K, V]
+  native fn length(self) -> Int
+  fn size(self) -> Int { self.length }
+  fn is_empty(self) -> Bool { self.length == 0 }
+  native fn [](self, key: K) -> V?
+  native fn []=(mut self, key: K, value: V)
+  native fn get(self, key: K) -> V?
+  fn fetch(self, key: K, default: V) -> V { self.get(key) ?? default }
+  native fn has_key(self, key: K) -> Bool
+  fn contains_key(self, key: K) -> Bool { self.has_key(key) }
+  native fn delete(mut self, key: K) -> V?
+  native fn clear(mut self)
+  native fn keys(self) -> List[K]
+  native fn values(self) -> List[V]
+  native fn entries(self) -> List[(K, V)]
+  native fn dup(self) -> Dict[K, V]
+  fn each(self, f: fn((K, V))) {
+    for e in self.entries() { f(e) }
+  }
+  fn each_key(self, f: fn(K)) { for k in self.keys() { f(k) } }
+  fn each_value(self, f: fn(V)) { for v in self.values() { f(v) } }
+  fn get_or_insert(mut self, key: K, default: V) -> V {
+    if let v = self.get(key) { return v }
+    self[key] = default
+    default
+  }
+  fn merge(self, other: Dict[K, V]) -> Dict[K, V] {
+    out = self.dup()
+    for (k, v) in other.entries() { out[k] = v }
+    out
+  }
+  fn update(mut self, other: Dict[K, V]) {
+    for (k, v) in other.entries() { self[k] = v }
+  }
+  fn map_values[W](self, f: fn(V) -> W) -> Dict[K, W] {
+    out: Dict[K, W] = [:]
+    for (k, v) in self.entries() { out[k] = f(v) }
+    out
+  }
+  fn select_entries(self, f: fn(K, V) -> Bool) -> Dict[K, V] {
+    out: Dict[K, V] = [:]
+    for (k, v) in self.entries() { if f(k, v) { out[k] = v } }
+    out
+  }
+  fn invert(self) -> Dict[V, K] {
+    out: Dict[V, K] = [:]
+    for (k, v) in self.entries() { out[v] = k }
+    out
+  }
+  fn sort_by_value(self) -> List[(K, V)] {
+    self.entries().sort_by { |e| e.1 }
+  }
+  fn sort_by_key(self) -> List[(K, V)] {
+    self.entries().sort_by { |e| e.0 }
+  }
+}
+
+extend Set[T] {
+  native fn new() -> Set[T]
+  native fn from(items: List[T]) -> Set[T]
+  native fn length(self) -> Int
+  fn size(self) -> Int { self.length }
+  fn is_empty(self) -> Bool { self.length == 0 }
+  native fn add(mut self, item: T) -> Bool
+  native fn remove(mut self, item: T) -> Bool
+  native fn contains(self, item: T) -> Bool
+  native fn clear(mut self)
+  native fn to_list(self) -> List[T]
+  native fn dup(self) -> Set[T]
+  fn each(self, f: fn(T)) { for x in self.to_list() { f(x) } }
+  fn union(self, other: Set[T]) -> Set[T] {
+    out = self.dup()
+    for x in other.to_list() { out.add(x) }
+    out
+  }
+  fn intersection(self, other: Set[T]) -> Set[T] {
+    out: Set[T] = Set.new()
+    for x in self.to_list() { if other.contains(x) { out.add(x) } }
+    out
+  }
+  fn difference(self, other: Set[T]) -> Set[T] {
+    out: Set[T] = Set.new()
+    for x in self.to_list() { if not other.contains(x) { out.add(x) } }
+    out
+  }
+  fn |(self, other: Set[T]) -> Set[T] { self.union(other) }
+  fn &(self, other: Set[T]) -> Set[T] { self.intersection(other) }
+  fn -(self, other: Set[T]) -> Set[T] { self.difference(other) }
+  fn is_subset(self, other: Set[T]) -> Bool { self.all { |x| other.contains(x) } }
+  fn is_superset(self, other: Set[T]) -> Bool { other.is_subset(self) }
+}
+
+extend Range {
+  native fn first(self) -> Int
+  native fn last(self) -> Int
+  native fn is_exclusive(self) -> Bool
+  fn each(self, f: fn(Int)) {
+    i = self.first
+    stop = if self.is_exclusive { self.last } else { self.last + 1 }
+    while i < stop {
+      f(i)
+      i += 1
+    }
+  }
+  fn length(self) -> Int {
+    n = if self.is_exclusive { self.last - self.first } else { self.last - self.first + 1 }
+    n.max(0)
+  }
+  fn size(self) -> Int { self.length }
+  fn contains(self, x: Int) -> Bool {
+    if self.is_exclusive { x >= self.first and x < self.last } else { x >= self.first and x <= self.last }
+  }
+  fn step(self, n: Int) -> List[Int] {
+    out: List[Int] = []
+    i = self.first
+    stop = if self.is_exclusive { self.last } else { self.last + 1 }
+    while i < stop {
+      out.push(i)
+      i += n
+    }
+    out
+  }
+  fn to_list(self) -> List[Int] {
+    out: List[Int] = List.with_capacity(self.length)
+    for i in self { out.push(i) }
+    out
+  }
+  fn sum(self) -> Int {
+    total = 0
+    for i in self { total += i }
+    total
+  }
+}
+
+extend StringBuilder {
+  native fn new() -> StringBuilder
+  native fn push(mut self, s: String)
+  native fn push_value(mut self, v: Dyn)
+  native fn push_char(mut self, code: Int)
+  native fn to_s(self) -> String
+  native fn length(self) -> Int
+  native fn clear(mut self)
+}
+
+extend Mutex[T] {
+  native fn new(move value: T) -> Mutex[T]
+  native fn lock[R](self, f: fn(T) -> R) -> R
+  native fn update(self, f: fn(T) -> T) -> T
+  native fn get(self) -> T
+  native fn set(self, move value: T)
+}
+
+extend Atomic[T] {
+  native fn new(value: T) -> Atomic[T]
+  native fn get(self) -> T
+  native fn set(self, value: T)
+  native fn swap(self, value: T) -> T
+  native fn compare_and_set(self, expected: T, value: T) -> Bool
+  native fn add(self, delta: Int) -> Int
+  native fn update(self, f: fn(T) -> T) -> T
+}
+
+extend Channel[T] {
+  native fn new(capacity: Int = 0) -> Channel[T]
+  native fn send(self, move item: T)
+  native fn recv(self) -> T?
+  native fn try_recv(self) -> T?
+  native fn close(self)
+  native fn is_closed(self) -> Bool
+  native fn length(self) -> Int
+  fn each(self, f: fn(T)) {
+    loop {
+      if let x = self.recv() { f(x) } else { break }
+    }
+  }
+}
+
+extend Thread[T] {
+  native fn join(self) -> Result[T, String]
+  native fn is_done(self) -> Bool
+}
+
+# ---------------------------------------------------------------------------------------------
+# Namespaces
+
+pub class Math {
+  const PI: Float = 3.141592653589793
+  const E: Float = 2.718281828459045
+  const INFINITY: Float = 1.0 / 0.0
+  native fn sqrt(x: Float) -> Float
+  native fn pow(x: Float, y: Float) -> Float
+  native fn sin(x: Float) -> Float
+  native fn cos(x: Float) -> Float
+  native fn tan(x: Float) -> Float
+  native fn atan2(y: Float, x: Float) -> Float
+  native fn exp(x: Float) -> Float
+  native fn log(x: Float) -> Float
+  native fn log10(x: Float) -> Float
+  native fn hypot(x: Float, y: Float) -> Float
+  fn min_int(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+  fn max_int(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+}
+
+pub class File {
+  native fn read(path: String) -> Result[String, String]
+  native fn write(path: String, contents: String) -> Result[Nil, String]
+  native fn append(path: String, contents: String) -> Result[Nil, String]
+  native fn exists(path: String) -> Bool
+  native fn delete(path: String) -> Result[Nil, String]
+  native fn read_lines(path: String) -> Result[List[String], String]
+  native fn list_dir(path: String) -> Result[List[String], String]
+}
+
+pub class Time {
+  native fn now() -> Float
+  native fn monotonic() -> Float
+  native fn millis() -> Int
+}
+
+pub class Random {
+  native fn seed(n: Int)
+  native fn int(lo: Int, hi: Int) -> Int
+  native fn float() -> Float
+  native fn shuffle[T](items: List[T]) -> List[T]
+  native fn choice[T](items: List[T]) -> T?
+}
+
+pub class Env {
+  native fn get(name: String) -> String?
+  native fn cpu_count() -> Int
+}
+
+pub class Json {
+  native fn parse(text: String) -> Result[Dyn, String]
+  native fn stringify(value: Dyn) -> String
+  native fn pretty(value: Dyn) -> String
+}

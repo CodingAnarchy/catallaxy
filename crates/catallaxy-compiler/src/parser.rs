@@ -391,12 +391,20 @@ impl<'a> Parser<'a> {
         self.expect_sym("{")?;
         let mut fields = Vec::new();
         let mut methods = Vec::new();
+        let mut consts = Vec::new();
         self.skip_newlines();
         while !self.is_sym("}") && !self.at_eof() {
             let mstart = self.span();
             let r = (|| -> PResult<()> {
                 let mpub = self.eat_kw(Kw::Pub);
-                if self.is_kw(Kw::Fn) || self.is_kw(Kw::Native) {
+                if self.eat_kw(Kw::Const) {
+                    let cname = self.expect_ident()?;
+                    let ty = if self.eat_sym(":") { Some(self.parse_type()?) } else { None };
+                    self.expect_sym("=")?;
+                    let value = self.parse_expr()?;
+                    let span = mstart.to(value.span);
+                    consts.push(ConstDecl { name: cname, is_pub: true, ty, value, span });
+                } else if self.is_kw(Kw::Fn) || self.is_kw(Kw::Native) {
                     methods.push(self.parse_fn(mpub, mstart, true)?);
                 } else {
                     let fname = self.expect_ident()?;
@@ -421,6 +429,7 @@ impl<'a> Parser<'a> {
             superclass,
             fields,
             methods,
+            consts,
             span: start.to(self.prev_span()),
             doc: None,
         })

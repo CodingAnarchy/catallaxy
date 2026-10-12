@@ -1,0 +1,327 @@
+# The Catallaxy prelude: core interfaces, builtin type methods and global functions.
+# It is implicitly imported into every module. `native` functions are implemented in Rust by the
+# catallaxy-stdlib crate under the name `Type.method` (or `function` for free functions).
+
+# ---------------------------------------------------------------------------------------------
+# Core interfaces
+
+pub interface Display {
+  fn to_s(self) -> String
+}
+
+pub interface Hashable {
+  fn hash(self) -> Int
+}
+
+pub interface Comparable {
+  fn <=>(self, other: Self) -> Int
+  fn <(self, other: Self) -> Bool { (self <=> other) < 0 }
+  fn <=(self, other: Self) -> Bool { (self <=> other) <= 0 }
+  fn >(self, other: Self) -> Bool { (self <=> other) > 0 }
+  fn >=(self, other: Self) -> Bool { (self <=> other) >= 0 }
+  fn between(self, lo: Self, hi: Self) -> Bool { (self <=> lo) >= 0 and (self <=> hi) <= 0 }
+  fn clamp(self, lo: Self, hi: Self) -> Self {
+    if (self <=> lo) < 0 { return lo }
+    if (self <=> hi) > 0 { return hi }
+    self
+  }
+}
+
+pub interface Indexable[T] {
+  fn [](self, index: Int) -> T
+  fn length(self) -> Int
+}
+
+pub interface Callable {
+  fn call(self) -> Dyn
+}
+
+pub interface Enumerable[T] {
+  fn each(self, f: fn(T))
+
+  fn map[U](self, f: fn(T) -> U) -> List[U] {
+    out: List[U] = []
+    self.each { |x| out.push(f(x)) }
+    out
+  }
+  fn flat_map[U](self, f: fn(T) -> List[U]) -> List[U] {
+    out: List[U] = []
+    self.each { |x| out.concat(f(x)) }
+    out
+  }
+  fn select(self, f: fn(T) -> Bool) -> List[T] {
+    out: List[T] = []
+    self.each { |x| if f(x) { out.push(x) } }
+    out
+  }
+  fn filter(self, f: fn(T) -> Bool) -> List[T] { self.select(f) }
+  fn reject(self, f: fn(T) -> Bool) -> List[T] {
+    out: List[T] = []
+    self.each { |x| if not f(x) { out.push(x) } }
+    out
+  }
+  fn reduce[U](self, init: U, f: fn(U, T) -> U) -> U {
+    acc = init
+    self.each { |x| acc = f(acc, x) }
+    acc
+  }
+  fn count(self, f: fn(T) -> Bool) -> Int {
+    n = 0
+    self.each { |x| if f(x) { n += 1 } }
+    n
+  }
+  fn size(self) -> Int {
+    n = 0
+    self.each { |_x| n += 1 }
+    n
+  }
+  fn any(self, f: fn(T) -> Bool) -> Bool {
+    for x in self { if f(x) { return true } }
+    false
+  }
+  fn all(self, f: fn(T) -> Bool) -> Bool {
+    for x in self { if not f(x) { return false } }
+    true
+  }
+  fn none(self, f: fn(T) -> Bool) -> Bool { not self.any(f) }
+  fn find(self, f: fn(T) -> Bool) -> T? {
+    for x in self { if f(x) { return x } }
+    nil
+  }
+  fn find_index(self, f: fn(T) -> Bool) -> Int? {
+    i = 0
+    for x in self {
+      if f(x) { return i }
+      i += 1
+    }
+    nil
+  }
+  fn to_list(self) -> List[T] {
+    out: List[T] = []
+    self.each { |x| out.push(x) }
+    out
+  }
+  fn first(self) -> T? {
+    for x in self { return x }
+    nil
+  }
+  fn each_with_index(self, f: fn(T, Int)) {
+    i = 0
+    self.each { |x|
+      f(x, i)
+      i += 1
+    }
+  }
+  fn with_index(self) -> List[(T, Int)] {
+    out: List[(T, Int)] = []
+    i = 0
+    self.each { |x|
+      out.push((x, i))
+      i += 1
+    }
+    out
+  }
+  fn each_slice(self, n: Int, f: fn(List[T])) {
+    batch: List[T] = []
+    self.each { |x|
+      batch.push(x)
+      if batch.length == n {
+        f(batch)
+        batch = []
+      }
+    }
+    if batch.length > 0 { f(batch) }
+  }
+  fn each_cons(self, n: Int, f: fn(List[T])) {
+    window: List[T] = []
+    self.each { |x|
+      window.push(x)
+      if window.length > n { window.shift() }
+      if window.length == n { f(window.dup()) }
+    }
+  }
+  fn take(self, n: Int) -> List[T] {
+    out: List[T] = []
+    if n <= 0 { return out }
+    for x in self {
+      out.push(x)
+      if out.length >= n { break }
+    }
+    out
+  }
+  fn take_while(self, f: fn(T) -> Bool) -> List[T] {
+    out: List[T] = []
+    for x in self {
+      if not f(x) { break }
+      out.push(x)
+    }
+    out
+  }
+  fn drop(self, n: Int) -> List[T] {
+    out: List[T] = []
+    i = 0
+    self.each { |x|
+      if i >= n { out.push(x) }
+      i += 1
+    }
+    out
+  }
+  fn drop_while(self, f: fn(T) -> Bool) -> List[T] {
+    out: List[T] = []
+    dropping = true
+    self.each { |x|
+      if dropping and f(x) {
+      } else {
+        dropping = false
+        out.push(x)
+      }
+    }
+    out
+  }
+  fn group_by[K](self, f: fn(T) -> K) -> Dict[K, List[T]] {
+    out: Dict[K, List[T]] = [:]
+    self.each { |x|
+      k = f(x)
+      if let g = out[k] {
+        g.push(x)
+      } else {
+        out[k] = [x]
+      }
+    }
+    out
+  }
+  fn partition(self, f: fn(T) -> Bool) -> (List[T], List[T]) {
+    yes: List[T] = []
+    no: List[T] = []
+    self.each { |x| if f(x) { yes.push(x) } else { no.push(x) } }
+    (yes, no)
+  }
+  fn tally_by[K](self, f: fn(T) -> K) -> Dict[K, Int] {
+    out: Dict[K, Int] = [:]
+    self.each { |x|
+      k = f(x)
+      out[k] = (out[k] ?? 0) + 1
+    }
+    out
+  }
+  fn sort_by[K](self, f: fn(T) -> K) -> List[T] {
+    items = self.to_list()
+    keys = items.map(f)
+    items.sort_by_keys(keys)
+  }
+  fn min_by[K](self, f: fn(T) -> K) -> T? {
+    best: T? = nil
+    best_key: K? = nil
+    self.each { |x|
+      k = f(x)
+      if best_key == nil or compare_values(k, best_key) < 0 {
+        best = x
+        best_key = k
+      }
+    }
+    best
+  }
+  fn max_by[K](self, f: fn(T) -> K) -> T? {
+    best: T? = nil
+    best_key: K? = nil
+    self.each { |x|
+      k = f(x)
+      if best_key == nil or compare_values(k, best_key) > 0 {
+        best = x
+        best_key = k
+      }
+    }
+    best
+  }
+  fn sum_by(self, f: fn(T) -> Int) -> Int {
+    total = 0
+    self.each { |x| total += f(x) }
+    total
+  }
+  fn zip[U](self, other: List[U]) -> List[(T, U)] {
+    out: List[(T, U)] = []
+    i = 0
+    for x in self {
+      if i >= other.length { break }
+      out.push((x, other[i]))
+      i += 1
+    }
+    out
+  }
+  fn uniq(self) -> List[T] {
+    seen: Set[T] = Set.new()
+    out: List[T] = []
+    self.each { |x|
+      if not seen.contains(x) {
+        seen.add(x)
+        out.push(x)
+      }
+    }
+    out
+  }
+  fn contains(self, item: T) -> Bool {
+    for x in self { if x == item { return true } }
+    false
+  }
+  fn include(self, item: T) -> Bool { self.contains(item) }
+  fn to_set(self) -> Set[T] {
+    out: Set[T] = Set.new()
+    self.each { |x| out.add(x) }
+    out
+  }
+}
+
+extend[T: Comparable] Enumerable[T] {
+  fn min(self) -> T? {
+    best: T? = nil
+    self.each { |x| if best == nil or (x <=> best) < 0 { best = x } }
+    best
+  }
+  fn max(self) -> T? {
+    best: T? = nil
+    self.each { |x| if best == nil or (x <=> best) > 0 { best = x } }
+    best
+  }
+  fn sort(self) -> List[T] { self.to_list().sorted() }
+  fn minmax(self) -> (T?, T?) { (self.min(), self.max()) }
+}
+
+extend Enumerable[Int] {
+  fn sum(self) -> Int { self.reduce(0) { |a, b| a + b } }
+  fn product(self) -> Int { self.reduce(1) { |a, b| a * b } }
+}
+
+extend Enumerable[Float] {
+  fn sum(self) -> Float { self.reduce(0.0) { |a, b| a + b } }
+  fn product(self) -> Float { self.reduce(1.0) { |a, b| a * b } }
+}
+
+extend Enumerable[String] {
+  fn join(self, sep: String = "") -> String {
+    sb = StringBuilder.new()
+    first = true
+    self.each { |x|
+      if not first { sb.push(sep) }
+      sb.push(x)
+      first = false
+    }
+    sb.to_s
+  }
+}
+
+# ---------------------------------------------------------------------------------------------
+# Global functions
+
+pub native fn puts(value: Dyn = "")
+pub native fn print(value: Dyn)
+pub native fn eputs(value: Dyn = "")
+pub native fn panic(message: String) -> Never
+pub native fn assert(condition: Bool, message: String = "assertion failed")
+pub native fn assert_eq(actual: Dyn, expected: Dyn, message: String = "")
+pub native fn inspect(value: Dyn) -> String
+pub native fn compare_values(a: Dyn, b: Dyn) -> Int
+pub native fn read_line() -> String?
+pub native fn args() -> List[String]
+pub native fn exit(code: Int = 0) -> Never
+pub native fn sleep(seconds: Float)
+pub native fn gc()

@@ -1,0 +1,25 @@
+[package]
+name = "catallaxy"
+description = "The Catallaxy programming language: a statically typed, Ruby-flavored language whose threads run truly in parallel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+
+[[bin]]
+name = "catx"
+path = "src/main.rs"
+
+[dependencies]
+catallaxy-gc.workspace = true
+catallaxy-runtime.workspace = true
+catallaxy-vm.workspace = true
+catallaxy-compiler.workspace = true
+catallaxy-stdlib.workspace = true
+rustc-hash.workspace = true

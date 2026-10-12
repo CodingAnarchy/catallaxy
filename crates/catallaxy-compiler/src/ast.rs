@@ -91,6 +91,8 @@ pub struct ClassDecl {
     pub superclass: Option<TypeExpr>,
     pub fields: Vec<FieldDecl>,
     pub methods: Vec<FnDecl>,
+    /// Class-level constants (`Math.PI`).
+    pub consts: Vec<ConstDecl>,
     pub span: Span,
     pub doc: Option<String>,
 }
