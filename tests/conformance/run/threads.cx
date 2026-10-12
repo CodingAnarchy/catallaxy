@@ -1,0 +1,66 @@
+fn work(n: Int) -> Int {
+  total = 0
+  for i in 0...n { total += i }
+  total
+}
+
+t1 = spawn { work(1000) }
+t2 = spawn { work(10) }
+puts(t1.join())
+puts(t2.join().unwrap())
+
+# Moving owned data into a thread.
+data = [1, 2, 3, 4]
+t3 = spawn move { data.sum() * 2 }
+puts(t3.join().unwrap())
+
+# A panicking thread reports an error to the joiner.
+bad = spawn { panic("boom") }
+r = bad.join()
+puts(r.is_err())
+
+# Channels move values between threads.
+ch: Channel[List[Int]] = Channel.new()
+producer = spawn {
+  for i in 1..3 { ch.send([i, i * i]) }
+  ch.close()
+}
+received = []
+for msg in ch { received.push(msg) }
+producer.join()
+puts(received)
+
+# Bounded channel with several producers.
+results: Channel[Int] = Channel.new(capacity: 2)
+workers = (1..4).map { |w| spawn { results.send(w * 100) } }
+sum = 0
+4.times { |_i| sum += results.recv()! }
+for w in workers { w.join() }
+puts(sum)
+
+# Mutex and Atomic shared state.
+counter = Atomic.new(0)
+m = Mutex.new(0)
+ts = (1..8).map { |_i|
+  spawn {
+    for _j in 0...1000 {
+      counter.add(1)
+      m.update { |v| v + 1 }
+    }
+  }
+}
+for t in ts { t.join() }
+puts(counter.get())
+puts(m.get())
+
+# Parallel collections.
+nums = (1..1000).to_list()
+squares = nums.par_map { |n| n * n }
+puts(squares.length)
+puts(squares[999])
+puts(nums.par_reduce(0) { |a, b| a + b })
+puts(nums.par_select { |n| n % 100 == 0 }.length)
+
+frozen_words = freeze(["a", "b", "c"])
+lens = frozen_words.par_map { |w| w.upcase }
+puts(lens)

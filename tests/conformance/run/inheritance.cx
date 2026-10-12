@@ -1,0 +1,36 @@
+class Animal {
+  name: String
+  fn speak(self) -> String { "..." }
+  fn intro(self) -> String { "#{self.name} says #{self.speak()}" }
+}
+class Dog < Animal {
+  fn speak(self) -> String { "woof" }
+}
+class Puppy < Dog {
+  fn speak(self) -> String { super.speak() + "!" }
+}
+animals: List[Animal] = [Animal.new("generic"), Dog.new("rex"), Puppy.new("bit")]
+for a in animals { puts(a.intro()) }
+
+class Account {
+  owner: String
+  balance: Int
+  fn init(self, owner: String, deposit: Int = 0) {
+    self.owner = owner
+    self.balance = deposit
+  }
+  fn deposit(self, n: Int) { self.balance += n }
+}
+class Savings < Account {
+  rate: Int = 2
+  fn interest(self) -> Int { self.balance * self.rate / 100 }
+}
+acct = Savings.new("ann", 500)
+acct.deposit(500)
+puts(acct.interest())
+puts(acct.balance)
+plain = Account.new("bo")
+puts(plain.balance)
+puts(acct is Account)
+a2: Account = acct
+puts(a2 is Savings)

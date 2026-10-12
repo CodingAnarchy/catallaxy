@@ -72,6 +72,10 @@ impl<'a> Codegen<'a> {
         self.prog.ifaces = ck.rt_ifaces.clone();
         self.prog.funcs = vec![FuncProto::default(); ck.fns.len()];
         for fid in 0..ck.fns.len() as FnId {
+            if matches!(ck.fns[fid as usize].decl, DeclRef::Closure(_)) {
+                // Generated together with the enclosing function.
+                continue;
+            }
             let proto = self.gen_fn(fid);
             self.prog.funcs[fid as usize] = proto;
         }

@@ -1,0 +1,76 @@
+interface Named {
+  fn name(self) -> String
+  fn greet(self) -> String { "Hello, #{self.name()}!" }
+}
+
+class User {
+  full_name: String
+  email: String?
+  fn name(self) -> String { self.full_name }
+}
+
+class Robot {
+  serial: Int
+  fn name(self) -> String { "RX-#{self.serial}" }
+  fn greet(self) -> String { "BEEP #{self.serial}" }
+}
+
+pub fn greet(x: Named) -> String { x.greet() }
+
+puts(greet(User.new("Ada", nil)))
+puts(greet(Robot.new(7)))
+puts(User.new("Bob", "b@x.org").greet())
+
+# Inline interface types and intersections.
+fn render(x: { fn to_s(self) -> String }) -> String { "<" + x.to_s() + ">" }
+puts(render(42))
+puts(render("s"))
+
+# Fields satisfy zero-argument method requirements.
+class Pet { name: String }
+puts(greet(Pet.new("Rex")))
+
+# Comparable via <=>.
+class Version {
+  major: Int
+  minor: Int
+  fn <=>(self, other: Version) -> Int {
+    if self.major != other.major { self.major <=> other.major } else { self.minor <=> other.minor }
+  }
+  fn to_s(self) -> String { "#{self.major}.#{self.minor}" }
+}
+a = Version.new(1, 2)
+b = Version.new(1, 10)
+puts(a < b)
+puts(a >= b)
+puts([b, a, Version.new(0, 9)].sort())
+puts([b, a].max())
+puts(a.clamp(Version.new(1, 5), b))
+
+# Enumerable defaults from a single `each`.
+class Countdown {
+  from: Int
+  fn each(self, f: fn(Int)) {
+    i = self.from
+    while i > 0 {
+      f(i)
+      i -= 1
+    }
+  }
+}
+c = Countdown.new(5)
+puts(c.map { |x| x * 10 })
+puts(c.select { |x| x.is_even })
+puts(c.sum())
+puts(c.include(3))
+puts(c.first())
+puts(c.sort())
+for x in c {
+  if x == 2 { break }
+  print("#{x} ")
+}
+puts()
+pub fn total(xs: Enumerable[Int]) -> Int { xs.reduce(0) { |a, b| a + b } }
+puts(total(c))
+puts(total([1, 2, 3]))
+puts(total(1..4))

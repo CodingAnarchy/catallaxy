@@ -899,7 +899,19 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    fn can_take_block(&self) -> bool {
+    fn can_take_block(&mut self) -> bool {
+        if self.no_block && self.is_sym(BLOCK_START) && matches!(self.peek_tok(1), Tok::Sym("|") | Tok::Sym("||")) {
+            let span = self.span();
+            self.diags.push(
+                Diagnostic::error(
+                    "E0109",
+                    "a block argument cannot follow a call in an `if`/`while`/`for`/`match` header",
+                    span,
+                )
+                .note("wrap the call in parentheses: `for x in (xs.map { |v| ... }) {`"),
+            );
+            return false;
+        }
         !self.no_block && self.is_sym(BLOCK_START)
     }
 

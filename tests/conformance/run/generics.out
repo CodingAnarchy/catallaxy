@@ -1,0 +1,24 @@
+9
+zoo
+1.5
+nil
+b
+b
+1
+[1, 2, 3, 4]
+(1, "one")
+2
+3
+300
+abababab
+v=42
+["evens": [2, 4], "odds": [1]]
+["a": ["apple", "avocado"], "b": ["banana"], "c": ["cherry", "cranberry"]]
+["cranberry", "avocado", "banana", "cherry", "apple"]
+[5, 7, 6, 9]
+(["avocado", "cranberry"], ["apple", "banana", "cherry"])
+[5: 1, 7: 1, 6: 2, 9: 1]
+apple
+[1, 2, 3]
+["apple", "avocado"]["banana", "cherry"]["cranberry"]nil
+[("apple", 1), ("avocado", 2), ("banana", 3)]

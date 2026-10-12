@@ -221,7 +221,8 @@ impl<'a> Lexer<'a> {
             }
             if saw_newline && self.newlines_significant() {
                 let cont_prev = self.out.last().map(|t| continues_line(&t.tok)).unwrap_or(true);
-                let next_is_chain = (self.peek() == b'.' && self.peek_at(1) != b'.')
+                // `.method` continues a chain; `.Variant` (uppercase) starts a pattern or value.
+                let next_is_chain = (self.peek() == b'.' && self.peek_at(1) != b'.' && !self.peek_at(1).is_ascii_uppercase())
                     || (self.peek() == b'?' && self.peek_at(1) == b'.');
                 let prev_is_nl = matches!(self.out.last().map(|t| &t.tok), Some(Tok::Newline) | None);
                 if !cont_prev && !next_is_chain && !prev_is_nl {

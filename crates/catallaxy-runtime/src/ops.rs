@@ -83,11 +83,20 @@ pub fn is_int(v: Value) -> bool {
     v.is_small_int() || (v.is_ptr() && kind_of(v) == ObjKind::BigInt)
 }
 
+/// The big integer behind an Int value (callers check `is_int`; anything else reads as 0).
+fn bigint_ref(v: Value) -> Option<&'static BigInt> {
+    if v.is_ptr() && kind_of(v) == ObjKind::BigInt {
+        Some(&unsafe { as_bigint(v) }.value)
+    } else {
+        None
+    }
+}
+
 pub fn to_bigint(v: Value) -> BigInt {
     if v.is_small_int() {
         BigInt::from(v.as_small_int())
     } else {
-        unsafe { as_bigint(v) }.value.clone()
+        bigint_ref(v).cloned().unwrap_or_default()
     }
 }
 
@@ -95,17 +104,17 @@ pub fn int_to_f64(v: Value) -> f64 {
     if v.is_small_int() {
         v.as_small_int() as f64
     } else {
-        unsafe { as_bigint(v) }.value.to_f64().unwrap_or(f64::NAN)
+        bigint_ref(v).and_then(|b| b.to_f64()).unwrap_or(f64::NAN)
     }
 }
 
-/// Small-int value, or None for big integers.
+/// The value as i64 if it is an Int that fits.
 #[inline]
 pub fn int_as_i64(v: Value) -> Option<i64> {
     if v.is_small_int() {
         Some(v.as_small_int())
     } else {
-        unsafe { as_bigint(v) }.value.to_i64()
+        bigint_ref(v).and_then(|b| b.to_i64())
     }
 }
 
@@ -301,7 +310,7 @@ pub fn format_int(v: Value) -> String {
     if v.is_small_int() {
         v.as_small_int().to_string()
     } else {
-        unsafe { as_bigint(v) }.value.to_string()
+        to_bigint(v).to_string()
     }
 }
 
@@ -790,7 +799,7 @@ pub fn sign_of(v: Value) -> i64 {
     if v.is_small_int() {
         v.as_small_int().signum()
     } else {
-        let b = &unsafe { as_bigint(v) }.value;
+        let b = to_bigint(v);
         if b.is_negative() {
             -1
         } else if b.is_zero() {

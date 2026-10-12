@@ -49,7 +49,7 @@ fn index_error(i: i64, len: usize) -> Trap {
 }
 
 fn norm_index(i: Value, len: usize) -> RtResult<usize> {
-    let Some(mut idx) = ops::int_as_i64(i).filter(|_| ops::is_int(i)) else {
+    let Some(mut idx) = (if ops::is_int(i) { ops::int_as_i64(i) } else { None }) else {
         return panic(format!("TypeError: index must be Int, got {}", type_name(i)));
     };
     let orig = idx;
@@ -154,7 +154,7 @@ pub fn dict_set(vm: &mut Vm, d: Value, k: Value, v: Value) -> RtResult<()> {
 }
 
 fn char_at(s: &str, i: Value) -> RtResult<Option<&str>> {
-    let Some(mut idx) = ops::int_as_i64(i).filter(|_| ops::is_int(i)) else {
+    let Some(mut idx) = (if ops::is_int(i) { ops::int_as_i64(i) } else { None }) else {
         return panic(format!("TypeError: string index must be Int, got {}", type_name(i)));
     };
     if s.is_ascii() {
@@ -177,8 +177,45 @@ fn char_at(s: &str, i: Value) -> RtResult<Option<&str>> {
     Ok(Some(&s[start..start + ch.len_utf8()]))
 }
 
+/// The [start, end) bounds selected by a range over a sequence of `len` items, clamped.
+fn range_bounds(r: Value, len: usize) -> RtResult<(usize, usize)> {
+    let inst = unsafe { as_instance(r) };
+    let (first, last, excl) = (inst.get(0), inst.get(1), inst.get(2).is_true());
+    let (Some(a), Some(b)) = (ops::int_as_i64(first), ops::int_as_i64(last)) else {
+        return panic("RangeError: range bounds too large");
+    };
+    let n = len as i64;
+    let a = if a < 0 { a + n } else { a };
+    let b = if b < 0 { b + n } else { b };
+    let end = if excl { b } else { b + 1 };
+    let start = a.clamp(0, n);
+    let end = end.clamp(start, n);
+    Ok((start as usize, end as usize))
+}
+
+fn is_range(v: Value) -> bool {
+    v.is_ptr() && unsafe { heap_class(v.as_ptr()) }.id == ids::RANGE
+}
+
 /// Generic `x[i]` for lists, dicts, strings, tuples and ranges (and `Dyn` values).
 pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
+    if is_range(i) {
+        match kind_of(x) {
+            ObjKind::List => {
+                let items = ownership::with_read(&vm.m, x, || unsafe { as_list(x).items() }.clone())?;
+                let (a, b) = range_bounds(i, items.len())?;
+                return Ok(vm.m.alloc_list(items[a..b].to_vec()));
+            }
+            ObjKind::Str => {
+                let s = unsafe { as_str_obj(x) }.as_str();
+                let n = unsafe { as_str_obj(x) }.char_count();
+                let (a, b) = range_bounds(i, n)?;
+                let sub: String = if s.is_ascii() { s[a..b].to_string() } else { s.chars().skip(a).take(b - a).collect() };
+                return Ok(vm.m.alloc_str(&sub));
+            }
+            _ => {}
+        }
+    }
     match kind_of(x) {
         ObjKind::List => list_get(vm, x, i),
         ObjKind::Dict => Ok(dict_get(vm, x, i)?.unwrap_or(Value::NIL)),

@@ -1,0 +1,30 @@
+class User {
+  name: String
+  fn greeting(self) -> String { "hi #{self.name}" }
+}
+class Dog {
+  fn name(self) -> String { "rex" }
+}
+
+fn shout(x) { x.name.upcase }
+puts(shout(User.new("ada")))
+puts(shout(Dog.new()))
+
+fn double(v) { v + v }
+puts(double(21))
+puts(double("ab"))
+puts(double(1.5))
+puts(double([1]))
+
+fn describe(items) {
+  out = []
+  for i in items { out.push(i.to_s + "!") }
+  out
+}
+puts(describe([1, 2]))
+puts(describe(1..3))
+
+fn biggest(a, b) { if a > b { a } else { b } }
+puts(biggest(3, 8))
+puts(biggest("pear", "apple"))
+puts(biggest(2, 8) + 1)

@@ -1,0 +1,63 @@
+fn max_of[T: Comparable](xs: List[T]) -> T? {
+  best: T? = nil
+  for x in xs {
+    if best == nil or x > best { best = x }
+  }
+  best
+}
+puts(max_of([3, 9, 2]))
+puts(max_of(["pear", "apple", "zoo"]))
+puts(max_of([1.5, -2.0]))
+empty: List[Int] = []
+puts(max_of(empty))
+
+class Stack[T] {
+  items: List[T] = []
+  fn push(self, x: T) { self.items.push(x) }
+  fn pop(self) -> T? { self.items.pop() }
+  fn peek(self) -> T? { self.items.last() }
+  fn size(self) -> Int { self.items.length }
+}
+s = Stack[String].new()
+s.push("a")
+s.push("b")
+puts(s.peek())
+puts(s.pop())
+puts(s.size())
+n = Stack.new(items: [1, 2, 3])
+n.push(4)
+puts(n.items)
+
+fn pair[A, B](a: A, b: B) -> (A, B) { (a, b) }
+p = pair(1, "one")
+puts(p)
+puts(p.0 + 1)
+puts(p.1.length)
+
+fn apply_twice[T](x: T, f: fn(T) -> T) -> T { f(f(x)) }
+puts(apply_twice(3) { |v| v * 10 })
+puts(apply_twice("ab") { |v| v + v })
+
+class Box[T] {
+  value: T
+  fn map[U](self, f: fn(T) -> U) -> Box[U] { Box.new(f(self.value)) }
+}
+b = Box.new(21).map { |v| v * 2 }.map { |v| "v=#{v}" }
+puts(b.value)
+
+d: Dict[String, List[Int]] = [:]
+d["evens"] = [2, 4]
+d.get_or_insert("odds", []).push(1)
+puts(d)
+words = ["apple", "avocado", "banana", "cherry", "cranberry"]
+groups = words.group_by { |w| w[0] }
+puts(groups)
+puts(words.sort_by { |w| -w.length })
+puts(words.map { |w| w.length }.uniq())
+puts(words.partition { |w| w.length > 6 })
+counts = words.tally_by { |w| w.length }
+puts(counts)
+puts(words.min_by { |w| w.length })
+puts([[1, 2], [3]].flatten())
+puts(words.each_slice(2) { |b| print(b) })
+puts(words.zip([1, 2, 3]))

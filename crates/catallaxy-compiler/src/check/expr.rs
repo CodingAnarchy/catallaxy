@@ -576,13 +576,20 @@ impl Checker {
         let (bool_, int, float, string) = (self.types.bool, self.types.int, self.types.float, self.types.string);
         if let Ty::Open(o) = self.types.get(self.types.shallow_resolve(lt)).clone() {
             let ret = match op {
-                BinOp::Eq | BinOp::Ne => bool_,
+                BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::In => bool_,
                 _ => self.new_open(o),
             };
             if !matches!(op, BinOp::Eq | BinOp::Ne) {
                 self.opens[o as usize].reqs.push(OpenReq::BinOp { op, rhs: rt, ret, span: e.span });
             }
-            self.bins.insert(e.id, if matches!(op, BinOp::Eq | BinOp::Ne) { BinRes::Eq } else { BinRes::Arith(ArithKind::Generic) });
+            let res = match op {
+                BinOp::Eq | BinOp::Ne => BinRes::Eq,
+                BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Cmp => BinRes::Compare(ArithKind::Generic),
+                BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => BinRes::Bitwise,
+                BinOp::In => BinRes::Method(Dispatch::Dynamic("contains".into(), None), true),
+                _ => BinRes::Arith(ArithKind::Generic),
+            };
+            self.bins.insert(e.id, res);
             return ret;
         }
         let lk = self.numeric_kind(lt);
@@ -1477,6 +1484,18 @@ impl Checker {
     }
 
     fn check_call(&mut self, e: &Expr, callee: &Expr, args: &[Arg], block: Option<&Expr>, expected: Option<TyId>) -> TyId {
+        if let ExprKind::Ident(n) = &callee.kind {
+            if n == "freeze" && self.lookup_local(n).is_none() && self.lookup_name(self.cur_module, n).is_none() {
+                if args.len() != 1 || block.is_some() {
+                    self.err("E0332", "`freeze` takes exactly one argument", e.span);
+                    self.check_args_loose(args, block);
+                    return self.types.error;
+                }
+                let t = self.check_expr(&args[0].value, None);
+                self.calls.insert(e.id, CallRes::Freeze);
+                return self.freeze_ty(t);
+            }
+        }
         if let Some(path) = self.resolve_path(callee) {
             match path {
                 PathRes::Fn(f) => {

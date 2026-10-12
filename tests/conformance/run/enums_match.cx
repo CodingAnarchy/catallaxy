@@ -1,0 +1,59 @@
+enum Shape {
+  Circle(r: Float)
+  Rect(w: Float, h: Float)
+  Empty
+
+  fn area(self) -> Float {
+    match self {
+      .Circle(r) => 3.0 * r * r
+      .Rect(w, h) => w * h
+      .Empty => 0.0
+    }
+  }
+}
+
+shapes = [Shape.Circle(1.0), Shape.Rect(2.0, 3.0), Shape.Empty]
+for s in shapes {
+  puts(s.area)
+}
+puts(shapes[0])
+
+fn describe(n: Int) -> String {
+  match n {
+    0 => "zero"
+    1 | 2 | 3 => "small"
+    4..9 => "medium"
+    x if x < 0 => "negative"
+    _ => "large"
+  }
+}
+for n in [0, 2, 5, -3, 100] { puts(describe(n)) }
+
+fn kind(v: Int | String | Nil) -> String {
+  match v {
+    nil => "nothing"
+    n: Int => "int #{n + 1}"
+    s: String => "string #{s.upcase}"
+  }
+}
+puts(kind(41))
+puts(kind("hi"))
+puts(kind(nil))
+
+b = true
+puts(match b { true => "yes", false => "no" })
+
+enum Tree {
+  Leaf(Int)
+  Node(Tree, Tree)
+}
+fn sum(t: Tree) -> Int {
+  match t {
+    .Leaf(v) => v
+    .Node(l, r) => sum(l) + sum(r)
+  }
+}
+puts(sum(Tree.Node(Tree.Leaf(1), Tree.Node(Tree.Leaf(2), Tree.Leaf(3)))))
+puts(Shape.Empty == Shape.Empty)
+puts(Shape.Circle(1.0) == Shape.Circle(1.0))
+puts(Shape.Circle(1.0) == Shape.Circle(2.0))

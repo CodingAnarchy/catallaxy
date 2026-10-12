@@ -1,0 +1,22 @@
+extend String {
+  fn shout(self) -> String { self.upcase + "!" }
+  fn words(self) -> Int { self.split().length }
+}
+puts("hello".shout())
+puts("a b  c".words())
+
+extend Int {
+  fn squared(self) -> Int { self * self }
+}
+puts(7.squared())
+
+extend List[Int] {
+  fn average(self) -> Float { self.sum().to_f / self.length.to_f }
+}
+puts([1, 2, 3, 4].average())
+
+class Temp { celsius: Float }
+extend Temp {
+  fn fahrenheit(self) -> Float { self.celsius * 9.0 / 5.0 + 32.0 }
+}
+puts(Temp.new(100.0).fahrenheit())

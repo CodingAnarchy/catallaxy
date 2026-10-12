@@ -1,0 +1,11 @@
+Ok(42)
+Err("not a number: x")
+Err("negative: -1")
+true
+42
+0
+ok 3
+got 5
+GH
+nil
+not a number: x

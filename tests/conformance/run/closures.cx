@@ -1,0 +1,59 @@
+fn make_counter() -> fn() -> Int {
+  count = 0
+  { ||
+    count += 1
+    count
+  }
+}
+c = make_counter()
+c()
+c()
+puts(c())
+d = make_counter()
+puts(d())
+
+adders = [1, 2, 3].map { |n| fn(x: Int) -> Int { x + n } }
+puts(adders.map { |f| f(10) })
+
+total = 0
+[1, 2, 3].each { |x| total += x }
+puts(total)
+
+fact: fn(Int) -> Int = fn(n: Int) -> Int { if n <= 1 { 1 } else { n * fact(n - 1) } }
+puts(fact(10))
+
+compose = fn(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int { fn(x: Int) -> Int { g(f(x)) } }
+inc_then_double = compose({ |x| x + 1 }, { |x| x * 2 })
+puts(inc_then_double(5))
+
+squares = (1..5).map { it * it }
+puts(squares)
+
+# Blocks with `return` return from the block.
+evens = [1, 2, 3, 4].map { |x|
+  if x % 2 == 1 { return 0 }
+  x
+}
+puts(evens)
+
+# `for` over a user Enumerable supports break, continue and return.
+class Range3 {
+  fn each(self, f: fn(Int)) { f(1); f(2); f(3) }
+}
+fn first_over(limit: Int) -> Int {
+  for x in Range3.new() {
+    if x <= limit { continue }
+    return x
+  }
+  -1
+}
+puts(first_over(1))
+puts(first_over(5))
+
+x = 10
+shadow = { ||
+  x = 20
+  x
+}
+puts(shadow())
+puts(x)
