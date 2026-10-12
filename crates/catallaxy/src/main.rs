@@ -1,5 +1,7 @@
 //! `catx`: the Catallaxy command-line tool.
 
+mod lsp;
+mod repl;
 mod run;
 
 use std::path::PathBuf;
@@ -31,6 +33,9 @@ fn main() -> ExitCode {
         "check" => run::cmd_check(rest),
         "disasm" => run::cmd_disasm(rest),
         "test" => run::cmd_test(rest),
+        "repl" => repl::cmd_repl(rest),
+        "lsp" => lsp::cmd_lsp(rest),
+        "__repl-exec" => repl::cmd_repl_exec(rest),
         "version" | "--version" | "-V" => {
             println!("catx {}", env!("CARGO_PKG_VERSION"));
             0

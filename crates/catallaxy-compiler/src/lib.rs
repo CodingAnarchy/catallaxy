@@ -9,5 +9,6 @@ pub mod types;
 pub mod util;
 pub mod codegen;
 pub mod driver;
+pub mod query;
 
 pub use driver::{compile_path, compile_source, Compilation, Options};
