@@ -684,11 +684,10 @@ fn signature(src: &str) -> (Vec<Sig>, Vec<Span>) {
     }
     let mut out: Vec<(Sig, Span)> = Vec::new();
     for (sig, span) in raw {
-        let after_sep_ok = match out.last() {
-            None | Some((Sig::Sep, _)) => false,
-            Some((Sig::Tok(Tok::Sym("{" | "|" | "||"), _), _)) => false,
-            _ => true,
-        };
+        let after_sep_ok = !matches!(
+            out.last(),
+            None | Some((Sig::Sep, _)) | Some((Sig::Tok(Tok::Sym("{" | "|" | "||"), _), _))
+        );
         match sig {
             Sig::Sep if !after_sep_ok => {}
             Sig::Tok(Tok::Sym("}") | Tok::Kw(Kw::Else), _) if matches!(out.last(), Some((Sig::Sep, _))) => {
@@ -866,7 +865,7 @@ mod tests {
 
     #[test]
     fn long_if_else_breaks_every_branch() {
-        let cond = vec!["x > 0"; 12].join(" and ");
+        let cond = ["x > 0"; 12].join(" and ");
         let out = fmt(&format!("if {cond} {{ a }} else if y {{ b }} else {{ c }}\n"));
         assert_eq!(out, format!("if {cond} {{\n  a\n}} else if y {{\n  b\n}} else {{\n  c\n}}\n"));
     }

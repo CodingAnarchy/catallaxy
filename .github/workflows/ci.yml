@@ -33,8 +33,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --release --locked -- -D warnings
 
-  sanitizers:
-    runs-on: ubuntu-latest
+  miri:
+    # parking_lot_core's Linux futex call is rejected by current Miri; macOS is fine.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -44,6 +45,14 @@ jobs:
         env:
           MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-permissive-provenance -Zmiri-tree-borrows -Zmiri-ignore-leaks
         run: cargo miri test -p catallaxy-gc -p catallaxy-runtime
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
       - name: ThreadSanitizer (gc and runtime)
         env:
           RUSTFLAGS: -Zsanitizer=thread

@@ -115,9 +115,9 @@ fn big_integers_and_equality() {
     let mut h = Host::new();
     let big = h.m.int(1 << 50);
     assert!(big.is_ptr());
-    let sum = ops::int_add(&mut h.m, big, Value::small_int(1));
+    let sum = ops::int_add(h.m, big, Value::small_int(1));
     assert_eq!(ops::format_int(sum), ((1i64 << 50) + 1).to_string());
-    let back = ops::int_sub(&mut h.m, sum, big);
+    let back = ops::int_sub(h.m, sum, big);
     assert!(back.is_small_int() && back.as_small_int() == 1);
     let a = h.m.alloc_list(vec![Value::small_int(1), big]);
     let big2 = h.m.int(1 << 50);
@@ -141,26 +141,26 @@ fn ownership_states() {
     let outer = h.m.alloc_list(vec![inner]);
     h.m.root(outer);
     let hdr = |v: Value| unsafe { &*v.as_ptr() };
-    assert_eq!(ownership::check_write(&h.m, hdr(outer)).unwrap(), Access::Local);
-    ownership::freeze_deep(&h.m, outer).unwrap();
-    assert!(ownership::check_write(&h.m, hdr(outer)).is_err());
-    assert!(ownership::check_write(&h.m, hdr(inner)).is_err(), "freezing is deep");
-    assert_eq!(ownership::check_read(&h.m, hdr(inner)).unwrap(), Access::Local);
+    assert_eq!(ownership::check_write(h.m, hdr(outer)).unwrap(), Access::Local);
+    ownership::freeze_deep(h.m, outer).unwrap();
+    assert!(ownership::check_write(h.m, hdr(outer)).is_err());
+    assert!(ownership::check_write(h.m, hdr(inner)).is_err(), "freezing is deep");
+    assert_eq!(ownership::check_read(h.m, hdr(inner)).unwrap(), Access::Local);
 
     let child = h.m.alloc_list(Vec::new());
     let shared = h.m.alloc_list(vec![child]);
     h.m.root(shared);
-    ownership::share_deep(&h.m, shared, false).unwrap();
-    assert_eq!(ownership::check_write(&h.m, hdr(shared)).unwrap(), Access::Shared);
-    ownership::with_write(&h.m, shared, |_| unsafe { as_list(shared).items_mut() }.push(Value::NIL)).unwrap();
+    ownership::share_deep(h.m, shared, false).unwrap();
+    assert_eq!(ownership::check_write(h.m, hdr(shared)).unwrap(), Access::Shared);
+    ownership::with_write(h.m, shared, |_| unsafe { as_list(shared).items_mut() }.push(Value::NIL)).unwrap();
 
     // Transfer to another (fake) owner: now foreign to us.
     let mine = h.m.alloc_list(Vec::new());
     h.m.root(mine);
     ownership::transfer_deep(mine, h.m.tid, 999);
-    assert!(ownership::check_read(&h.m, hdr(mine)).is_err());
+    assert!(ownership::check_read(h.m, hdr(mine)).is_err());
     ownership::transfer_deep(mine, 999, h.m.tid);
-    assert!(ownership::check_read(&h.m, hdr(mine)).is_ok());
+    assert!(ownership::check_read(h.m, hdr(mine)).is_ok());
     h.gc();
     h.finish();
 }
@@ -168,10 +168,10 @@ fn ownership_states() {
 #[test]
 fn shared_list_is_safe_under_concurrent_pushes() {
     let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    let mut h = Host::new();
+    let h = Host::new();
     let list = h.m.alloc_list(Vec::new());
     h.m.root(list);
-    ownership::share_deep(&h.m, list, false).unwrap();
+    ownership::share_deep(h.m, list, false).unwrap();
     let addr = list.0;
     let per = n(300);
     let threads: Vec<_> = (0..3)
@@ -180,7 +180,7 @@ fn shared_list_is_safe_under_concurrent_pushes() {
                 let mut w = Host::new();
                 let l = Value(addr);
                 for i in 0..per {
-                    ownership::with_write(&w.m, l, |_| unsafe { as_list(l).items_mut() }.push(Value::small_int(i as i64)))
+                    ownership::with_write(w.m, l, |_| unsafe { as_list(l).items_mut() }.push(Value::small_int(i as i64)))
                         .unwrap();
                     if i % 50 == 0 {
                         catallaxy_gc::safepoint(&w.m.rec);
@@ -197,7 +197,7 @@ fn shared_list_is_safe_under_concurrent_pushes() {
             t.join().unwrap();
         }
     });
-    let len = ownership::with_read(&h.m, list, || unsafe { as_list(list).items() }.len()).unwrap();
+    let len = ownership::with_read(h.m, list, || unsafe { as_list(list).items() }.len()).unwrap();
     assert_eq!(len, 3 * per);
     h.finish();
 }

@@ -383,8 +383,10 @@ impl Tracer {
         Tracer { color, local: None }
     }
 
-    /// Marks `obj` reachable. Null pointers are ignored.
+    /// Marks `obj` reachable. Null pointers are ignored. Tracers are only handed to root sources
+    /// and trace hooks, whose contract is to pass live object pointers.
     #[inline]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn mark(&mut self, obj: *const Header) {
         if obj.is_null() {
             return;

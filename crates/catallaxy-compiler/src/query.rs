@@ -224,11 +224,10 @@ pub fn expr_at(m: &Module, offset: u32) -> Option<&Expr> {
 pub fn expr_ending_at(m: &Module, end: u32) -> Option<&Expr> {
     let mut best: Option<&Expr> = None;
     walk(m, &mut |e| {
-        if e.span.end == end && e.span.start < end && !matches!(e.kind, ExprKind::Error) {
-            if best.is_none_or(|b| e.span.end - e.span.start < b.span.end - b.span.start) {
+        if e.span.end == end && e.span.start < end && !matches!(e.kind, ExprKind::Error)
+            && best.is_none_or(|b| e.span.end - e.span.start < b.span.end - b.span.start) {
                 best = Some(e);
             }
-        }
     });
     best.or_else(|| expr_at(m, end.saturating_sub(1)))
 }

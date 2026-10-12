@@ -32,7 +32,7 @@ pub const NUM_CLASSES: usize = SIZE_CLASSES.len();
 #[inline]
 pub fn size_class_of(size: usize) -> usize {
     if size <= 512 {
-        (size.max(16) + 15) / 16 - 1
+        size.max(16).div_ceil(16) - 1
     } else {
         32 + SIZE_CLASSES[32..].iter().position(|&s| s >= size).expect("size within small range")
     }
@@ -264,7 +264,9 @@ impl LocalHeap {
 
     /// Allocates `size` bytes (header included), zeroed, with an initialized header owned by this
     /// thread. Never runs a collection; it may request one.
+    /// `vtable` must point to a `GcVTable` that outlives the object (in practice, a class).
     #[inline]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn alloc(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
         debug_assert!(size >= HEADER_SIZE);
         if size > MAX_SMALL {

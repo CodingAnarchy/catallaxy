@@ -536,7 +536,7 @@ impl Checker {
                 return self.types.bool;
             }
             BinOp::Eq | BinOp::Ne => {
-                if let Some(_) = self.as_nil_test(e) {
+                if self.as_nil_test(e).is_some() {
                     self.check_cond(e);
                     return self.types.bool;
                 }
@@ -804,7 +804,8 @@ impl Checker {
     /// Checks a Bool condition and computes the narrowings it implies.
     pub fn check_cond(&mut self, e: &Expr) -> Narrowings {
         let bool_ = self.types.bool;
-        let res = match &e.kind {
+        
+        match &e.kind {
             ExprKind::Unary(UnOp::Not, x) => {
                 let (t, f) = self.check_cond(x);
                 self.record_ty(e.id, bool_);
@@ -863,14 +864,13 @@ impl Checker {
                         fne.push((l, no));
                     }
                 }
-                return (tn, fne);
+                (tn, fne)
             }
             _ => {
                 self.check_against(e, bool_, "condition");
                 (Vec::new(), Vec::new())
             }
-        };
-        res
+        }
     }
 
     /// Splits a (union) type into the part matching `target` and the rest.
@@ -1636,15 +1636,15 @@ impl Checker {
                 },
             }
         }
-        if block.is_some() {
+        if let Some(blk) = block {
             // The block fills the last unfilled parameter.
             match (0..params.len()).rev().find(|&j| slots[j].is_none()) {
                 Some(j) => slots[j] = Some(ArgSlot::Block),
                 None => {
                     let msg = format!("`{fname}` does not take a block");
-                    self.err("E0337", msg, block.unwrap().span);
+                    self.err("E0337", msg, blk.span);
                     ok = false;
-                    self.check_expr(block.unwrap(), None);
+                    self.check_expr(blk, None);
                 }
             }
         }
@@ -2580,8 +2580,8 @@ impl Checker {
             || matches!(self.types.get(rtr), Ty::Frozen(i) if matches!(self.types.get(*i), Ty::Class(builtin::LIST, _)));
         if is_list && self.types.shallow_resolve(it) == int {
             self.calls.insert(e.id, CallRes::ListGet);
-        } else if self.calls.get(&e.id).is_none() {
-            self.calls.insert(e.id, CallRes::IndexGet);
+        } else {
+            self.calls.entry(e.id).or_insert(CallRes::IndexGet);
         }
         t
     }

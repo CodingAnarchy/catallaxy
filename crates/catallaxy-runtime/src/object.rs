@@ -408,6 +408,7 @@ unsafe fn size_zero(_: *const Header) -> usize {
     0
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn vtable_for(kind: ObjKind) -> GcVTable {
     let (trace, finalize, size): (
         unsafe fn(*const Header, &mut Tracer),

@@ -416,7 +416,8 @@ impl Checker {
                 _ => None,
             }
         };
-        let (params, mk): (Vec<ParamId>, Box<dyn Fn(&mut Types, Vec<TyId>) -> TyId>) = match item {
+        type MakeTy = Box<dyn Fn(&mut Types, Vec<TyId>) -> TyId>;
+        let (params, mk): (Vec<ParamId>, MakeTy) = match item {
             Some(ScopeItem::Class(c)) => (self.classes[&c].params.clone(), Box::new(move |t, a| t.class(c, a))),
             Some(ScopeItem::Enum(e)) => {
                 (self.enums[e as usize].params.clone(), Box::new(move |t, a| t.intern(Ty::Enum(e, a))))

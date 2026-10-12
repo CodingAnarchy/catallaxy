@@ -365,7 +365,7 @@ impl Checker {
             if matches!(self.types.get(t), Ty::Never) {
                 continue;
             }
-            if acc.iter().any(|&a| a == t) {
+            if acc.contains(&t) {
                 continue;
             }
             // Absorb subtypes into an existing member.

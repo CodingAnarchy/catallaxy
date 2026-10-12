@@ -1,5 +1,8 @@
 //! The Catallaxy compiler: lexer, parser, type checker, bytecode emitter and formatter.
 
+// Parse failures are reported through the diagnostics list; `Err(())` just unwinds.
+#![allow(clippy::result_unit_err)]
+
 pub mod ast;
 pub mod check;
 pub mod diag;

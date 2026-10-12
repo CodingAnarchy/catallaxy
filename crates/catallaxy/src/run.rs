@@ -162,11 +162,10 @@ pub fn cmd_disasm(args: &[String]) -> i32 {
         if func.native.is_some() || func.code.is_empty() {
             continue;
         }
-        if func.file as usize >= 2 || filter.is_some_and(|n| func.name.contains(n.as_str())) {
-            if filter.is_none_or(|n| func.name.contains(n.as_str())) {
+        if (func.file as usize >= 2 || filter.is_some_and(|n| func.name.contains(n.as_str())))
+            && filter.is_none_or(|n| func.name.contains(n.as_str())) {
                 println!("{}", catallaxy_vm::bytecode::disassemble(&p, func));
             }
-        }
     }
     0
 }

@@ -1699,18 +1699,18 @@ impl<'a> Codegen<'a> {
         let v = self.alloc(st);
         self.expr_to(st, x, v);
         let is_result = ck.calls.contains_key(&e.id);
-        let ok_jump;
-        if is_result {
+        
+        let ok_jump = if is_result {
             // Ok has tag 0.
             let t = self.alloc(st);
             self.emit(st, encode(Op::EnumTag, t, v, 0));
             let z = self.alloc(st);
             self.emit(st, encode_sbx(Op::LoadInt, z, 0));
             self.emit(st, encode(Op::EqI, t, t, z));
-            ok_jump = self.emit_jump(st, Op::JmpIf, t);
+            self.emit_jump(st, Op::JmpIf, t)
         } else {
-            ok_jump = self.emit_jump(st, Op::JmpIfNotNil, v);
-        }
+            self.emit_jump(st, Op::JmpIfNotNil, v)
+        };
         // Propagate: return the Err value (or nil) from the function.
         self.unlock_withs(st, 0);
         match ck.control.get(&e.id) {

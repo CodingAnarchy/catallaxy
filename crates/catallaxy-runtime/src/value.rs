@@ -29,7 +29,7 @@ pub const SMALL_INT_MIN: i64 = -(1 << 47);
 pub const SMALL_INT_MAX: i64 = (1 << 47) - 1;
 
 impl Value {
-    pub const NIL: Value = Value((TAG_SPECIAL << TAG_SHIFT) | 0);
+    pub const NIL: Value = Value(TAG_SPECIAL << TAG_SHIFT);
     pub const FALSE: Value = Value((TAG_SPECIAL << TAG_SHIFT) | 2);
     pub const TRUE: Value = Value((TAG_SPECIAL << TAG_SHIFT) | 3);
     /// Marks an empty slot in internal tables and an uninitialized register. Never user-visible.
