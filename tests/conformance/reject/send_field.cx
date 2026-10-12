@@ -1,0 +1,5 @@
+# expect: E0613
+class Job { items: List[Int] }
+j = Job.new([1])
+ch: Channel[List[Int]] = Channel.new()
+ch.send(j.items)

@@ -1,0 +1,14 @@
+lines: 5
+words: 29
+distinct: 17
+longest: quick
+
+top 5:
+ 1. dog     5 #####
+ 2. the     5 #####
+ 3. fox     3 ###
+ 4. a       2 ##
+ 5. quick   2 ##
+
+hapax legomena: 12
+["and", "barks", "brown", "end", "happy", "is", "isn't", "it", "jumps", "lazy", "over", "runs"]

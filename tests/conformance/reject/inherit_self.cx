@@ -1,0 +1,2 @@
+# expect: E0219
+class Node < Node { v: Int }

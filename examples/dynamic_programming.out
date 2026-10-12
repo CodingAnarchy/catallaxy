@@ -1,0 +1,10 @@
+LCS(ABCBDAB, BDCABA) = BCBA
+LCS(dynamic, programming) = ami
+edit("kitten", "sitting") = 3
+edit("flaw", "lawn") = 2
+edit("", "abc") = 3
+edit("same", "same") = 0
+knapsack(8): value 100, items ["water", "tent"]
+min coins for 63 with [1, 5, 10, 21, 25]: 3
+min coins for 7 with [2, 4]: -1
+ways to make 100 with [1, 5, 10, 25, 50]: 292

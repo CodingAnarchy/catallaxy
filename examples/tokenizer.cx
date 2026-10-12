@@ -1,0 +1,136 @@
+# A hand-written lexer for a small assignment language: identifiers, keywords, integer and float
+# literals, strings with escapes, operators (including two-character ones) and comments.
+# Every token records its line and column; lexical errors come back as Err with a position.
+
+enum Kind {
+  Ident(String)
+  Keyword(String)
+  IntLit(Int)
+  FloatLit(Float)
+  Str(String)
+  Op(String)
+  Newline
+}
+
+class Token {
+  kind: Kind
+  line: Int
+  col: Int
+  fn to_s(self) -> String { "#{self.line}:#{self.col} #{self.kind}" }
+}
+
+const KEYWORDS = ["let", "if", "else", "print", "while"]
+const TWO_CHAR_OPS = ["==", "!=", "<=", ">=", "+=", "->"]
+const ONE_CHAR_OPS = "+-*/%=<>(){},"
+
+class Lexer {
+  chars: List[String]
+  pos: Int = 0
+  line: Int = 1
+  col: Int = 1
+
+  fn peek(self, ahead: Int = 0) -> String { self.chars.get(self.pos + ahead) ?? "" }
+
+  fn advance(self) -> String {
+    c = self.chars[self.pos]
+    self.pos += 1
+    if c == "\n" {
+      self.line += 1
+      self.col = 1
+    } else {
+      self.col += 1
+    }
+    c
+  }
+
+  fn error(self, msg: String) -> Result[List[Token], String] {
+    Err("#{self.line}:#{self.col}: #{msg}")
+  }
+
+  fn run(self) -> Result[List[Token], String] {
+    out: List[Token] = []
+    while self.pos < self.chars.length {
+      c = self.peek()
+      line = self.line
+      col = self.col
+      if c == " " or c == "\t" {
+        self.advance()
+      } else if c == "#" {
+        while self.pos < self.chars.length and self.peek() != "\n" { self.advance() }
+      } else if c == "\n" {
+        self.advance()
+        out.push(Token.new(Kind.Newline, line, col))
+      } else if c.is_digit {
+        sb = StringBuilder.new()
+        while self.peek().is_digit or self.peek() == "_" { sb.push(self.advance()) }
+        if self.peek() == "." and self.peek(1).is_digit {
+          sb.push(self.advance())
+          while self.peek().is_digit { sb.push(self.advance()) }
+          out.push(Token.new(Kind.FloatLit(sb.to_s.to_f!), line, col))
+        } else {
+          out.push(Token.new(Kind.IntLit(sb.to_s.replace("_", "").to_i!), line, col))
+        }
+      } else if c.is_alpha or c == "_" {
+        sb = StringBuilder.new()
+        while self.peek().is_alnum or self.peek() == "_" { sb.push(self.advance()) }
+        word = sb.to_s
+        kind = if KEYWORDS.contains(word) { Kind.Keyword(word) } else { Kind.Ident(word) }
+        out.push(Token.new(kind, line, col))
+      } else if c == "\"" {
+        self.advance()
+        sb = StringBuilder.new()
+        loop {
+          if self.pos >= self.chars.length or self.peek() == "\n" {
+            return Err("#{line}:#{col}: unterminated string")
+          }
+          ch = self.advance()
+          if ch == "\"" { break }
+          if ch == "\\" {
+            esc = self.advance()
+            match esc {
+              "n" => sb.push("\n")
+              "t" => sb.push("\t")
+              "\"" => sb.push("\"")
+              "\\" => sb.push("\\")
+              _ => return Err("#{self.line}:#{self.col - 2}: unknown escape \\#{esc}")
+            }
+          } else {
+            sb.push(ch)
+          }
+        }
+        out.push(Token.new(Kind.Str(sb.to_s), line, col))
+      } else if TWO_CHAR_OPS.contains(c + self.peek(1)) {
+        op = self.advance() + self.advance()
+        out.push(Token.new(Kind.Op(op), line, col))
+      } else if ONE_CHAR_OPS.contains(c) {
+        out.push(Token.new(Kind.Op(self.advance()), line, col))
+      } else {
+        return self.error("unexpected character #{inspect(c)}")
+      }
+    }
+    Ok(out)
+  }
+}
+
+fn tokenize(src: String) -> Result[List[Token], String] { Lexer.new(src.chars).run() }
+
+program = "let total = 1_000 # starting value
+total += 2.5 * (x - 3)
+if total >= 10 { print(\"big\\n\") }"
+
+match tokenize(program) {
+  Ok(tokens) => {
+    for t in tokens { puts(t) }
+    idents = tokens.select { |t| match t.kind { .Ident(_) => true, _ => false } }
+    puts("#{tokens.length} tokens, #{idents.length} identifiers")
+  }
+  Err(e) => puts("error: #{e}")
+}
+puts()
+
+for src in ["x = 3 $ 4", "s = \"open", "a = 1\nb = \"bad \\q\"", "f(a, b) -> a != b"] {
+  match tokenize(src) {
+    Ok(tokens) => puts("ok: #{tokens.map { |t| t.kind }}")
+    Err(e) => puts("error at #{e}")
+  }
+}

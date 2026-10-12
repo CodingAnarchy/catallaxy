@@ -1,0 +1,25 @@
+== all shapes ==
+circle(r=1.0): area 3.14, perimeter 6.28
+rect(3.0x4.0): area 12.00, perimeter 14.00
+a perfectly square rect(2.0x2.0)
+triangle(3.0, 4.0, 5.0): area 6.00, perimeter 12.00
+circle(r=2.0): area 12.57, perimeter 12.57
+== sorted by area ==
+circle(r=1.0) 3.142
+square(2.0) 4.000
+triangle(3.0, 4.0, 5.0) 6.000
+rect(3.0x4.0) 12.000
+circle(r=2.0) 12.566
+== sorted by perimeter, descending ==
+rect(3.0x4.0)
+circle(r=2.0)
+triangle(3.0, 4.0, 5.0)
+square(2.0)
+circle(r=1.0)
+largest: circle(r=2.0)
+smallest: circle(r=1.0)
+true
+true
+total area: 37.7080
+squares: 1
+rect-like: 2

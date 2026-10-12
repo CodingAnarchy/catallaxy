@@ -1,0 +1,2 @@
+# expect: E0305
+fn helper() -> Int { self.count }

@@ -1,0 +1,3 @@
+# expect: E0344
+pair = (1, "a")
+puts(pair.2)

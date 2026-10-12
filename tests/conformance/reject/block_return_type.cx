@@ -1,0 +1,2 @@
+# expect: E0358
+puts([1, 2].select { |x| x + 1 })

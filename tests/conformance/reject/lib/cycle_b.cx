@@ -1,0 +1,2 @@
+import cycle_a
+pub fn b() -> Int { 1 }

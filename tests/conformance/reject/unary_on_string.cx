@@ -1,0 +1,2 @@
+# expect: E0312
+puts(-"five")

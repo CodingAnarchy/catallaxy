@@ -1,0 +1,3 @@
+# expect: E0317
+n = 5
+if let v = n { puts(v) }

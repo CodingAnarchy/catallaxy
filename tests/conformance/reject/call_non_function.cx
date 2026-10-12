@@ -1,0 +1,3 @@
+# expect: E0334
+limit = 10
+puts(limit(3))

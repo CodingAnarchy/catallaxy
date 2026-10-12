@@ -1,0 +1,2 @@
+# expect: E0210
+fn same(a: Self, b: Self) -> Bool { true }

@@ -1,0 +1,3 @@
+# expect: E0335
+fn area(w: Int, h: Int) -> Int { w * h }
+puts(area(w: 1, w: 2))

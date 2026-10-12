@@ -1,0 +1,9 @@
+maze 1: start (0, 0), exit (3, 7)
+shortest path: 12 steps
+S.#.....
+*##.###.
+****#***
+.##***#E
+....#...
+maze 2: start (0, 0), exit (2, 2)
+no path

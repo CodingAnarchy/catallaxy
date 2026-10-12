@@ -1,0 +1,77 @@
+# Integers have arbitrary precision: they grow past 64 bits transparently.
+
+fn factorial(n: Int) -> Int {
+  acc = 1
+  for i in 2..n { acc *= i }
+  acc
+}
+
+fn fib(n: Int) -> Int {
+  a = 0
+  b = 1
+  n.times { |_i|
+    next = a + b
+    a = b
+    b = next
+  }
+  a
+}
+
+fn digit_sum(n: Int) -> Int { n.digits().reduce(0) { |a, b| a + b } }
+
+# Modular exponentiation by repeated squaring.
+fn pow_mod(base: Int, exp: Int, m: Int) -> Int {
+  result = 1
+  b = base % m
+  e = exp
+  while e > 0 {
+    if e % 2 == 1 { result = result * b % m }
+    b = b * b % m
+    e /= 2
+  }
+  result
+}
+
+# Integer square root by Newton's method (works for any size).
+fn isqrt(n: Int) -> Int {
+  if n < 2 { return n }
+  x = n
+  y = (x + 1) / 2
+  while y < x {
+    x = y
+    y = (x + n / x) / 2
+  }
+  x
+}
+
+f50 = factorial(50)
+puts("50! = #{f50}")
+puts("50! has #{f50.to_s.length} digits, digit sum #{digit_sum(f50)}")
+trailing = 0
+n = f50
+while n % 10 == 0 {
+  trailing += 1
+  n /= 10
+}
+puts("50! ends in #{trailing} zeros")
+
+f200 = fib(200)
+puts("fib(200) = #{f200}")
+puts("fib(100) = #{fib(100)}")
+puts("gcd(fib(200), fib(100)) = #{f200.gcd(fib(100))}")    # equals fib(gcd(200, 100))
+
+p = 2 ** 200
+puts("2**200 = #{p}")
+puts("digit sum of 2**1000 = #{digit_sum(2 ** 1000)}")
+puts("bit length of 2**200 - 1 = #{(p - 1).bit_length()}")
+puts("2**200 in hex = #{p.to_s_radix(16)}")
+
+# Mixed small/big arithmetic keeps exact results and shrinks back to small values.
+huge = factorial(30)
+puts("30! / 28! = #{huge / factorial(28)}")
+puts("(2**100 + 1) % 7 = #{(2 ** 100 + 1) % 7}")
+puts("-(2**70) / 3 = #{-(2 ** 70) / 3}, remainder #{-(2 ** 70) % 3}")
+puts("isqrt(10**40 + 12345) = #{isqrt(10 ** 40 + 12345)}")
+puts("2**127 - 1 mod 1_000_000_007 = #{(2 ** 127 - 1) % 1_000_000_007}")
+puts("3**1000 mod 1000 = #{pow_mod(3, 1000, 1000)}")
+puts("comparisons: #{2 ** 64 > 2 ** 63}, #{factorial(20) == 2432902008176640000}")

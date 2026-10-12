@@ -1,0 +1,13 @@
+input:     [38, 27, 43, 3, 9, 82, 10, 3, -5]
+insertion: [-5, 3, 3, 9, 10, 27, 38, 43, 82]
+merge:     [-5, 3, 3, 9, 10, 27, 38, 43, 82]
+quick:     [-5, 3, 3, 9, 10, 27, 38, 43, 82]
+builtin:   [-5, 3, 3, 9, 10, 27, 38, 43, 82]
+input unchanged: true
+descending: [82, 43, 38, 27, 10, 9, 3, 3, -5]
+[]
+[1]
+[1, 2]
+500 items, all agree: true
+sorted check: true false
+["al", "bo", "ann", "echo", "delta", "charlie"]

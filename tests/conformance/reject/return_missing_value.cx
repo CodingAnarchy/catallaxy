@@ -1,0 +1,5 @@
+# expect: E0318
+fn pick(xs: List[Int]) -> Int {
+  if xs.is_empty() { return }
+  xs[0]
+}

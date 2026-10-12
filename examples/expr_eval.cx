@@ -1,0 +1,111 @@
+# Arithmetic expressions: a recursive enum with an evaluator, a printer and a simplifier.
+
+enum Expr {
+  Num(Int)
+  Var(String)
+  Add(Expr, Expr)
+  Mul(Expr, Expr)
+  Neg(Expr)
+  Let(name: String, value: Expr, body: Expr)
+
+  fn show(self) -> String {
+    match self {
+      .Num(n) => if n < 0 { "(#{n})" } else { n.to_s }
+      .Var(v) => v
+      .Add(a, b) => "(#{a.show()} + #{b.show()})"
+      .Mul(a, b) => "#{a.show()} * #{b.show()}"
+      .Neg(a) => "-#{a.show()}"
+      .Let(n, v, b) => "let #{n} = #{v.show()} in #{b.show()}"
+    }
+  }
+
+  fn size(self) -> Int {
+    match self {
+      .Num(_) | .Var(_) => 1
+      .Add(a, b) => 1 + a.size() + b.size()
+      .Mul(a, b) => 1 + a.size() + b.size()
+      .Neg(a) => 1 + a.size()
+      .Let(_, v, b) => 1 + v.size() + b.size()
+    }
+  }
+}
+
+fn eval(e: Expr, env: Dict[String, Int]) -> Result[Int, String] {
+  match e {
+    .Num(n) => Ok(n)
+    .Var(name) => if let v = env[name] { Ok(v) } else { Err("unbound variable `#{name}`") }
+    .Add(a, b) => Ok(eval(a, env)? + eval(b, env)?)
+    .Mul(a, b) => Ok(eval(a, env)? * eval(b, env)?)
+    .Neg(a) => eval(a, env).map { |v| -v }
+    .Let(name, value, body) => {
+      v = eval(value, env)?
+      inner = env.dup()
+      inner[name] = v
+      eval(body, inner)
+    }
+  }
+}
+
+fn simplify(e: Expr) -> Expr {
+  match e {
+    .Add(a, b) => {
+      sa = simplify(a)
+      sb = simplify(b)
+      match (sa, sb) {
+        (.Num(x), .Num(y)) => Expr.Num(x + y)
+        (.Num(0), other) => other
+        (other, .Num(0)) => other
+        _ => Expr.Add(sa, sb)
+      }
+    }
+    .Mul(a, b) => {
+      sa = simplify(a)
+      sb = simplify(b)
+      match (sa, sb) {
+        (.Num(x), .Num(y)) => Expr.Num(x * y)
+        (.Num(0), _) | (_, .Num(0)) => Expr.Num(0)
+        (.Num(1), other) => other
+        (other, .Num(1)) => other
+        _ => Expr.Mul(sa, sb)
+      }
+    }
+    .Neg(a) => match simplify(a) {
+      .Num(n) => Expr.Num(-n)
+      .Neg(inner) => inner
+      other => Expr.Neg(other)
+    }
+    .Let(n, v, b) => Expr.Let(n, simplify(v), simplify(b))
+    other => other
+  }
+}
+
+fn num(n: Int) -> Expr { Expr.Num(n) }
+fn v(name: String) -> Expr { Expr.Var(name) }
+
+exprs = [
+  Expr.Add(num(2), Expr.Mul(num(3), num(4))),
+  Expr.Mul(Expr.Add(v("x"), num(0)), Expr.Add(num(1), num(0))),
+  Expr.Neg(Expr.Neg(Expr.Add(v("y"), num(-3)))),
+  Expr.Let("z", Expr.Mul(num(6), num(7)), Expr.Add(v("z"), v("x"))),
+  Expr.Mul(v("unknown"), num(0)),
+  Expr.Let("a", num(5), Expr.Let("b", Expr.Mul(v("a"), v("a")), Expr.Add(v("b"), Expr.Neg(v("a"))))),
+]
+
+env = ["x": 10, "y": 7]
+for e in exprs {
+  s = simplify(e)
+  puts("expr:       #{e.show()}  [size #{e.size()}]")
+  puts("simplified: #{s.show()}  [size #{s.size()}]")
+  match eval(e, env) {
+    Ok(n) => puts("value:      #{n}")
+    Err(msg) => puts("error:      #{msg}")
+  }
+  # Simplification must never change a successful result.
+  if let Ok(a) = eval(e, env) {
+    assert(eval(s, env) == Ok(a), "simplifier changed the value")
+  }
+  puts()
+}
+
+puts(simplify(Expr.Mul(num(1), v("q"))) == Expr.Var("q"))
+puts(Expr.Num(3))

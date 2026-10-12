@@ -1,0 +1,150 @@
+# Integer matrices with operator methods (+, *, ==, []), transpose, fast powers and an exact
+# determinant via Bareiss fraction-free elimination. Big integers keep everything exact.
+
+class Matrix {
+  rows: List[List[Int]]
+
+  fn identity(n: Int) -> Matrix {
+    Matrix.new((0...n).to_list().map { |i| (0...n).to_list().map { |j| if i == j { 1 } else { 0 } } })
+  }
+
+  fn height(self) -> Int { self.rows.length }
+  fn width(self) -> Int { if self.rows.is_empty() { 0 } else { self.rows[0].length } }
+  fn shape(self) -> String { "#{self.height()}x#{self.width()}" }
+
+  fn [](self, i: Int) -> List[Int] { self.rows[i] }
+
+  fn ==(self, other: Matrix) -> Bool { self.rows == other.rows }
+
+  fn +(self, other: Matrix) -> Matrix {
+    assert(self.shape() == other.shape(), "shape mismatch in +")
+    Matrix.new(self.rows.map_with_index { |row, i| row.map_with_index { |x, j| x + other[i][j] } })
+  }
+
+  fn try_mul(self, other: Matrix) -> Result[Matrix, String] {
+    if self.width() != other.height() {
+      return Err("cannot multiply #{self.shape()} by #{other.shape()}")
+    }
+    out: List[List[Int]] = []
+    for i in 0...self.height() {
+      row: List[Int] = []
+      for j in 0...other.width() {
+        acc = 0
+        for k in 0...self.width() { acc += self[i][k] * other[k][j] }
+        row.push(acc)
+      }
+      out.push(row)
+    }
+    Ok(Matrix.new(out))
+  }
+
+  fn *(self, other: Matrix) -> Matrix { self.try_mul(other).unwrap() }
+
+  fn transpose(self) -> Matrix {
+    rows = self.rows # a local, not `self`, inside the block: see BUGS.md (self capture)
+    Matrix.new((0...self.width()).to_list().map { |j| rows.map { |row| row[j] } })
+  }
+
+  # Exponentiation by squaring.
+  fn pow(self, n: Int) -> Matrix {
+    result = Matrix.identity(self.height())
+    base = self
+    e = n
+    while e > 0 {
+      if e % 2 == 1 { result = result * base }
+      base = base * base
+      e = e / 2
+    }
+    result
+  }
+
+  fn det(self) -> Result[Int, String] {
+    n = self.height()
+    if n != self.width() { return Err("determinant needs a square matrix, got #{self.shape()}") }
+    if n == 0 { return Ok(1) }
+    m = self.rows.map { |row| row.dup() }
+    sign = 1
+    prev = 1
+    for k in 0...(n - 1) {
+      if m[k][k] == 0 {
+        swap_with: Int? = nil
+        for i in (k + 1)...n {
+          if swap_with == nil and m[i][k] != 0 { swap_with = i }
+        }
+        if let i = swap_with {
+          m.swap(k, i)
+          sign = -sign
+        } else {
+          return Ok(0)
+        }
+      }
+      for i in (k + 1)...n {
+        for j in (k + 1)...n {
+          m[i][j] = (m[i][j] * m[k][k] - m[i][k] * m[k][j]) / prev
+        }
+      }
+      prev = m[k][k]
+    }
+    Ok(sign * m[n - 1][n - 1])
+  }
+
+  fn to_s(self) -> String {
+    w = self.rows.reduce(1) { |acc, row| row.reduce(acc) { |a, x| a.max(x.to_s.length) } }
+    sb = StringBuilder.new()
+    self.rows.each_with_index { |row, i|
+      if i > 0 { sb.push("\n") }
+      sb.push("[")
+      row.each_with_index { |x, j|
+        if j > 0 { sb.push(" ") }
+        sb.push(x.to_s.rjust(w))
+      }
+      sb.push("]")
+    }
+    sb.to_s
+  }
+}
+
+fn show(label: String, m: Matrix) {
+  puts("#{label}:")
+  puts(m)
+}
+
+a = Matrix.new([[1, 2], [3, 4]])
+b = Matrix.new([[5, 6], [7, 8]])
+show("A", a)
+show("A + B", a + b)
+show("A * B", a * b)
+show("B * A", b * a)
+show("A^T", a.transpose())
+puts("A * B == B * A: #{a * b == b * a}")
+puts("A * I == A: #{a * Matrix.identity(2) == a}")
+puts("(AB)^T == B^T A^T: #{(a * b).transpose() == b.transpose() * a.transpose()}")
+puts("A[1][0] = #{a[1][0]}")
+
+q = Matrix.new([[1, 1], [1, 0]])
+show("Q^10", q.pow(10))
+puts("F(100) = #{q.pow(100)[0][1]}")
+
+dets = [
+  ("A", a),
+  ("AB", a * b),
+  ("C", Matrix.new([[2, -3, 1], [2, 0, -1], [1, 4, 5]])),
+  ("D (needs a row swap)", Matrix.new([[0, 1, 2], [1, 0, 3], [4, -3, 8]])),
+  ("singular", Matrix.new([[1, 2, 3], [4, 5, 6], [7, 8, 9]])),
+  ("4x4", Matrix.new([[3, 2, 0, 1], [4, 0, 1, 2], [3, 0, 2, 1], [9, 2, 3, 1]])),
+  ("I5", Matrix.identity(5)),
+  ("wide", Matrix.new([[1, 2, 3], [4, 5, 6]])),
+]
+for (name, m) in dets {
+  match m.det() {
+    Ok(d) => puts("det #{name} = #{d}")
+    Err(e) => puts("det #{name}: #{e}")
+  }
+}
+
+wide = Matrix.new([[1, 2, 3], [4, 5, 6]])
+show("wide * wide^T", wide * wide.transpose())
+match a.try_mul(wide.transpose()) {
+  Ok(m) => show("unexpected", m)
+  Err(e) => puts("error: #{e}")
+}

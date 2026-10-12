@@ -1,0 +1,2 @@
+# expect: E0357
+puts([1, 2].map { |s: String| s.length })

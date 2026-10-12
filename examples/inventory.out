@@ -1,0 +1,21 @@
+sold 4 x A100 for $10.00
+sold 2 x B200 for $25.98
+sold 5 x C300 for $3.75
+error: unknown sku Z999
+error: cannot sell 2 of B200, only 1 left
+error: bad quantity 0
+sold 1 x D400 for $40.00
+revenue: $79.73
+low stock: ["B200", "C300", "D400"]
+restocked B200 to 11
+restocked C300 to 17
+restocked D400 to 3
+true
+low stock now: ["D400"]
+stock report:
+A100  widget       16 @   $2.50
+B200  gadget       11 @  $12.99
+C300  doohickey    17 @   $0.75
+D400  gizmo         3 @  $40.00
+inventory value: $315.64
+best seller: doohickey (5 units)

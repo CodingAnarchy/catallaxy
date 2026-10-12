@@ -1,0 +1,2 @@
+# expect: E0003
+puts("tab\q")

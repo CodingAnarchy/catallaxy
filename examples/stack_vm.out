@@ -1,0 +1,9 @@
+factorial: [3628800] in 119 steps
+squares: [1, 4, 9, 16, 25, 55] in 96 steps
+underflow: error: stack underflow at pc 1
+runaway: error: step limit exceeded
+fall off: error: pc 7 out of range
+listing of underflow:
+  0: Push(1)
+  1: Add
+  2: Halt

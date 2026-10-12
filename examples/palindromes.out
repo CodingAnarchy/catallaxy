@@ -1,0 +1,23 @@
+yes  "A man, a plan, a canal: Panama!"
+yes  "Was it a car or a cat I saw?"
+yes  "No 'x' in Nixon"
+no   "Hello, world"
+yes  "Step on no pets"
+no   "Palindrome"
+yes  ""
+
+babad              -> bab
+cbbd               -> bb
+forgeeksskeegfor   -> geeksskeeg
+abacdfgdcaba       -> aba
+x                  -> x
+racecar level      -> racecar
+
+palindromes in 101..200: [101, 111, 121, 131, 141, 151, 161, 171, 181, 191]
+palindromic in base 10 and 2: [33, 99, 313, 585]
+585 in binary: 1001001001
+
+56: 1 steps -> 121
+87: 4 steps -> 4884
+89: 24 steps -> 8813200023188
+196: no palindrome within 30 steps

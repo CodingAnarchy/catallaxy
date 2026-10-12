@@ -1,0 +1,15 @@
+columns: ["region", "category", "item", "units", "unit_price"]
+parsed 8 rows, 2 rejected
+  ! line 9: bad units `oops`
+  ! line 10: expected 5 fields, got 4
+
+Category   Items  Units   Revenue
+---------------------------------
+Garden         3     50    225.72
+Hardware       3     27    251.50
+Kitchen        2      6    210.00
+---------------------------------
+Total                      687.22
+
+best line: Kettle (south) = 120.00
+items needing quotes: ["Hammer, claw", "Hose \"50ft\"", "Pan, cast iron"]

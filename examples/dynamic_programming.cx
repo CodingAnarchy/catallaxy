@@ -1,0 +1,117 @@
+# Four classic dynamic-programming problems solved with bottom-up tables.
+
+fn grid(rows: Int, cols: Int, value: Int) -> List[List[Int]] {
+  (0...rows).to_list().map { |_r| List.filled(cols, value) }
+}
+
+# Longest common subsequence: length table, then walk back to recover one subsequence.
+fn lcs(a: String, b: String) -> String {
+  x = a.chars
+  y = b.chars
+  t = grid(x.length + 1, y.length + 1, 0)
+  for i in 1..x.length {
+    for j in 1..y.length {
+      t[i][j] = if x[i - 1] == y[j - 1] { t[i - 1][j - 1] + 1 } else { t[i - 1][j].max(t[i][j - 1]) }
+    }
+  }
+  out: List[String] = []
+  i = x.length
+  j = y.length
+  while i > 0 and j > 0 {
+    if x[i - 1] == y[j - 1] {
+      out.unshift(x[i - 1])
+      i -= 1
+      j -= 1
+    } else if t[i - 1][j] >= t[i][j - 1] {
+      i -= 1
+    } else {
+      j -= 1
+    }
+  }
+  out.reduce("") { |acc, c| acc + c }
+}
+
+# Levenshtein distance with a rolling pair of rows.
+fn edit_distance(a: String, b: String) -> Int {
+  prev = (0..b.length).to_list()
+  for i in 1..a.length {
+    cur = [i]
+    for j in 1..b.length {
+      cost = if a[i - 1] == b[j - 1] { 0 } else { 1 }
+      cur.push((prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost))
+    }
+    prev = cur
+  }
+  prev[b.length]
+}
+
+frozen class Item {
+  name: String
+  weight: Int
+  value: Int
+}
+
+# 0/1 knapsack: best total value and the chosen items.
+fn knapsack(items: List[Item], capacity: Int) -> (Int, List[String]) {
+  n = items.length
+  best = grid(n + 1, capacity + 1, 0)
+  for i in 1..n {
+    item = items[i - 1]
+    for w in 0..capacity {
+      best[i][w] = best[i - 1][w]
+      if item.weight <= w {
+        with_item = best[i - 1][w - item.weight] + item.value
+        if with_item > best[i][w] { best[i][w] = with_item }
+      }
+    }
+  }
+  chosen: List[String] = []
+  w = capacity
+  i = n
+  while i > 0 {
+    if best[i][w] != best[i - 1][w] {
+      chosen.unshift(items[i - 1].name)
+      w -= items[i - 1].weight
+    }
+    i -= 1
+  }
+  (best[n][capacity], chosen)
+}
+
+# Fewest coins for an amount (nil when impossible), and the number of ways to make it.
+fn min_coins(coins: List[Int], amount: Int) -> Int? {
+  inf = amount + 1
+  table = List.filled(amount + 1, inf)
+  table[0] = 0
+  for a in 1..amount {
+    for c in coins {
+      if c <= a and table[a - c] + 1 < table[a] { table[a] = table[a - c] + 1 }
+    }
+  }
+  if table[amount] == inf { nil } else { table[amount] }
+}
+
+fn coin_ways(coins: List[Int], amount: Int) -> Int {
+  ways = List.filled(amount + 1, 0)
+  ways[0] = 1
+  for c in coins {
+    for a in c..amount { ways[a] += ways[a - c] }
+  }
+  ways[amount]
+}
+
+puts("LCS(ABCBDAB, BDCABA) = #{lcs("ABCBDAB", "BDCABA")}")
+puts("LCS(dynamic, programming) = #{lcs("dynamic", "programming")}")
+
+for (a, b) in [("kitten", "sitting"), ("flaw", "lawn"), ("", "abc"), ("same", "same")] {
+  puts("edit(#{inspect(a)}, #{inspect(b)}) = #{edit_distance(a, b)}")
+}
+
+items = [Item.new("map", 1, 15), Item.new("compass", 2, 10), Item.new("water", 3, 40),
+         Item.new("tent", 5, 60), Item.new("stove", 4, 30)]
+let (value, chosen) = knapsack(items, 8)
+puts("knapsack(8): value #{value}, items #{chosen}")
+
+puts("min coins for 63 with [1, 5, 10, 21, 25]: #{min_coins([1, 5, 10, 21, 25], 63)}")
+puts("min coins for 7 with [2, 4]: #{min_coins([2, 4], 7) ?? -1}")
+puts("ways to make 100 with [1, 5, 10, 25, 50]: #{coin_ways([1, 5, 10, 25, 50], 100)}")

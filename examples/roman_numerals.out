@@ -1,0 +1,27 @@
+   1 = I
+   4 = IV
+   9 = IX
+  14 = XIV
+  40 = XL
+  90 = XC
+ 400 = CD
+1994 = MCMXCIV
+2024 = MMXXIV
+3999 = MMMCMXCIX
+
+"mcmxciv" -> 1994
+"XLII" -> 42
+"MMMCMXCIX" -> 3999
+"IIII" -> error: IIII is not canonical (did you mean IV?)
+"VX" -> error: VX is not canonical (did you mean V?)
+"IC" -> error: IC is not canonical (did you mean XCIX?)
+"MCMZ" -> error: unknown symbol "Z" at 3
+"" -> error: empty numeral
+"  xiv  " -> 14
+
+XIV + XXVIII = Ok("XLII")
+MM + MM = Err("4000 is outside 1..3999")
+MMM + CMXCIX = Ok("MMMCMXCIX")
+X + Q = Err("unknown symbol \"Q\" at 0")
+round trips: 3999/3999
+longest numeral has 15 symbols: MMMDCCCLXXXVIII

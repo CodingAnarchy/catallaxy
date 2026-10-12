@@ -1,0 +1,3 @@
+# expect: E0337
+fn twice(n: Int) -> Int { n * 2 }
+puts(twice(3) { |x| x })

@@ -1,0 +1,24 @@
+ 1. idle --Select("cola")--> idle: insert coins first
+ 2. idle --Coin(100)--> collecting(100): accepted 100
+ 3. collecting(100) --Coin(3)--> collecting(100): rejected coin 3
+ 4. collecting(100) --Select("cola")--> collecting(100): cola costs 125, need 25 more
+ 5. collecting(100) --Coin(25)--> collecting(125): accepted 25
+ 6. collecting(125) --Select("cola")--> idle: dispensed cola, change 0
+ 7. idle --Coin(100)--> collecting(100): accepted 100
+ 8. collecting(100) --Select("candy")--> collecting(100): candy sold out
+ 9. collecting(100) --Select("water")--> collecting(100): no such item water
+10. collecting(100) --Select("chips")--> idle: dispensed chips, change 10
+11. idle --Cancel--> idle: nothing to do
+12. idle --Fault("coin jam")--> out-of-service(coin jam): fault reported
+13. out-of-service(coin jam) --Coin(25)--> out-of-service(coin jam): ignored, machine is out of service
+14. out-of-service(coin jam) --Repair--> idle: repaired coin jam
+15. idle --Coin(100)--> collecting(100): accepted 100
+16. collecting(100) --Coin(25)--> collecting(125): accepted 25
+17. collecting(125) --Coin(10)--> collecting(135): accepted 10
+18. collecting(135) --Select("cola")--> idle: dispensed cola, change 10
+19. idle --Coin(100)--> collecting(100): accepted 100
+20. collecting(100) --Select("cola")--> collecting(100): cola sold out
+21. collecting(100) --Cancel--> idle: returned 100
+final state: idle
+bank: 340
+stock: ["cola": 0, "chips": 0, "candy": 0]

@@ -1,0 +1,85 @@
+# The sieve of Eratosthenes, plus a few things built on top of it.
+
+fn sieve(limit: Int) -> List[Int] {
+  if limit < 2 { return [] }
+  is_prime = List.filled(limit + 1, true)
+  is_prime[0] = false
+  is_prime[1] = false
+  p = 2
+  while p * p <= limit {
+    if is_prime[p] {
+      m = p * p
+      while m <= limit {
+        is_prime[m] = false
+        m += p
+      }
+    }
+    p += 1
+  }
+  primes: List[Int] = []
+  is_prime.each_with_index { |flag, n| if flag { primes.push(n) } }
+  primes
+}
+
+fn factorize(n: Int, primes: List[Int]) -> List[(Int, Int)] {
+  factors: List[(Int, Int)] = []
+  rest = n
+  for p in primes {
+    if p * p > rest { break }
+    count = 0
+    while rest % p == 0 {
+      rest /= p
+      count += 1
+    }
+    if count > 0 { factors.push((p, count)) }
+  }
+  if rest > 1 { factors.push((rest, 1)) }
+  factors
+}
+
+fn show_factors(factors: List[(Int, Int)]) -> String {
+  sb = StringBuilder.new()
+  factors.each_with_index { |f, i|
+    if i > 0 { sb.push(" * ") }
+    sb.push(if f.1 == 1 { f.0.to_s } else { "#{f.0}^#{f.1}" })
+  }
+  sb.to_s
+}
+
+primes = sieve(100)
+puts("primes below 100: #{primes}")
+puts("count: #{primes.length}, total: #{primes.reduce(0) { |a, b| a + b }}")
+
+big = sieve(100_000)
+puts("primes below 100000: #{big.length}, largest #{big.last()}")
+
+# Twin primes and prime gaps under 1000.
+small = sieve(1000)
+twins: List[(Int, Int)] = []
+max_gap = 0
+gap_at = 0
+for i in 1...small.length {
+  gap = small[i] - small[i - 1]
+  if gap == 2 { twins.push((small[i - 1], small[i])) }
+  if gap > max_gap {
+    max_gap = gap
+    gap_at = small[i - 1]
+  }
+}
+puts("twin pairs below 1000: #{twins.length}, last #{twins.last()}")
+puts("largest gap below 1000: #{max_gap} after #{gap_at}")
+
+# Goldbach: each even number as a sum of two primes (smallest first prime).
+prime_set = Set.from(small)
+for n in [4, 28, 100, 998] {
+  for p in small {
+    if prime_set.contains(n - p) {
+      puts("#{n} = #{p} + #{n - p}")
+      break
+    }
+  }
+}
+
+for n in [360, 9973, 1_000_000, 600851475143] {
+  puts("#{n} = #{show_factors(factorize(n, big))}")
+}

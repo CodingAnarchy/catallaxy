@@ -1,0 +1,6 @@
+# expect: E0222
+class Point {
+  x: Int
+  y: Int
+  x: Float
+}

@@ -1,0 +1,17 @@
+67 -> 18 chars: "12W1B12W3B24W1B14W" (round trip: true)
+9 -> 8 chars: "3a1b2c3d" (round trip: true)
+3 -> 6 chars: "1a1b1c" (round trip: true)
+0 -> 0 chars: "" (round trip: true)
+3 => error: dangling count 3 at end
+a2 => error: missing count before `a` at 0
+2a0b => error: zero count before `b` at 3
+10x2y => xxxxxxxxxxyy
+
+a: 0
+b: 110
+c: 100
+d: 101
+r: 111
+01101110100010101101110
+23 bits instead of 88
+decoded: abracadabra

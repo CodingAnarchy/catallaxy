@@ -1,0 +1,127 @@
+# Bank accounts: inheritance, overrides, super calls and Result-based errors.
+
+enum TxError {
+  Insufficient(needed: Int, available: Int)
+  InvalidAmount(Int)
+  Frozen
+}
+
+fn describe_error(e: TxError) -> String {
+  match e {
+    .Insufficient(n, a) => "insufficient funds: need #{n}, have #{a}"
+    .InvalidAmount(x) => "invalid amount #{x}"
+    .Frozen => "account is frozen"
+  }
+}
+
+class Account {
+  owner: String
+  balance: Int
+  log: List[String]
+  frozen_flag: Bool
+
+  fn init(self, owner: String, opening: Int = 0) {
+    self.owner = owner
+    self.balance = opening
+    self.log = ["open #{opening}"]
+    self.frozen_flag = false
+  }
+
+  fn kind(self) -> String { "account" }
+
+  fn available(self) -> Int { self.balance }
+
+  fn deposit(self, amount: Int) -> Result[Int, TxError] {
+    if self.frozen_flag { return Err(TxError.Frozen) }
+    if amount <= 0 { return Err(TxError.InvalidAmount(amount)) }
+    self.balance += amount
+    self.log.push("deposit #{amount}")
+    Ok(self.balance)
+  }
+
+  fn withdraw(self, amount: Int) -> Result[Int, TxError] {
+    if self.frozen_flag { return Err(TxError.Frozen) }
+    if amount <= 0 { return Err(TxError.InvalidAmount(amount)) }
+    if amount > self.available() {
+      return Err(TxError.Insufficient(amount, self.available()))
+    }
+    self.balance -= amount
+    self.log.push("withdraw #{amount}")
+    Ok(self.balance)
+  }
+
+  fn month_end(self) { }
+
+  fn summary(self) -> String { "#{self.kind()} #{self.owner}: #{self.balance}" }
+}
+
+class Savings < Account {
+  rate_pct: Int = 3
+
+  fn kind(self) -> String { "savings" }
+
+  fn month_end(self) {
+    interest = self.balance * self.rate_pct / 100
+    self.balance += interest
+    self.log.push("interest #{interest}")
+  }
+}
+
+class Checking < Account {
+  overdraft: Int = 100
+  fee: Int = 2
+
+  fn kind(self) -> String { "checking" }
+
+  fn available(self) -> Int { self.balance + self.overdraft }
+
+  fn withdraw(self, amount: Int) -> Result[Int, TxError] {
+    r = super.withdraw(amount)
+    if r.is_ok() and self.balance < 0 {
+      self.balance -= self.fee
+      self.log.push("fee #{self.fee}")
+    }
+    me = self   # see BUGS.md: blocks cannot capture `self` directly
+    r.map { |_b| me.balance }
+  }
+}
+
+fn transfer(from: Account, to: Account, amount: Int) -> Result[Int, TxError] {
+  from.withdraw(amount)?
+  to.deposit(amount)
+}
+
+fn report(label: String, r: Result[Int, TxError]) {
+  match r {
+    Ok(b) => puts("#{label}: ok, balance #{b}")
+    Err(e) => puts("#{label}: failed, #{describe_error(e)}")
+  }
+}
+
+ann = Savings.new("ann", 1000)
+bob = Checking.new("bob", 50)
+cat = Account.new("cat")
+
+report("ann deposit", ann.deposit(250))
+report("bob withdraw", bob.withdraw(120))
+report("bob withdraw again", bob.withdraw(100))
+report("cat withdraw", cat.withdraw(1))
+report("cat deposit", cat.deposit(-5))
+report("ann -> cat", transfer(ann, cat, 300))
+report("cat -> bob", transfer(cat, bob, 500))
+
+cat.frozen_flag = true
+report("frozen deposit", cat.deposit(10))
+
+accounts: List[Account] = [ann, bob, cat]
+for a in accounts { a.month_end() }
+for a in accounts { puts(a.summary()) }
+
+total = accounts.reduce(0) { |acc, a| acc + a.balance }
+puts("total holdings: #{total}")
+puts(ann is Account)
+puts(cat is Savings)
+
+puts("ann's log:")
+ann.log.each_with_index { |entry, i| puts("  #{i + 1}. #{entry}") }
+puts("bob's log: #{bob.log}")

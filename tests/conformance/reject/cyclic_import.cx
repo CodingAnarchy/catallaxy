@@ -1,0 +1,3 @@
+# expect: E0205
+import lib.cycle_a
+puts(cycle_a.a())

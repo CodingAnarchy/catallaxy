@@ -1,0 +1,23 @@
+store: Corner Books
+open: true
+rating: 4.5
+owner is null: true
+first tag of first book: scifi
+skipping: Untitled: price is not a number ("free")
+loaded 3 books
+in stock: ["Dune", "Neuromancer"]
+inventory value: 86.22
+{"books":[{"price":7.99,"stock":3,"tags":["scifi","classic"],"title":"Dune"},{"price":7.5,"stock":0,"tags":["classic"],"title":"Emma"},{"price":9.0,"stock":5,"tags":["scifi","cyberpunk"],"title":"Neuromancer"}],"count":3}
+round trip stable: true
+second title: Emma
+{
+  "ids": [
+    1,
+    2
+  ],
+  "ok": true
+}
+error: invalid JSON: trailing comma at line 1 column 9
+error: invalid JSON: EOF while parsing a list at line 1 column 5
+error: invalid JSON: EOF while parsing a value at line 1 column 0
+error: no `books` array

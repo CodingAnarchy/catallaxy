@@ -1,0 +1,26 @@
+expr:       (2 + 3 * 4)  [size 5]
+simplified: 14  [size 1]
+value:      14
+
+expr:       (x + 0) * (1 + 0)  [size 7]
+simplified: x  [size 1]
+value:      10
+
+expr:       --(y + (-3))  [size 5]
+simplified: (y + (-3))  [size 3]
+value:      4
+
+expr:       let z = 6 * 7 in (z + x)  [size 7]
+simplified: let z = 42 in (z + x)  [size 5]
+value:      52
+
+expr:       unknown * 0  [size 3]
+simplified: 0  [size 1]
+error:      unbound variable `unknown`
+
+expr:       let a = 5 in let b = a * a in (b + -a)  [size 10]
+simplified: let a = 5 in let b = a * a in (b + -a)  [size 10]
+value:      20
+
+true
+Num(3)

@@ -1,0 +1,11 @@
+solutions for n = 1..8: [1, 0, 0, 2, 10, 4, 40, 92]
+n = 8: 92 solutions; first one (columns by row): [0, 4, 7, 5, 2, 6, 1, 3]
+Q . . . . . . . 
+. . . . Q . . . 
+. . . . . . . Q 
+. . . . . Q . . 
+. . Q . . . . . 
+. . . . . . Q . 
+. Q . . . . . . 
+. . . Q . . . . 
+valid: true, broken board valid: false

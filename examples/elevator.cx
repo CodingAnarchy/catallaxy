@@ -1,0 +1,120 @@
+# A single elevator scheduled with the "elevator algorithm": keep going in the current direction
+# while there are requests ahead, then turn around. One tick moves one floor; doors stay open for
+# two ticks.
+
+enum Dir {
+  Up
+  Down
+
+  fn step(self) -> Int { match self { .Up => 1, .Down => -1 } }
+  fn name(self) -> String { match self { .Up => "up", .Down => "down" } }
+}
+
+enum State {
+  Idle
+  Moving(Dir)
+  Doors(Int)
+}
+
+class Elevator {
+  floor: Int = 0
+  heading: Dir = Dir.Up
+  state: State = State.Idle
+  stops: Set[Int] = Set.new()
+  waiting: Dict[Int, List[Int]] = [:]
+  travelled: Int = 0
+  waits: List[Int] = []
+
+  fn request(self, now: Int, floor: Int) {
+    self.stops.add(floor)
+    self.waiting.get_or_insert(floor, []).push(now)
+  }
+
+  fn ahead(self, d: Dir) -> Bool {
+    for f in self.stops.to_list() {
+      if (f - self.floor) * d.step() > 0 { return true }
+    }
+    false
+  }
+
+  fn nearest(self) -> Int {
+    best = -1
+    for f in self.stops.to_list() {
+      dist = (f - self.floor).abs
+      if best < 0 or dist < (best - self.floor).abs or (dist == (best - self.floor).abs and f < best) {
+        best = f
+      }
+    }
+    best
+  }
+
+  fn open(self, now: Int) {
+    self.stops.remove(self.floor)
+    for t in self.waiting.delete(self.floor) ?? [] { self.waits.push(now - t) }
+    self.state = State.Doors(2)
+  }
+
+  fn tick(self, now: Int) -> String? {
+    match self.state {
+      .Idle => {
+        if self.stops.is_empty() { return nil }
+        if self.stops.contains(self.floor) {
+          self.open(now)
+          return "doors open at #{self.floor}"
+        }
+        self.heading = if self.nearest() > self.floor { Dir.Up } else { Dir.Down }
+        self.state = State.Moving(self.heading)
+        "start #{self.heading.name()} from #{self.floor}"
+      }
+      .Moving(d) => {
+        self.floor += d.step()
+        self.travelled += 1
+        if self.stops.contains(self.floor) {
+          self.open(now)
+          return "arrive at #{self.floor}, doors open"
+        }
+        nil
+      }
+      .Doors(n) => {
+        if n > 1 {
+          self.state = State.Doors(n - 1)
+          return nil
+        }
+        if self.ahead(self.heading) {
+          self.state = State.Moving(self.heading)
+        } else if not self.stops.is_empty() and not self.stops.contains(self.floor) {
+          self.heading = if self.heading == Dir.Up { Dir.Down } else { Dir.Up }
+          self.state = State.Moving(self.heading)
+        } else {
+          self.state = State.Idle
+        }
+        match self.state {
+          .Moving(d) => "doors close at #{self.floor}, heading #{d.name()}"
+          _ => "doors close at #{self.floor}"
+        }
+      }
+    }
+  }
+}
+
+requests = [(0, 5), (1, 2), (3, 8), (4, 1), (10, 3), (12, 3), (15, 0), (16, 7), (30, 4)]
+lift = Elevator.new()
+now = 0
+next_req = 0
+while now < 100 {
+  while next_req < requests.length and requests[next_req].0 == now {
+    let (_t, floor) = requests[next_req]
+    lift.request(now, floor)
+    puts("t=#{now.to_s.rjust(2)}  call from floor #{floor}")
+    next_req += 1
+  }
+  if let msg = lift.tick(now) { puts("t=#{now.to_s.rjust(2)}  #{msg}") }
+  done = next_req == requests.length and lift.stops.is_empty() and lift.state == State.Idle
+  if done { break }
+  now += 1
+}
+
+total_wait = lift.waits.reduce(0) { |a, b| a + b }
+worst = lift.waits.reduce(0) { |a, b| a.max(b) }
+puts("finished at t=#{now}: travelled #{lift.travelled} floors, served #{lift.waits.length} calls")
+puts("average wait #{(total_wait.to_f / lift.waits.length.to_f).format(2)} ticks, worst #{worst}")

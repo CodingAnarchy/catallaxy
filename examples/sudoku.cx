@@ -1,0 +1,99 @@
+# A backtracking sudoku solver. Puzzles are 81-character strings with `.` for empty cells.
+
+class Sudoku {
+  cells: List[Int]          # 81 cells, row-major, 0 = empty
+
+  fn parse(text: String) -> Result[Sudoku, String] {
+    digits = text.chars.select { |c| not c.is_space() }
+    if digits.length != 81 { return Err("expected 81 cells, got #{digits.length}") }
+    cells: List[Int] = []
+    for c in digits {
+      if c == "." or c == "0" {
+        cells.push(0)
+      } else if let d = c.to_i {
+        cells.push(d)
+      } else {
+        return Err("bad cell #{inspect(c)}")
+      }
+    }
+    Ok(Sudoku.new(cells))
+  }
+
+  fn allowed(self, idx: Int, d: Int) -> Bool {
+    row = idx / 9
+    col = idx % 9
+    box = (row / 3) * 27 + (col / 3) * 3
+    for k in 0...9 {
+      if self.cells[row * 9 + k] == d { return false }
+      if self.cells[k * 9 + col] == d { return false }
+      if self.cells[box + (k / 3) * 9 + k % 3] == d { return false }
+    }
+    true
+  }
+
+  # Picks the empty cell with the fewest candidates; -1 when the grid is full.
+  fn best_cell(self) -> (Int, List[Int]) {
+    best = -1
+    best_cands: List[Int] = []
+    grid = self          # blocks cannot use `self` directly (BUGS.md)
+    for idx in 0...81 {
+      if self.cells[idx] != 0 { continue }
+      cands = (1..9).to_list().select { |d| grid.allowed(idx, d) }
+      if best == -1 or cands.length < best_cands.length {
+        best = idx
+        best_cands = cands
+        if cands.length <= 1 { break }
+      }
+    }
+    (best, best_cands)
+  }
+
+  fn solve(self) -> Bool {
+    let (idx, cands) = self.best_cell()
+    if idx == -1 { return true }
+    for d in cands {
+      self.cells[idx] = d
+      if self.solve() { return true }
+    }
+    self.cells[idx] = 0
+    false
+  }
+
+  fn render(self) -> String {
+    sb = StringBuilder.new()
+    for r in 0...9 {
+      if r > 0 and r % 3 == 0 { sb.push("------+-------+------\n") }
+      for c in 0...9 {
+        if c > 0 and c % 3 == 0 { sb.push("| ") }
+        v = self.cells[r * 9 + c]
+        sb.push(if v == 0 { "." } else { v.to_s })
+        sb.push(if c == 8 { "\n" } else { " " })
+      }
+    }
+    sb.to_s
+  }
+}
+
+puzzle = "53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79"
+
+match Sudoku.parse(puzzle) {
+  Ok(s) => {
+    print(s.render())
+    puts()
+    if s.solve() {
+      print(s.render())
+    } else {
+      puts("no solution")
+    }
+  }
+  Err(e) => puts("parse error: #{e}")
+}
+
+# An unsolvable grid (the first row's last cell needs a 9, but its column has one) and malformed input.
+bad = "12345678." + "........9" + "." * 63
+match Sudoku.parse(bad) {
+  Ok(s) => puts(if s.solve() { "solved?!" } else { "unsolvable puzzle detected" })
+  Err(e) => puts("parse error: #{e}")
+}
+puts(Sudoku.parse("12x").err())
+puts(Sudoku.parse("x" * 81).err())

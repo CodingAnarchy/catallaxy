@@ -1,0 +1,116 @@
+# Inventory: classes, Dict-based stock, Result errors and reports.
+
+class Item {
+  sku: String
+  name: String
+  price_cents: Int
+  reorder_at: Int = 5
+}
+
+enum StockError {
+  UnknownSku(String)
+  OutOfStock(sku: String, wanted: Int, have: Int)
+  BadQuantity(Int)
+}
+
+fn error_text(e: StockError) -> String {
+  match e {
+    .UnknownSku(s) => "unknown sku #{s}"
+    .OutOfStock(s, w, h) => "cannot sell #{w} of #{s}, only #{h} left"
+    .BadQuantity(q) => "bad quantity #{q}"
+  }
+}
+
+fn money(cents: Int) -> String {
+  "$#{cents / 100}.#{(cents % 100).to_s.rjust(2, "0")}"
+}
+
+class Inventory {
+  items: Dict[String, Item] = [:]
+  stock: Dict[String, Int] = [:]
+  revenue_cents: Int = 0
+  sold: Dict[String, Int] = [:]
+
+  fn add_item(self, item: Item, qty: Int) {
+    self.items[item.sku] = item
+    self.stock[item.sku] = qty
+  }
+
+  fn lookup(self, sku: String) -> Result[Item, StockError] {
+    if let item = self.items[sku] { Ok(item) } else { Err(StockError.UnknownSku(sku)) }
+  }
+
+  fn restock(self, sku: String, qty: Int) -> Result[Int, StockError] {
+    if qty <= 0 { return Err(StockError.BadQuantity(qty)) }
+    self.lookup(sku)?
+    now = self.stock.fetch(sku, 0) + qty
+    self.stock[sku] = now
+    Ok(now)
+  }
+
+  fn sell(self, sku: String, qty: Int) -> Result[Int, StockError] {
+    if qty <= 0 { return Err(StockError.BadQuantity(qty)) }
+    item = self.lookup(sku)?
+    have = self.stock.fetch(sku, 0)
+    if qty > have { return Err(StockError.OutOfStock(sku, qty, have)) }
+    self.stock[sku] = have - qty
+    self.sold[sku] = self.sold.fetch(sku, 0) + qty
+    total = item.price_cents * qty
+    self.revenue_cents += total
+    Ok(total)
+  }
+
+  fn low_stock(self) -> List[String] {
+    out: List[String] = []
+    for (sku, item) in self.items {
+      if self.stock.fetch(sku, 0) <= item.reorder_at { out.push(sku) }
+    }
+    out.sorted()
+  }
+
+  fn value_cents(self) -> Int {
+    total = 0
+    for (sku, qty) in self.stock {
+      total += self.items[sku]!.price_cents * qty
+    }
+    total
+  }
+}
+
+inv = Inventory.new()
+inv.add_item(Item.new("A100", "widget", 250), 20)
+inv.add_item(Item.new("B200", "gadget", 1299, reorder_at: 2), 3)
+inv.add_item(Item.new("C300", "doohickey", 75, 10), 12)
+inv.add_item(Item.new("D400", "gizmo", 4000), 1)
+
+orders = [("A100", 4), ("B200", 2), ("C300", 5), ("Z999", 1), ("B200", 2), ("A100", 0), ("D400", 1)]
+for (sku, qty) in orders {
+  match inv.sell(sku, qty) {
+    Ok(cents) => puts("sold #{qty} x #{sku} for #{money(cents)}")
+    Err(e) => puts("error: #{error_text(e)}")
+  }
+}
+
+puts("revenue: #{money(inv.revenue_cents)}")
+puts("low stock: #{inv.low_stock()}")
+
+for sku in inv.low_stock() {
+  amount = if sku == "D400" { 3 } else { 10 }
+  match inv.restock(sku, amount) {
+    Ok(n) => puts("restocked #{sku} to #{n}")
+    Err(e) => puts("error: #{error_text(e)}")
+  }
+}
+puts(inv.restock("Q1", 5).is_err())
+puts("low stock now: #{inv.low_stock()}")
+
+puts("stock report:")
+for sku in inv.items.keys().sorted() {
+  item = inv.items[sku]!
+  qty = inv.stock[sku] ?? 0
+  line = "#{sku.ljust(6)}#{item.name.ljust(11)}#{qty.to_s.rjust(4)} @ #{money(item.price_cents).rjust(7)}"
+  puts(line)
+}
+puts("inventory value: #{money(inv.value_cents())}")
+best = inv.sold.entries().sort_with { |a, b| b.1 <=> a.1 }[0]
+puts("best seller: #{inv.items[best.0]!.name} (#{best.1} units)")

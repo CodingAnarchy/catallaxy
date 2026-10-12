@@ -1,0 +1,5 @@
+# expect: E0322
+fn twice(n: Int) -> Int? {
+  m = n?
+  m * 2
+}

@@ -1,0 +1,97 @@
+# Disjoint-set union with path compression and union by rank,
+# used for connected components and Kruskal's minimum spanning tree.
+
+class UnionFind {
+  parent: List[Int]
+  rank: List[Int]
+  sets: Int
+
+  fn init(self, n: Int) {
+    self.parent = (0...n).to_list()
+    self.rank = List.filled(n, 0)
+    self.sets = n
+  }
+
+  fn find(self, x: Int) -> Int {
+    root = x
+    while self.parent[root] != root { root = self.parent[root] }
+    # Path compression: point every node on the way directly at the root.
+    cur = x
+    while self.parent[cur] != root {
+      next = self.parent[cur]
+      self.parent[cur] = root
+      cur = next
+    }
+    root
+  }
+
+  # Returns false when a and b were already connected.
+  fn union(self, a: Int, b: Int) -> Bool {
+    ra = self.find(a)
+    rb = self.find(b)
+    if ra == rb { return false }
+    if self.rank[ra] < self.rank[rb] {
+      self.parent[ra] = rb
+    } else if self.rank[ra] > self.rank[rb] {
+      self.parent[rb] = ra
+    } else {
+      self.parent[rb] = ra
+      self.rank[ra] += 1
+    }
+    self.sets -= 1
+    true
+  }
+
+  fn connected(self, a: Int, b: Int) -> Bool { self.find(a) == self.find(b) }
+}
+
+frozen class Edge {
+  a: Int
+  b: Int
+  weight: Int
+}
+
+fn components(n: Int, pairs: List[(Int, Int)]) -> List[List[Int]] {
+  uf = UnionFind.new(n)
+  for (a, b) in pairs { uf.union(a, b) }
+  by_root: Dict[Int, List[Int]] = [:]
+  for v in 0...n { by_root.get_or_insert(uf.find(v), []).push(v) }
+  # Order the groups by their smallest member.
+  groups = by_root.values()
+  groups.sort_with { |x, y| x[0] <=> y[0] }
+}
+
+fn kruskal(n: Int, edges: List[Edge]) -> (Int, List[Edge]) {
+  uf = UnionFind.new(n)
+  tree: List[Edge] = []
+  total = 0
+  ordered = edges.sort_with { |x, y| x.weight <=> y.weight }
+  for e in ordered {
+    if uf.union(e.a, e.b) {
+      tree.push(e)
+      total += e.weight
+      if tree.length == n - 1 { break }
+    }
+  }
+  (total, tree)
+}
+
+uf = UnionFind.new(10)
+puts("initial sets: #{uf.sets}")
+for (a, b) in [(0, 1), (2, 3), (1, 3), (5, 6), (7, 8), (8, 9), (3, 0)] {
+  merged = uf.union(a, b)
+  puts("union(#{a}, #{b}) -> #{if merged { "merged" } else { "already joined" }}, sets = #{uf.sets}")
+}
+puts("0~2: #{uf.connected(0, 2)}, 4~5: #{uf.connected(4, 5)}, 7~9: #{uf.connected(7, 9)}")
+
+puts("components: #{components(8, [(0, 4), (4, 7), (1, 2), (5, 6), (6, 1)])}")
+
+names = ["A", "B", "C", "D", "E", "F"]
+edges = [
+  Edge.new(0, 1, 7), Edge.new(0, 3, 5), Edge.new(1, 2, 8), Edge.new(1, 3, 9),
+  Edge.new(1, 4, 7), Edge.new(2, 4, 5), Edge.new(3, 4, 15), Edge.new(3, 5, 6),
+  Edge.new(4, 5, 8), Edge.new(5, 2, 11)
+]
+let (total, tree) = kruskal(6, edges)
+puts("MST weight: #{total}")
+for e in tree { puts("  #{names[e.a]}-#{names[e.b]} (#{e.weight})") }

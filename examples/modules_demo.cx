@@ -1,0 +1,45 @@
+# Modules: whole-module imports, selective imports, pub consts/classes/enums and pub extensions.
+# The helper modules live in examples/lib/.
+
+import lib.geometry
+import lib.geometry.{Point, Quadrant, quadrant}
+import lib.textutil
+import lib.textutil.{title_case, wrap}
+
+puts("main body starts")
+
+square = [Point.new(0.0, 0.0), Point.new(4.0, 0.0), Point.new(4.0, 4.0), Point.new(0.0, 4.0)]
+puts("square area #{geometry.area(square)}, perimeter #{geometry.perimeter(square)}")
+
+triangle = [Point.new(0.0, 0.0), geometry.Point.new(3.0, 0.0), Point.new(0.0, 4.0)]
+puts("triangle area #{geometry.area(triangle)}, perimeter #{geometry.perimeter(triangle)}")
+
+fn quadrant_name(q: Quadrant) -> String {
+  match q {
+    .First => "I"
+    .Second => "II"
+    .Third => "III"
+    .Fourth => "IV"
+    .OnAxis => "axis"
+  }
+}
+
+pts = [Point.new(1.0, 2.0), Point.new(-1.0, 2.0), Point.new(-3.0, -0.5), Point.new(2.0, -2.0), Point.new(0.0, 5.0)]
+for p in pts {
+  puts("#{p.to_s()} is in quadrant #{quadrant_name(quadrant(p))}")
+}
+moved = pts[0].translate(2.0, 2.0)
+puts("moved #{pts[0].to_s()} to #{moved.to_s()}, distance #{pts[0].dist(moved).round_to(3)}")
+puts(geometry.quadrant(moved) == geometry.Quadrant.First)
+puts("origin is called #{geometry.ORIGIN_LABEL}")
+
+puts(textutil.VERSION)
+puts(title_case("the quick BROWN fox"))
+puts(textutil.join_words(["a", "b", "c"], "+"))
+text = "Catallaxy threads coordinate through ownership and explicit exchange instead of a global lock"
+for line in wrap(text, 24) { puts("| #{line.ljust(24)} |") }
+
+# The pub extension on String comes into scope with `import lib.textutil`.
+for s in ["A man, a plan, a canal: Panama", "modules", "Was it a car or a cat I saw?"] {
+  puts("#{s.word_count()} words, palindrome: #{s.is_palindrome()}")
+}

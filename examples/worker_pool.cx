@@ -1,0 +1,81 @@
+# A fixed pool of workers pulling jobs from a shared channel and reporting results.
+
+frozen class Job {
+  id: Int
+  limit: Int
+}
+
+fn prime_count(limit: Int) -> Result[Int, String] {
+  if limit < 0 { return Err("negative limit #{limit}") }
+  if limit < 2 { return Ok(0) }
+  sieve = List.filled(limit + 1, true)
+  sieve[0] = false
+  sieve[1] = false
+  i = 2
+  while i * i <= limit {
+    if sieve[i] {
+      j = i * i
+      while j <= limit {
+        sieve[j] = false
+        j += i
+      }
+    }
+    i += 1
+  }
+  Ok(sieve.select { |b| b }.length)
+}
+
+const WORKERS = 3
+
+jobs: Channel[Job] = Channel.new(capacity: 2)
+results: Channel[(Int, Result[Int, String])] = Channel.new()
+processed = Atomic.new(0)
+busiest = Atomic.new(0)
+
+pool = (1..WORKERS).to_list().map { |w|
+  spawn {
+    mine = 0
+    for job in jobs {
+      results.send((job.id, prime_count(job.limit)))
+      processed.add(1)
+      mine += 1
+    }
+    # Record the largest number of jobs any single worker handled.
+    loop {
+      seen = busiest.get()
+      if mine <= seen or busiest.compare_and_set(seen, mine) { break }
+    }
+    mine
+  }
+}
+
+limits = freeze([100, 1000, -5, 10000, 2, 50, 0, 5000])
+dispatcher = spawn {
+  for i in 0...limits.length {
+    jobs.send(Job.new(i + 1, limits[i]))
+  }
+  jobs.close()
+}
+
+collected: List[(Int, Result[Int, String])] = []
+limits.length.times { |_k| collected.push(results.recv()!) }
+dispatcher.join()
+
+handled = 0
+for t in pool { handled += t.join().unwrap() }
+
+ordered = collected.sort_with { |a, b| a.0 <=> b.0 }
+ok = 0
+for (id, r) in ordered {
+  limit = limits[id - 1]
+  match r {
+    Ok(n) => {
+      ok += 1
+      puts("job #{id}: primes <= #{limit}: #{n}")
+    }
+    Err(msg) => puts("job #{id}: failed (#{msg})")
+  }
+}
+puts("processed #{processed.get()} jobs (#{ok} ok, #{ordered.length - ok} failed)")
+puts("workers reported #{handled} jobs in total")
+puts("busiest worker handled at least one job: #{busiest.get() >= 1}")

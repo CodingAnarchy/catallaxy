@@ -1,0 +1,5 @@
+# expect: E0223
+class Dog {
+  fn speak(self) -> String { "woof" }
+  fn speak(self) -> String { "arf" }
+}

@@ -1,0 +1,83 @@
+# Text layout: greedy word wrapping, full justification (extra spaces go to the leftmost gaps,
+# the last line stays ragged) and centering. Words longer than the width get a line of their own.
+
+fn wrap(text: String, width: Int) -> List[List[String]] {
+  lines: List[List[String]] = []
+  current: List[String] = []
+  used = 0
+  for word in text.split() {
+    needed = if current.is_empty() { word.length } else { used + 1 + word.length }
+    if needed > width and not current.is_empty() {
+      lines.push(current)
+      current = [word]
+      used = word.length
+    } else {
+      current.push(word)
+      used = needed
+    }
+  }
+  if not current.is_empty() { lines.push(current) }
+  lines
+}
+
+fn join_words(words: List[String], sep: String) -> String {
+  sb = StringBuilder.new()
+  words.each_with_index { |w, i|
+    if i > 0 { sb.push(sep) }
+    sb.push(w)
+  }
+  sb.to_s
+}
+
+fn justify_line(words: List[String], width: Int) -> String {
+  if words.length == 1 { return words[0].ljust(width) }
+  letters = words.reduce(0) { |n, w| n + w.length }
+  gaps = words.length - 1
+  spaces = width - letters
+  base = spaces / gaps
+  extra = spaces % gaps
+  sb = StringBuilder.new()
+  words.each_with_index { |w, i|
+    sb.push(w)
+    if i < gaps {
+      sb.push(" " * (base + if i < extra { 1 } else { 0 }))
+    }
+  }
+  sb.to_s
+}
+
+fn justify(text: String, width: Int) -> List[String] {
+  lines = wrap(text, width)
+  lines.map_with_index { |words, i|
+    if i == lines.length - 1 { join_words(words, " ").ljust(width) } else { justify_line(words, width) }
+  }
+}
+
+fn boxed(lines: List[String], width: Int) {
+  puts("+" + "-" * width + "+")
+  for l in lines { puts("|" + l + "|") }
+  puts("+" + "-" * width + "+")
+}
+
+const TEXT = "Catallaxy threads coordinate through ownership and   explicit exchange
+instead of a global lock, so a racy program may compute a wrong answer
+but never corrupts memory."
+
+ragged = wrap(TEXT, 30).map { |ws| join_words(ws, " ").ljust(30) }
+puts("ragged, width 30:")
+boxed(ragged, 30)
+
+puts("justified, width 30:")
+boxed(justify(TEXT, 30), 30)
+
+puts("centered, width 30:")
+boxed(wrap(TEXT, 30).map { |ws| join_words(ws, " ").center(30) }, 30)
+
+puts("long words, width 12:")
+boxed(wrap("an internationalization effort", 12).map { |ws| join_words(ws, " ").ljust(12) }, 12)
+
+lengths = wrap(TEXT, 30).map { |ws| join_words(ws, " ").length }
+puts("line lengths: #{lengths}")
+for w in [10, 20, 40, 80] {
+  puts("width #{w.to_s.rjust(2)}: #{wrap(TEXT, w).length} lines")
+}

@@ -1,0 +1,116 @@
+# Classic comparison sorts on lists of integers, checked against the builtin `sorted`.
+
+fn insertion_sort(input: List[Int]) -> List[Int] {
+  xs = input.dup()
+  i = 1
+  while i < xs.length {
+    key = xs[i]
+    j = i - 1
+    while j >= 0 and xs[j] > key {
+      xs[j + 1] = xs[j]
+      j -= 1
+    }
+    xs[j + 1] = key
+    i += 1
+  }
+  xs
+}
+
+fn merge(left: List[Int], right: List[Int]) -> List[Int] {
+  out: List[Int] = List.with_capacity(left.length + right.length)
+  i = 0
+  j = 0
+  while i < left.length and j < right.length {
+    if left[i] <= right[j] {
+      out.push(left[i])
+      i += 1
+    } else {
+      out.push(right[j])
+      j += 1
+    }
+  }
+  out.concat(left.slice(i, left.length - i))
+  out.concat(right.slice(j, right.length - j))
+  out
+}
+
+fn merge_sort(xs: List[Int]) -> List[Int] {
+  if xs.length <= 1 { return xs.dup() }
+  mid = xs.length / 2
+  merge(merge_sort(xs.slice(0, mid)), merge_sort(xs.slice(mid, xs.length - mid)))
+}
+
+# Lomuto partition, sorting in place between lo and hi (inclusive).
+fn partition(xs: List[Int], lo: Int, hi: Int) -> Int {
+  pivot = xs[hi]
+  i = lo
+  for j in lo...hi {
+    if xs[j] < pivot {
+      xs.swap(i, j)
+      i += 1
+    }
+  }
+  xs.swap(i, hi)
+  i
+}
+
+fn quicksort_range(xs: List[Int], lo: Int, hi: Int) -> Nil {
+  if lo >= hi { return }
+  p = partition(xs, lo, hi)
+  quicksort_range(xs, lo, p - 1)
+  quicksort_range(xs, p + 1, hi)
+}
+
+fn quicksort(input: List[Int]) -> List[Int] {
+  xs = input.dup()
+  quicksort_range(xs, 0, xs.length - 1)
+  xs
+}
+
+fn is_sorted(xs: List[Int]) -> Bool {
+  for i in 1...xs.length {
+    if xs[i - 1] > xs[i] { return false }
+  }
+  true
+}
+
+# A deterministic pseudo-random sequence (linear congruential generator).
+fn lcg_list(n: Int, seed: Int) -> List[Int] {
+  out: List[Int] = []
+  state = seed
+  n.times { |_i|
+    state = (state * 1103515245 + 12345) % 2147483648
+    out.push(state % 1000)
+  }
+  out
+}
+
+data = [38, 27, 43, 3, 9, 82, 10, 3, -5]
+puts("input:     #{data}")
+puts("insertion: #{insertion_sort(data)}")
+puts("merge:     #{merge_sort(data)}")
+puts("quick:     #{quicksort(data)}")
+puts("builtin:   #{data.sorted()}")
+puts("input unchanged: #{data == [38, 27, 43, 3, 9, 82, 10, 3, -5]}")
+
+# Descending order with a comparator.
+puts("descending: #{data.sort_with { |a, b| b <=> a }}")
+
+# Edge cases.
+empty: List[Int] = []
+puts(quicksort(empty))
+puts(merge_sort([1]))
+puts(insertion_sort([2, 1]))
+
+# Cross-check on a larger generated list.
+big = lcg_list(500, 42)
+reference = big.sorted()
+puts("500 items, all agree: #{insertion_sort(big) == reference and merge_sort(big) == reference and quicksort(big) == reference}")
+puts("sorted check: #{is_sorted(reference)} #{is_sorted(big)}")
+
+# Sorting records by a key: names by length, then alphabetically.
+names = ["delta", "al", "charlie", "bo", "echo", "ann"]
+by_len = names.sort_with { |a, b|
+  if a.length != b.length { a.length <=> b.length } else { a <=> b }
+}
+puts(by_len)

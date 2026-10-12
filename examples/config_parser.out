@@ -1,0 +1,15 @@
+["db.pool", "db.url", "name", "server.debug", "server.host", "server.port", "server.timeout"]
+Ok("demo app")
+Ok(10)
+postgres://localhost/app?sslmode=off
+Err("`server.host`: `example.org` is not an integer")
+true
+-1
+good: example.org:8080 debug=true timeout=2.5 workers=4
+bad port: error: server.port: 70000 is outside 1..65535
+no timeout: error: missing key `server.timeout`
+fixed: h:22 debug=false timeout=0.25 workers=16
+parse error: line 1: unclosed section header
+parse error: line 2: expected `key = value`, got `just words`
+parse error: line 1: empty section name
+parse error: line 1: missing key

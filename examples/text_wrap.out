@@ -1,0 +1,38 @@
+ragged, width 30:
++------------------------------+
+|Catallaxy threads coordinate  |
+|through ownership and explicit|
+|exchange instead of a global  |
+|lock, so a racy program may   |
+|compute a wrong answer but    |
+|never corrupts memory.        |
++------------------------------+
+justified, width 30:
++------------------------------+
+|Catallaxy  threads  coordinate|
+|through ownership and explicit|
+|exchange  instead  of a global|
+|lock,  so  a  racy program may|
+|compute  a  wrong  answer  but|
+|never corrupts memory.        |
++------------------------------+
+centered, width 30:
++------------------------------+
+| Catallaxy threads coordinate |
+|through ownership and explicit|
+| exchange instead of a global |
+| lock, so a racy program may  |
+|  compute a wrong answer but  |
+|    never corrupts memory.    |
++------------------------------+
+long words, width 12:
++------------+
+|an          |
+|internationalization|
+|effort      |
++------------+
+line lengths: [28, 30, 28, 27, 26, 22]
+width 10: 20 lines
+width 20: 10 lines
+width 40: 5 lines
+width 80: 3 lines
