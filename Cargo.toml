@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = ["crates/catallaxy-gc", "crates/catallaxy-runtime", "crates/catallaxy-compiler"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/CodingAnarchy/catallaxy"
+homepage = "https://github.com/CodingAnarchy/catallaxy"
+authors = ["Matt Tanous <matt.tanous@hey.com>"]
+keywords = ["language", "interpreter", "parallel", "programming-language"]
+categories = ["compilers", "development-tools"]
+
+[workspace.dependencies]
+catallaxy-gc = { path = "crates/catallaxy-gc", version = "0.1.0" }
+catallaxy-runtime = { path = "crates/catallaxy-runtime", version = "0.1.0" }
+catallaxy-vm = { path = "crates/catallaxy-vm", version = "0.1.0" }
+catallaxy-compiler = { path = "crates/catallaxy-compiler", version = "0.1.0" }
+catallaxy-stdlib = { path = "crates/catallaxy-stdlib", version = "0.1.0" }
+crossbeam-deque = "0.8"
+crossbeam-utils = "0.8"
+parking_lot = "0.12"
+parking_lot_core = "0.9"
+num-bigint = "0.5"
+num-traits = "0.2"
+num-integer = "0.1"
+rustc-hash = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "unwind"
+debug = 1
+
+[profile.bench]
+inherits = "release"

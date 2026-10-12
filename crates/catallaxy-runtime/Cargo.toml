@@ -1,0 +1,20 @@
+[package]
+name = "catallaxy-runtime"
+description = "Object model, NaN-boxed values and ownership states for the Catallaxy language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+catallaxy-gc.workspace = true
+num-bigint.workspace = true
+num-traits.workspace = true
+num-integer.workspace = true
+parking_lot.workspace = true
+rustc-hash.workspace = true

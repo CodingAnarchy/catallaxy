@@ -1,0 +1,20 @@
+[package]
+name = "catallaxy-gc"
+description = "Parallel stop-the-world mark-sweep garbage collector for the Catallaxy language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+crossbeam-deque.workspace = true
+parking_lot.workspace = true
+parking_lot_core.workspace = true
+
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"
