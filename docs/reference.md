@@ -330,3 +330,37 @@ would change and exits with status 1 if there are any. Files with syntax errors 
 `check --json` prints `{"diagnostics": [...]}` where each diagnostic has `code`, `severity`, `message`,
 `file`, `span` (`start`/`end` as `{line, col, offset}`, 1-based lines and columns), `notes`, and `fixes`
 (each a list of `{span, replacement}` edits).
+
+## 11. Embedding and native extensions
+
+Native functions are written in Rust against the `catallaxy` crate and declared in Catallaxy with
+`native fn` (a top-level `native fn name(...)` is registered as `name`; one inside `class C` as
+`C.name`):
+
+```rust
+use catallaxy::{native, Engine, RtResult, Value, Vm};
+
+fn apply_twice(vm: &mut Vm, args: &[Value]) -> RtResult<Value> {
+    let (f, x) = (args[0], args[1]);
+    let scope = vm.handle_scope();                // roots values across calls that may collect
+    let first = scope.root(native::call(vm, f, &[x])?);
+    let second = native::call(vm, f, &[scope.get(first)])?;
+    Ok(native::new_list(vm, vec![scope.get(first), second]))
+}
+
+fn main() {
+    let mut engine = Engine::new();
+    engine.register("apply_twice", apply_twice);
+    std::process::exit(engine.run_file("app.cx".as_ref()).unwrap_or(2));
+}
+```
+
+```
+native fn apply_twice(f: fn(Int) -> Int, x: Int) -> List[Int]
+puts(apply_twice({ |v| v * 10 }, 3))     # [30, 300]
+```
+
+Rules for native code: values held across a call back into the VM (`native::call`, or anything that
+runs Catallaxy code) must be rooted in a `HandleScope`; handles borrow the scope, so they cannot
+escape it. Allocation alone never collects. Missing optional arguments arrive as the empty marker
+(`Value::is_empty_marker`). A process runs one program.

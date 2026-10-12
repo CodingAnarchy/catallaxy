@@ -283,3 +283,72 @@ pub fn note_external(bytes: usize) {
         catallaxy_gc::stats::note_allocated(bytes);
     }
 }
+
+/// A region in which native code can root values across calls back into the interpreter (which
+/// may collect). Handles borrow the scope, so the borrow checker keeps them from escaping it;
+/// dropping the scope releases them.
+///
+/// ```ignore
+/// let scope = HandleScope::new(&mut vm.m);
+/// let list = scope.root(make_list(scope.mutator()));
+/// vm_call_that_may_collect();
+/// let still_valid = scope.get(list);
+/// ```
+pub struct HandleScope<'m> {
+    m: *mut Mutator,
+    base: usize,
+    _borrow: std::marker::PhantomData<&'m mut Mutator>,
+}
+
+/// A rooted value, valid for the lifetime of its [`HandleScope`].
+#[derive(Copy, Clone)]
+pub struct Local<'s> {
+    index: usize,
+    _scope: std::marker::PhantomData<&'s ()>,
+}
+
+impl<'m> HandleScope<'m> {
+    pub fn new(m: &'m mut Mutator) -> Self {
+        let base = m.handles_len();
+        HandleScope { m, base, _borrow: std::marker::PhantomData }
+    }
+
+    /// A scope that does not borrow the mutator, so native code can keep calling into the VM
+    /// while it holds handles. Handles still cannot outlive the scope.
+    ///
+    /// # Safety
+    /// `m` must outlive the scope and belong to the current thread.
+    pub unsafe fn detached(m: *mut Mutator) -> HandleScope<'static> {
+        let base = (*m).handles_len();
+        HandleScope { m, base, _borrow: std::marker::PhantomData }
+    }
+
+    /// Roots `v` until the scope ends.
+    pub fn root<'s>(&'s self, v: Value) -> Local<'s> {
+        // SAFETY: the scope holds the mutator's unique borrow; handles are only read by the
+        // collector while this thread is stopped.
+        let hs = unsafe { &mut *(*self.m).handles };
+        hs.push(v);
+        Local { index: hs.len() - 1, _scope: std::marker::PhantomData }
+    }
+
+    pub fn get(&self, h: Local<'_>) -> Value {
+        unsafe { (&(*(*self.m).handles))[h.index] }
+    }
+
+    pub fn set(&self, h: Local<'_>, v: Value) {
+        unsafe { (&mut (*(*self.m).handles))[h.index] = v }
+    }
+
+    /// The mutator, for allocation. Allocation never collects, so handles stay valid.
+    #[allow(clippy::mut_from_ref)]
+    pub fn mutator(&self) -> &mut Mutator {
+        unsafe { &mut *self.m }
+    }
+}
+
+impl Drop for HandleScope<'_> {
+    fn drop(&mut self) {
+        unsafe { (*(*self.m).handles).truncate(self.base) };
+    }
+}

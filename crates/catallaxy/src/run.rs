@@ -6,9 +6,6 @@ use std::process::Command;
 
 use catallaxy_compiler::diag::SourceMap;
 use catallaxy_compiler::driver::{compile_path, FsLoader, Options};
-use catallaxy_runtime::Trap;
-use catallaxy_vm::interp::MAIN_STACK;
-use catallaxy_vm::{Program, Vm};
 
 fn print_diags(sm: &SourceMap, diags: &[catallaxy_compiler::diag::Diagnostic]) {
     let color = std::io::stderr().is_terminal();
@@ -51,63 +48,7 @@ pub fn cmd_run(args: &[String]) -> i32 {
     execute(program)
 }
 
-/// Runs a program on a fresh main VM thread (with a large native stack). Returns the exit code.
-pub fn execute(program: Program) -> i32 {
-    let h = std::thread::Builder::new()
-        .name("catx-main".into())
-        .stack_size(256 << 20)
-        .spawn(move || run_program(&program))
-        .expect("spawn main thread");
-    h.join().unwrap_or(101)
-}
-
-fn run_program(program: &Program) -> i32 {
-    let mut vm = Vm::for_current_thread(MAIN_STACK);
-    catallaxy_runtime::ownership::set_promotion_hook(|cls| {
-        eprintln!("warning: promoted a {cls} to shared on access from another thread");
-    });
-    if let Err(e) = catallaxy_vm::load(program, &mut vm.m, &catallaxy_stdlib::lookup) {
-        eprintln!("error: {}", e.0);
-        return 70;
-    }
-    for &fid in &program.entry {
-        match vm.call_func(fid, &[]) {
-            Ok(_) => {}
-            Err(Trap::Panic(msg)) => {
-                catallaxy_stdlib::flush();
-                eprintln!("panic: {msg}");
-                if let Some(trace) = vm.panic_trace.take() {
-                    for line in trace.iter().take(30) {
-                        eprintln!("    at {line}");
-                    }
-                    if trace.len() > 30 {
-                        eprintln!("    ... {} more", trace.len() - 30);
-                    }
-                }
-                return 101;
-            }
-            Err(Trap::Exit(code)) => {
-                catallaxy_stdlib::flush();
-                return code;
-            }
-            Err(Trap::Unwind { .. }) => {
-                catallaxy_stdlib::flush();
-                eprintln!("panic: internal error: stray non-local exit");
-                return 101;
-            }
-        }
-    }
-    catallaxy_stdlib::flush();
-    if std::env::var_os("CATX_GC_STATS").is_some() {
-        eprintln!(
-            "gc: {} collections, {:.1} MB heap, {:.1} MB live after last",
-            catallaxy_gc::stats::collections(),
-            catallaxy_gc::total_heap_bytes() as f64 / 1e6,
-            catallaxy_gc::stats::live_bytes() as f64 / 1e6
-        );
-    }
-    0
-}
+pub use catallaxy::execute;
 
 pub fn cmd_check(args: &[String]) -> i32 {
     let json = args.iter().any(|a| a == "--json");

@@ -12,6 +12,9 @@ keywords.workspace = true
 categories.workspace = true
 readme.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "catx"
 path = "src/main.rs"

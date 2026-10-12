@@ -38,9 +38,23 @@ pub fn flush() {
     }
 }
 
-/// Looks up a native implementation by name.
+static EXTENSIONS: std::sync::LazyLock<parking_lot::RwLock<rustc_hash::FxHashMap<String, NativeFn>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Registers a native function implemented by a Rust extension crate. Catallaxy code declares it
+/// with `native fn name(...) -> T` (a top-level `native fn` uses its plain name; a `native fn` in
+/// a class `C` uses `C.name`). Must be called before the program is loaded.
+pub fn register_native(name: &str, f: NativeFn) {
+    EXTENSIONS.write().insert(name.to_string(), f);
+}
+
+/// Looks up a native implementation by name: the standard library, then extensions.
 pub fn lookup(name: &str) -> Option<NativeFn> {
-    core::lookup(name).or_else(|| coll::lookup(name)).or_else(|| conc::lookup(name)).or_else(|| sys::lookup(name))
+    core::lookup(name)
+        .or_else(|| coll::lookup(name))
+        .or_else(|| conc::lookup(name))
+        .or_else(|| sys::lookup(name))
+        .or_else(|| EXTENSIONS.read().get(name).copied())
 }
 
 // ---- argument helpers ------------------------------------------------------------------------

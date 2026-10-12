@@ -171,6 +171,14 @@ impl Vm {
         unsafe { *self.stack.add(i) = v }
     }
 
+    /// A handle scope for native code: values rooted in it survive collections triggered by
+    /// calls back into the VM, and are released when the scope is dropped.
+    pub fn handle_scope(&mut self) -> catallaxy_runtime::HandleScope<'static> {
+        // SAFETY: the mutator lives as long as the VM and belongs to this thread; scopes are
+        // created and dropped within one native call.
+        unsafe { catallaxy_runtime::HandleScope::detached(&mut self.m) }
+    }
+
     pub fn extra_roots(&mut self) -> &mut Vec<Value> {
         &mut self.rs().extra_roots
     }
