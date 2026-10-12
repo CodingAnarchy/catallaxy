@@ -73,7 +73,8 @@ catx lsp                        language server (stdio)
 
 ## Documentation
 
-- [Language reference](docs/reference.md) — syntax, types, semantics and the standard library.
+- [Language reference](docs/reference.md) — syntax, types and semantics.
+- [Standard library](docs/stdlib.md) — every builtin type, method and function.
 - [Design](docs/design.md) — why the language and runtime look the way they do.
 - [Examples](examples/) — complete programs, each with its expected output.
 

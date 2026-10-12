@@ -5,7 +5,6 @@
 //! of the caller's registers). Calls between bytecode functions do not recurse on the Rust stack;
 //! only natives calling back into bytecode do.
 
-use std::cell::UnsafeCell;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -43,42 +42,52 @@ pub struct Vm {
     pub m: Mutator,
     stack: *mut Value,
     stack_cap: usize,
-    pub(crate) frames: Vec<Frame>,
+    /// Frames, locks and extra roots: read by the collector while this thread is stopped, so
+    /// they live in a separate allocation reached only through this raw pointer.
+    rs: *mut RootState,
     next_serial: u64,
-    /// Objects locked by `with lock`, with the frame depth that locked them.
-    held_locks: Vec<(usize, Value)>,
     /// Stack trace captured where the current panic started.
     pub panic_trace: Option<Vec<String>>,
+}
+
+/// VM state the collector scans.
+pub(crate) struct RootState {
+    pub(crate) frames: Vec<Frame>,
+    /// Objects locked by `with lock`, with the frame depth that locked them.
+    held_locks: Vec<(usize, Value)>,
     /// Extra values rooted by the runtime (thread-pool jobs and the like).
-    pub extra_roots: UnsafeCell<Vec<Value>>,
+    extra_roots: Vec<Value>,
 }
 
 // SAFETY: a Vm is used by one thread at a time; it is created by a parent thread and handed to
 // the child before the child starts running code.
 unsafe impl Send for Vm {}
 
-struct VmRoots(*const Vm);
+struct VmRoots {
+    stack: *const Value,
+    rs: *const RootState,
+    handles: *const Vec<Value>,
+}
 
 impl RootSource for VmRoots {
     fn trace_roots(&self, t: &mut Tracer) {
-        // SAFETY: called only while the owning thread is stopped.
-        let vm = unsafe { &*self.0 };
-        // A callee's frame can end below its caller's higher registers, which stay live: scan
-        // up to the highest register of any frame, not just the top one.
-        let top = vm.stack_top();
+        // SAFETY: called only while the owning thread is stopped; all three pointers are owned
+        // allocations that the thread itself also reaches only through raw pointers.
+        let rs = unsafe { &*self.rs };
+        let top = rs.frames.last().map(|f| f.top).unwrap_or(0);
         for i in 0..top {
-            ops_mark(t, unsafe { *vm.stack.add(i) });
+            ops_mark(t, unsafe { *self.stack.add(i) });
         }
-        for f in &vm.frames {
+        for f in &rs.frames {
             ops_mark(t, f.closure);
         }
-        for &v in vm.m.handle_values() {
+        for &v in unsafe { &*self.handles } {
             ops_mark(t, v);
         }
-        for &v in unsafe { &*vm.extra_roots.get() }.iter() {
+        for &v in &rs.extra_roots {
             ops_mark(t, v);
         }
-        for &(_, v) in &vm.held_locks {
+        for &(_, v) in &rs.held_locks {
             ops_mark(t, v);
         }
     }
@@ -114,13 +123,16 @@ impl Vm {
             m,
             stack: alloc_stack(stack_size),
             stack_cap: stack_size,
-            frames: Vec::with_capacity(256),
+            rs: Box::into_raw(Box::new(RootState {
+                frames: Vec::with_capacity(256),
+                held_locks: Vec::new(),
+                extra_roots: Vec::new(),
+            })),
             next_serial: 1,
-            held_locks: Vec::new(),
             panic_trace: None,
-            extra_roots: UnsafeCell::new(Vec::new()),
         });
-        let roots: Box<dyn RootSource> = Box::new(VmRoots(&*vm as *const Vm));
+        let roots: Box<dyn RootSource> =
+            Box::new(VmRoots { stack: vm.stack, rs: vm.rs, handles: vm.m.handles_ptr() });
         let roots_ptr = Box::into_raw(roots);
         let heap_ptr = vm.m.heap_ptr();
         unsafe { catallaxy_gc::install(&vm.m.rec, roots_ptr, heap_ptr) };
@@ -151,7 +163,7 @@ impl Vm {
 
     /// First stack slot above every live register of every frame.
     fn stack_top(&self) -> usize {
-        self.frames.last().map(|f| f.top).unwrap_or(0)
+        self.rs().frames.last().map(|f| f.top).unwrap_or(0)
     }
 
     #[inline(always)]
@@ -160,7 +172,15 @@ impl Vm {
     }
 
     pub fn extra_roots(&mut self) -> &mut Vec<Value> {
-        self.extra_roots.get_mut()
+        &mut self.rs().extra_roots
+    }
+
+    /// The collector-visible state. Never hold the reference across a safepoint.
+    #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
+    pub(crate) fn rs(&self) -> &mut RootState {
+        // SAFETY: only this thread mutates its root state, and never while stopped.
+        unsafe { &mut *self.rs }
     }
 
     // ---- calling ---------------------------------------------------------------------------
@@ -216,16 +236,16 @@ impl Vm {
         for i in f.nparams..f.nregs {
             self.set_reg(base + i, Value::NIL);
         }
-        let stop = self.frames.len();
+        let stop = self.rs().frames.len();
         let top = (base + f.nregs).max(self.stack_top());
-        self.frames.push(Frame { func: f, pc: 0, base, ret: base, closure, serial: 0, top });
+        self.rs().frames.push(Frame { func: f, pc: 0, base, ret: base, closure, serial: 0, top });
         catallaxy_gc::safepoint(&self.m.rec);
         self.execute(stop)
     }
 
     #[inline(always)]
     fn check_stack(&self, need: usize) -> RtResult<()> {
-        if need >= self.stack_cap || self.frames.len() >= MAX_FRAMES {
+        if need >= self.stack_cap || self.rs().frames.len() >= MAX_FRAMES {
             return Err(Trap::Panic("SystemStackError: stack level too deep".into()));
         }
         Ok(())
@@ -237,14 +257,14 @@ impl Vm {
             match self.run(stop) {
                 Ok(v) => return Ok(v),
                 Err(Trap::Unwind { frame, kind, value }) => {
-                    let target = self.frames[stop..].iter().rposition(|f| f.serial == frame).map(|i| i + stop);
+                    let target = self.rs().frames[stop..].iter().rposition(|f| f.serial == frame).map(|i| i + stop);
                     let Some(idx) = target else {
                         self.unwind_to(stop);
                         return Err(Trap::Unwind { frame, kind, value });
                     };
                     self.unwind_to(idx + 1);
                     if kind == UNWIND_RETURN {
-                        let f = self.frames.pop().unwrap();
+                        let f = self.rs().frames.pop().unwrap();
                         self.release_locks();
                         if idx == stop {
                             return Ok(value);
@@ -253,7 +273,7 @@ impl Vm {
                     } else {
                         // Break: the frame was suspended in a call (instruction + data word);
                         // the call's result register gets nil and execution continues after it.
-                        let f = *self.frames.last().unwrap();
+                        let f = *self.rs().frames.last().unwrap();
                         let w = f.func.code[f.pc - 2];
                         self.set_reg(f.base + a_of(w), value);
                     }
@@ -273,17 +293,17 @@ impl Vm {
 
     /// Pops frames down to `depth`, releasing locks they held.
     fn unwind_to(&mut self, depth: usize) {
-        self.frames.truncate(depth);
+        self.rs().frames.truncate(depth);
         self.release_locks();
     }
 
     fn release_locks(&mut self) {
-        let depth = self.frames.len();
-        while let Some(&(d, v)) = self.held_locks.last() {
+        let depth = self.rs().frames.len();
+        while let Some(&(d, v)) = self.rs().held_locks.last() {
             if d < depth {
                 break;
             }
-            self.held_locks.pop();
+            self.rs().held_locks.pop();
             let h = unsafe { &*v.as_ptr() };
             if h.is_locked_by(self.m.tid) {
                 h.unlock();
@@ -293,7 +313,7 @@ impl Vm {
 
     pub fn backtrace(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for f in self.frames.iter().rev() {
+        for f in self.rs().frames.iter().rev() {
             let pc = f.pc.saturating_sub(1);
             let file = program::file_name(f.func.file);
             out.push(format!("{} ({}:{})", f.func.name, file, f.func.line_at(pc)));
@@ -303,7 +323,7 @@ impl Vm {
 
     /// Current source location (for warnings).
     pub fn location(&self) -> String {
-        match self.frames.last() {
+        match self.rs().frames.last() {
             Some(f) => format!("{}:{}", program::file_name(f.func.file), f.func.line_at(f.pc.saturating_sub(1))),
             None => "<native>".into(),
         }
@@ -314,7 +334,14 @@ impl Vm {
     #[inline(never)]
     fn run(&mut self, stop: usize) -> RtResult<Value> {
         let tid = self.m.tid;
-        let mut fr = *self.frames.last().unwrap();
+        // The root state's address never changes; keep it in a register.
+        let rs: *mut RootState = self.rs;
+        macro_rules! frames {
+            () => {
+                unsafe { &mut (*rs).frames }
+            };
+        }
+        let mut fr = *frames!().last().unwrap();
         let mut code: *const u32 = fr.func.code.as_ptr();
         let mut pc = fr.pc;
         let mut regs: *mut Value = unsafe { self.stack.add(fr.base) };
@@ -332,7 +359,7 @@ impl Vm {
         }
         macro_rules! save {
             () => {
-                self.frames.last_mut().unwrap().pc = pc;
+                frames!().last_mut().unwrap().pc = pc;
             };
         }
         macro_rules! tri {
@@ -355,7 +382,7 @@ impl Vm {
         }
         macro_rules! load_frame {
             () => {{
-                fr = *self.frames.last().unwrap();
+                fr = *frames!().last().unwrap();
                 code = fr.func.code.as_ptr();
                 pc = fr.pc;
                 regs = unsafe { self.stack.add(fr.base) };
@@ -366,7 +393,7 @@ impl Vm {
             ($f:expr, $base:expr, $ret:expr, $closure:expr, $nargs:expr) => {{
                 let f: &'static Func = $f;
                 let base: usize = $base;
-                if base + f.nregs >= self.stack_cap || self.frames.len() >= MAX_FRAMES {
+                if base + f.nregs >= self.stack_cap || frames!().len() >= MAX_FRAMES {
                     save!();
                     return Err(Trap::Panic("SystemStackError: stack level too deep".into()));
                 }
@@ -378,7 +405,7 @@ impl Vm {
                 }
                 save!();
                 let top = (base + f.nregs).max(fr.top);
-                self.frames.push(Frame { func: f, pc: 0, base, ret: $ret, closure: $closure, serial: 0, top });
+                frames!().push(Frame { func: f, pc: 0, base, ret: $ret, closure: $closure, serial: 0, top });
                 if catallaxy_gc::is_gc_requested() {
                     catallaxy_gc::safepoint_slow(&self.m.rec);
                 }
@@ -744,11 +771,11 @@ impl Vm {
                 }
                 Op::Return | Op::ReturnNil => {
                     let v = if Op::from_u8(op_of(w)) == Op::Return { r!(a) } else { Value::NIL };
-                    let done = self.frames.pop().unwrap();
-                    if !self.held_locks.is_empty() {
+                    let done = frames!().pop().unwrap();
+                    if !self.rs().held_locks.is_empty() {
                         self.release_locks();
                     }
-                    if self.frames.len() == stop {
+                    if frames!().len() == stop {
                         return Ok(v);
                     }
                     unsafe { *self.stack.add(done.ret) = v };
@@ -1036,12 +1063,16 @@ impl Vm {
                     set!(a, if ok { x } else { Value::NIL });
                 }
                 Op::FrameId => {
-                    let f = self.frames.last_mut().unwrap();
-                    if f.serial == 0 {
-                        f.serial = self.next_serial;
-                        self.next_serial += 1;
+                    let next = self.next_serial;
+                    let f = frames!().last_mut().unwrap();
+                    let assigned = f.serial == 0;
+                    if assigned {
+                        f.serial = next;
                     }
                     let s = f.serial as i64;
+                    if assigned {
+                        self.next_serial += 1;
+                    }
                     set!(a, Value::small_int(s));
                 }
                 Op::Unwind => {
@@ -1066,14 +1097,15 @@ impl Vm {
                                 h.lock(tid);
                                 catallaxy_gc::leave_native(&self.m.rec);
                             }
-                            self.held_locks.push((self.frames.len() - 1, o));
+                            let depth = frames!().len() - 1;
+                            self.rs().held_locks.push((depth, o));
                         }
                     }
                 }
                 Op::UnlockObj => {
                     let o = r!(a);
-                    if let Some(pos) = self.held_locks.iter().rposition(|&(_, v)| v == o) {
-                        self.held_locks.remove(pos);
+                    if let Some(pos) = self.rs().held_locks.iter().rposition(|&(_, v)| v == o) {
+                        self.rs().held_locks.remove(pos);
                         let h = unsafe { &*o.as_ptr() };
                         if h.is_locked_by(tid) {
                             h.unlock();

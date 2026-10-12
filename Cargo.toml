@@ -12,6 +12,7 @@ homepage = "https://github.com/CodingAnarchy/catallaxy"
 authors = ["Matt Tanous <matt.tanous@hey.com>"]
 keywords = ["language", "interpreter", "parallel", "programming-language"]
 categories = ["compilers", "development-tools"]
+readme = "README.md"
 
 [workspace.dependencies]
 catallaxy-gc = { path = "crates/catallaxy-gc", version = "0.1.0" }
