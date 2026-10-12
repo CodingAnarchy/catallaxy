@@ -96,8 +96,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
 
 fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let closure = a[0];
-    let rec = catallaxy_gc::register_thread();
-    let mut child = Vm::new(rec, THREAD_STACK);
+    // Registration takes the collector's thread-list lock, which a collection holds while it
+    // waits for running threads to stop: register from the native state.
+    let mut child = catallaxy_gc::blocking(&vm.m.rec, || {
+        let rec = catallaxy_gc::register_thread();
+        Vm::new(rec, THREAD_STACK)
+    });
     // The closure (and, for `spawn move`, what it captured) now belongs to the child.
     ownership::transfer_deep(closure, vm.tid(), child.tid());
     child.extra_roots().push(closure);

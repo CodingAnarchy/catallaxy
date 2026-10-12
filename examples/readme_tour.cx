@@ -1,0 +1,19 @@
+interface Named { fn name(self) -> String }
+
+class User {
+  full_name: String
+  email: String?
+  fn name(self) -> String { self.full_name }
+}
+
+pub fn greet(x: Named) -> String { "Hello, #{x.name()}" }
+
+fn shout(x) { x.name().upcase() }          # untyped: requirements inferred from the body
+
+users = [User.new("Ada Lovelace", nil), User.new("Grace Hopper", "grace@navy.mil")]
+puts(users.map { |u| greet(u) })
+puts(users.map { |u| u.email ?? "none" })
+puts(shout(users[0]))
+
+squares = (1..1_000_000).to_list().par_map { |n| n * n }   # runs on every core
+puts(squares.sum())
