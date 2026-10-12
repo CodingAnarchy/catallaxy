@@ -1,0 +1,120 @@
+# An INI-style config parser: Result everywhere, `?` for propagation, map_err/and_then/unwrap_or.
+
+class Config {
+  values: Dict[String, String] = [:]
+
+  fn parse(text: String) -> Result[Config, String] {
+    cfg = Config.new()
+    section = ""
+    line_no = 0
+    for raw in text.lines() {
+      line_no += 1
+      line = raw.strip
+      if line.is_empty() or line.starts_with("#") { continue }
+      if line.starts_with("[") {
+        if not line.ends_with("]") { return Err("line #{line_no}: unclosed section header") }
+        section = line.substring(1, line.length - 1).strip
+        if section.is_empty() { return Err("line #{line_no}: empty section name") }
+        continue
+      }
+      eq = line.index_of("=")
+      if eq == nil { return Err("line #{line_no}: expected `key = value`, got `#{line}`") }
+      key = line.substring(0, eq).strip
+      value = line.substring(eq + 1, line.length).strip
+      if key.is_empty() { return Err("line #{line_no}: missing key") }
+      full = if section.is_empty() { key } else { "#{section}.#{key}" }
+      cfg.values[full] = value
+    }
+    Ok(cfg)
+  }
+
+  fn get_str(self, key: String) -> Result[String, String] {
+    if let v = self.values[key] { Ok(v) } else { Err("missing key `#{key}`") }
+  }
+
+  fn get_int(self, key: String) -> Result[Int, String] {
+    s = self.get_str(key)?
+    if let n = s.to_i { Ok(n) } else { Err("`#{key}`: `#{s}` is not an integer") }
+  }
+
+  fn get_float(self, key: String) -> Result[Float, String] {
+    s = self.get_str(key)?
+    if let f = s.to_f { Ok(f) } else { Err("`#{key}`: `#{s}` is not a number") }
+  }
+
+  fn get_bool(self, key: String) -> Result[Bool, String] {
+    s = self.get_str(key)?
+    match s.downcase {
+      "true" | "yes" | "on" | "1" => Ok(true)
+      "false" | "no" | "off" | "0" => Ok(false)
+      other => Err("`#{key}`: `#{other}` is not a boolean")
+    }
+  }
+}
+
+fn in_range(lo: Int, hi: Int) -> fn(Int) -> Result[Int, String] {
+  fn(n: Int) -> Result[Int, String] {
+    if n < lo or n > hi { Err("#{n} is outside #{lo}..#{hi}") } else { Ok(n) }
+  }
+}
+
+class Server {
+  host: String
+  port: Int
+  debug: Bool
+  timeout: Float
+  workers: Int
+}
+
+fn load_server(cfg: Config) -> Result[Server, String] {
+  host = cfg.get_str("server.host")?
+  port = cfg.get_int("server.port").and_then(in_range(1, 65535)).map_err { |e| "server.port: #{e}" }?
+  debug = cfg.get_bool("server.debug").unwrap_or(false)
+  timeout = cfg.get_float("server.timeout")?
+  workers = cfg.get_int("server.workers").unwrap_or(4)
+  Ok(Server.new(host, port, debug, timeout, workers))
+}
+
+fn show(label: String, r: Result[Server, String]) {
+  match r {
+    Ok(s) => puts("#{label}: #{s.host}:#{s.port} debug=#{s.debug} timeout=#{s.timeout} workers=#{s.workers}")
+    Err(e) => puts("#{label}: error: #{e}")
+  }
+}
+
+good = "# demo configuration\n" +
+  "name = demo app\n" +
+  "\n" +
+  "[server]\n" +
+  "host = example.org\n" +
+  "port = 8080\n" +
+  "debug = Yes\n" +
+  "timeout = 2.5\n" +
+  "\n" +
+  "[db]\n" +
+  "  pool = 10  \n" +
+  "url = postgres://localhost/app?sslmode=off\n"
+
+cfg = Config.parse(good).unwrap()
+puts(cfg.values.keys().sorted())
+puts(cfg.get_str("name"))
+puts(cfg.get_int("db.pool"))
+puts(cfg.get_str("db.url").unwrap())
+puts(cfg.get_int("server.host"))
+puts(cfg.get_bool("db.pool").is_err())
+puts(cfg.get_int("db.missing").unwrap_or(-1))
+show("good", load_server(cfg))
+
+bad_port = Config.parse("[server]\nhost = h\nport = 70000\ntimeout = 1\n").unwrap()
+show("bad port", load_server(bad_port))
+no_timeout = Config.parse("[server]\nhost = h\nport = 22\ndebug = maybe\nworkers = 16\n").unwrap()
+show("no timeout", load_server(no_timeout))
+fixed = Config.parse("[server]\nhost = h\nport = 22\ndebug = maybe\nworkers = 16\ntimeout = 0.25\n")
+show("fixed", fixed.and_then { |c| load_server(c) })
+
+for text in ["[server\nx = 1", "a = 1\njust words", "[ ]", " = 3"] {
+  match Config.parse(text) {
+    Ok(_) => puts("parsed?!")
+    Err(e) => puts("parse error: #{e}")
+  }
+}

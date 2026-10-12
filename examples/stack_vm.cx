@@ -1,0 +1,117 @@
+# A tiny stack machine: an instruction enum, an interpreter with jumps, and error reporting.
+
+enum Instr {
+  Push(Int)
+  Add
+  Sub
+  Mul
+  Lt
+  Dup
+  Load(Int)
+  Store(Int)
+  Jmp(Int)
+  Jz(Int)
+  Print
+  Halt
+}
+
+class Machine {
+  program: List[Instr]
+  stack: List[Int] = []
+  locals: List[Int] = List.filled(4, 0)
+  output: List[Int] = []
+  pc: Int = 0
+  steps: Int = 0
+  max_steps: Int = 10_000
+
+  fn pop(self) -> Result[Int, String] {
+    if let v = self.stack.pop() { Ok(v) } else { Err("stack underflow at pc #{self.pc}") }
+  }
+
+  fn binary(self, f: fn(Int, Int) -> Int) -> Result[Nil, String] {
+    b = self.pop()?
+    a = self.pop()?
+    self.stack.push(f(a, b))
+    Ok(nil)
+  }
+
+  fn step(self, instr: Instr) -> Result[Bool, String] {
+    next = self.pc + 1
+    match instr {
+      .Push(n) => self.stack.push(n)
+      .Add => self.binary { |a, b| a + b }?
+      .Sub => self.binary { |a, b| a - b }?
+      .Mul => self.binary { |a, b| a * b }?
+      .Lt => self.binary { |a, b| if a < b { 1 } else { 0 } }?
+      .Dup => {
+        v = self.pop()?
+        self.stack.push(v)
+        self.stack.push(v)
+      }
+      .Load(slot) => self.stack.push(self.locals[slot])
+      .Store(slot) => self.locals[slot] = self.pop()?
+      .Jmp(target) => next = target
+      .Jz(target) => if self.pop()? == 0 { next = target }
+      .Print => self.output.push(self.pop()?)
+      .Halt => return Ok(false)
+    }
+    self.pc = next
+    Ok(true)
+  }
+
+  fn run(self) -> Result[List[Int], String] {
+    loop {
+      if self.pc < 0 or self.pc >= self.program.length {
+        return Err("pc #{self.pc} out of range")
+      }
+      self.steps += 1
+      if self.steps > self.max_steps { return Err("step limit exceeded") }
+      running = self.step(self.program[self.pc])?
+      if not running { break }
+    }
+    Ok(self.output)
+  }
+}
+
+factorial = [
+  Instr.Push(10), Instr.Store(0),       # n = 10
+  Instr.Push(1), Instr.Store(1),        # acc = 1
+  Instr.Load(0), Instr.Jz(15),          # 4: while n != 0
+  Instr.Load(1), Instr.Load(0), Instr.Mul, Instr.Store(1),   # acc *= n
+  Instr.Load(0), Instr.Push(1), Instr.Sub, Instr.Store(0),   # n -= 1
+  Instr.Jmp(4),
+  Instr.Load(1), Instr.Print,           # 15
+  Instr.Halt,
+]
+
+squares = [
+  Instr.Push(1), Instr.Store(0),        # i = 1
+  Instr.Push(0), Instr.Store(1),        # sum = 0
+  Instr.Load(0), Instr.Push(6), Instr.Lt, Instr.Jz(21),      # 4: while i < 6
+  Instr.Load(0), Instr.Dup, Instr.Mul,  # i * i
+  Instr.Dup, Instr.Print,               # print it, keep a copy
+  Instr.Load(1), Instr.Add, Instr.Store(1),                  # sum += i * i
+  Instr.Load(0), Instr.Push(1), Instr.Add, Instr.Store(0),   # i += 1
+  Instr.Jmp(4),
+  Instr.Load(1), Instr.Print,           # 21
+  Instr.Halt,
+]
+
+programs = [
+  ("factorial", factorial),
+  ("squares", squares),
+  ("underflow", [Instr.Push(1), Instr.Add, Instr.Halt]),
+  ("runaway", [Instr.Jmp(0)]),
+  ("fall off", [Instr.Push(2), Instr.Jmp(7)]),
+]
+
+for (name, code) in programs {
+  m = Machine.new(code)
+  match m.run() {
+    Ok(out) => puts("#{name}: #{out} in #{m.steps} steps")
+    Err(e) => puts("#{name}: error: #{e}")
+  }
+}
+
+puts("listing of underflow:")
+[Instr.Push(1), Instr.Add, Instr.Halt].each_with_index { |instr, i| puts("  #{i}: #{instr}") }

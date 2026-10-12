@@ -1,0 +1,4 @@
+# expect: E0350
+class Base {
+  fn hi(self) -> String { super.hi() }
+}

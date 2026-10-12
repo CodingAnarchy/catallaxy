@@ -1,0 +1,85 @@
+# A three-stage pipeline: generator -> transform -> sink, connected by channels.
+# Closing a channel ends the `for` loop of the stage that reads from it.
+
+nums: Channel[Int] = Channel.new(capacity: 4)
+squares: Channel[(Int, Int)] = Channel.new(capacity: 4)
+
+generator = spawn {
+  for i in 1..12 { nums.send(i) }
+  nums.close()
+}
+
+transformer = spawn {
+  for n in nums {
+    if n % 3 != 0 { squares.send((n, n * n)) }
+  }
+  squares.close()
+}
+
+sink = spawn {
+  lines: List[String] = []
+  total = 0
+  for (n, sq) in squares {
+    lines.push("#{n}^2 = #{sq}")
+    total += sq
+  }
+  (lines, total)
+}
+
+generator.join()
+transformer.join()
+let (lines, total) = sink.join().unwrap()
+for l in lines { puts(l) }
+puts("sum of squares (skipping multiples of 3): #{total}")
+
+# Fan-out / fan-in: several transform workers share one input channel. Results arrive in any
+# order, so each carries its index and the collector sorts before printing.
+words = freeze(["pipeline", "channel", "thread", "owner", "frozen", "shared", "move", "join"])
+inbox: Channel[Int] = Channel.new()
+outbox: Channel[(Int, String)] = Channel.new()
+
+workers = (1..3).to_list().map { |_w|
+  spawn {
+    for i in inbox {
+      w = words[i]
+      outbox.send((i, "#{w.upcase} (#{w.length})"))
+    }
+  }
+}
+
+feeder = spawn {
+  for i in 0...words.length { inbox.send(i) }
+  inbox.close()
+}
+
+results: List[(Int, String)] = []
+words.length.times { |_k| results.push(outbox.recv()!) }
+feeder.join()
+for w in workers { w.join() }
+
+ordered = results.sort_with { |a, b| a.0 <=> b.0 }
+for (i, text) in ordered { puts("#{i}: #{text}") }
+
+# Pipelines compose: a stage can be written once and reused.
+fn stage(input: Channel[Int], output: Channel[Int], f: fn(Int) -> Int) -> Thread[Nil] {
+  spawn move {
+    for x in input { output.send(f(x)) }
+    output.close()
+  }
+}
+
+a: Channel[Int] = Channel.new()
+b: Channel[Int] = Channel.new()
+c: Channel[Int] = Channel.new()
+s1 = stage(a, b) { |x| x + 1 }
+s2 = stage(b, c) { |x| x * 10 }
+src = spawn {
+  for x in [1, 2, 3, 4, 5] { a.send(x) }
+  a.close()
+}
+collected: List[Int] = []
+for v in c { collected.push(v) }
+src.join()
+s1.join()
+s2.join()
+puts(collected)

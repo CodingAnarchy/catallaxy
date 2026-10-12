@@ -1,0 +1,103 @@
+# Roman numerals: conversion in both directions. Parsing is strict: it rejects unknown symbols,
+# out-of-range values and non-canonical forms such as "IIII" or "VX" by re-encoding the result.
+
+const TABLE = [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+               (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
+
+enum RomanError {
+  OutOfRange(Int)
+  Empty
+  BadSymbol(String, Int)
+  NotCanonical(String, String)
+
+  fn message(self) -> String {
+    match self {
+      .OutOfRange(n) => "#{n} is outside 1..3999"
+      .Empty => "empty numeral"
+      .BadSymbol(s, at) => "unknown symbol #{inspect(s)} at #{at}"
+      .NotCanonical(got, want) => "#{got} is not canonical (did you mean #{want}?)"
+    }
+  }
+}
+
+fn to_roman(n: Int) -> Result[String, RomanError] {
+  if n < 1 or n > 3999 { return Err(RomanError.OutOfRange(n)) }
+  sb = StringBuilder.new()
+  rest = n
+  for (value, sym) in TABLE {
+    while rest >= value {
+      sb.push(sym)
+      rest -= value
+    }
+  }
+  Ok(sb.to_s)
+}
+
+fn symbol_value(c: String) -> Int? {
+  match c {
+    "I" => 1
+    "V" => 5
+    "X" => 10
+    "L" => 50
+    "C" => 100
+    "D" => 500
+    "M" => 1000
+    _ => nil
+  }
+}
+
+fn from_roman(s: String) -> Result[Int, RomanError] {
+  text = s.strip.upcase
+  if text.is_empty() { return Err(RomanError.Empty) }
+  values: List[Int] = []
+  chars = text.chars
+  for i in 0...chars.length {
+    c = chars[i]
+    v = symbol_value(c)
+    if v == nil { return Err(RomanError.BadSymbol(c, i)) }
+    values.push(v)
+  }
+  total = 0
+  for i in 0...values.length {
+    v = values[i]
+    if i + 1 < values.length and v < values[i + 1] { total -= v } else { total += v }
+  }
+  canonical = to_roman(total)?
+  if canonical != text { return Err(RomanError.NotCanonical(text, canonical)) }
+  Ok(total)
+}
+
+# Adds two numerals, propagating any parse error with `?`.
+fn add_roman(a: String, b: String) -> Result[String, RomanError] {
+  x = from_roman(a)?
+  y = from_roman(b)?
+  to_roman(x + y)
+}
+
+for n in [1, 4, 9, 14, 40, 90, 400, 1994, 2024, 3999] {
+  puts("#{n.to_s.rjust(4)} = #{to_roman(n).unwrap()}")
+}
+puts()
+
+for s in ["mcmxciv", "XLII", "MMMCMXCIX", "IIII", "VX", "IC", "MCMZ", "", "  xiv  "] {
+  match from_roman(s) {
+    Ok(n) => puts("#{inspect(s)} -> #{n}")
+    Err(e) => puts("#{inspect(s)} -> error: #{e.message()}")
+  }
+}
+puts()
+
+for (a, b) in [("XIV", "XXVIII"), ("MM", "MM"), ("MMM", "CMXCIX"), ("X", "Q")] {
+  r = add_roman(a, b).map_err { |e| e.message() }
+  puts("#{a} + #{b} = #{r}")
+}
+
+# Every value survives a round trip.
+ok = 0
+for n in 1..3999 {
+  if from_roman(to_roman(n).unwrap()).unwrap() == n { ok += 1 }
+}
+puts("round trips: #{ok}/3999")
+lengths = (1..3999).to_list().map { |n| to_roman(n).unwrap().length }
+longest = lengths.reduce(0) { |a, b| a.max(b) }
+puts("longest numeral has #{longest} symbols: #{to_roman(lengths.index_of(longest)! + 1).unwrap()}")

@@ -1,0 +1,3 @@
+# expect: E0323
+x: Int = 1
+x: Int = 2

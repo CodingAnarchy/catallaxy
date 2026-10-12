@@ -1,0 +1,86 @@
+# Shared counters: Atomic, Mutex-protected collections, and a shared class with `with lock`.
+
+const THREADS = 8
+const ROUNDS = 500
+
+# 1. Atomic increments never lose updates.
+hits = Atomic.new(0)
+ts = (1..THREADS).to_list().map { |_t|
+  spawn { ROUNDS.times { |_i| hits.add(1) } }
+}
+for t in ts { t.join() }
+puts("atomic hits: #{hits.get()} (expected #{THREADS * ROUNDS})")
+
+# 2. A lock-free maximum using compare_and_set.
+best = Atomic.new(0)
+fn score(seed: Int) -> Int { (seed * 7919 + 13) % 1009 }
+ts = (1..THREADS).to_list().map { |t|
+  spawn {
+    for i in 0...ROUNDS {
+      s = score(t * ROUNDS + i)
+      loop {
+        cur = best.get()
+        if s <= cur or best.compare_and_set(cur, s) { break }
+      }
+    }
+  }
+}
+for t in ts { t.join() }
+expected_best = 0
+for k in ROUNDS...(THREADS + 1) * ROUNDS { expected_best = expected_best.max(score(k)) }
+puts("max score: #{best.get()} (sequential: #{expected_best})")
+
+# 3. A word histogram behind a Mutex.
+text = freeze(["red green blue", "green blue", "blue", "red red", "green", "blue blue red"])
+counts: Mutex[Dict[String, Int]] = Mutex.new([:])
+ts = (0...text.length).to_list().map { |i|
+  spawn {
+    for w in text[i].split() {
+      counts.lock { |d| d[w] = d.fetch(w, 0) + 1 }
+    }
+  }
+}
+for t in ts { t.join() }
+final_counts = counts.get()
+for k in final_counts.keys().sorted() { puts("#{k}: #{final_counts[k]!}") }
+
+# 4. A log list behind a Mutex; entries are sorted before printing.
+log: Mutex[List[String]] = Mutex.new([])
+ts = (1..4).to_list().map { |i|
+  spawn { log.lock { |l| l.push("worker #{i} done") } }
+}
+for t in ts { t.join() }
+for line in log.get().sorted() { puts(line) }
+
+# 5. A shared class: each field access is atomic, `with lock` makes compound updates atomic.
+shared class Account {
+  balance: Int = 0
+  deposits: Int = 0
+  withdrawals: Int = 0
+}
+
+acct = Account.new()
+ts = (1..THREADS).to_list().map { |t|
+  spawn {
+    for i in 0...ROUNDS {
+      with lock(acct) {
+        if (t + i) % 3 == 0 and acct.balance >= 5 {
+          acct.balance = acct.balance - 5
+          acct.withdrawals = acct.withdrawals + 1
+        } else {
+          acct.balance = acct.balance + 2
+          acct.deposits = acct.deposits + 1
+        }
+      }
+    }
+  }
+}
+for t in ts { t.join() }
+puts("operations: #{acct.deposits + acct.withdrawals}")
+puts("balance consistent: #{acct.balance == acct.deposits * 2 - acct.withdrawals * 5}")
+
+# 6. Mutex.update returns the new value.
+m = Mutex.new(1)
+doublers = (1..5).to_list().map { |_i| spawn { m.update { |v| v * 2 } } }
+for t in doublers { t.join() }
+puts("doubled five times: #{m.get()}")

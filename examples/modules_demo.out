@@ -1,0 +1,23 @@
+[textutil 1.2 loaded]
+main body starts
+square area 16.0, perimeter 16.0
+triangle area 6.0, perimeter 12.0
+(1.0, 2.0) is in quadrant I
+(-1.0, 2.0) is in quadrant II
+(-3.0, -0.5) is in quadrant III
+(2.0, -2.0) is in quadrant IV
+(0.0, 5.0) is in quadrant axis
+moved (1.0, 2.0) to (3.0, 4.0), distance 2.828
+true
+origin is called O
+1.2
+The Quick Brown Fox
+a+b+c
+| Catallaxy threads        |
+| coordinate through       |
+| ownership and explicit   |
+| exchange instead of a    |
+| global lock              |
+7 words, palindrome: true
+1 words, palindrome: false
+9 words, palindrome: true

@@ -1,0 +1,12 @@
+atomic hits: 4000 (expected 4000)
+max score: 1008 (sequential: 1008)
+blue: 5
+green: 3
+red: 4
+worker 1 done
+worker 2 done
+worker 3 done
+worker 4 done
+operations: 4000
+balance consistent: true
+doubled five times: 32

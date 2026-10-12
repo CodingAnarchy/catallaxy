@@ -1,0 +1,4 @@
+# expect: E0225
+interface Shape {
+  fn area() -> Float
+}

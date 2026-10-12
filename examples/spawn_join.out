@@ -1,0 +1,13 @@
+fib(10) = 55
+fib(20) = 6765
+fib(30) = 832040
+fib(90) = 2880067194370816120
+sum 1..1000000 = 500000500000
+formula       = 500000500000
+60 / 5 = 12
+60 / 0 -> error: division by zero: 60 / 0
+    at checked_div (examples/spawn_join.cx:41)
+    at <spawn> (examples/spawn_join.cx:45)
+60 / 3 = 20
+min=3 max=25 total=74
+fallback: -1

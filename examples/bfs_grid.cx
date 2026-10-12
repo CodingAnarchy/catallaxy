@@ -1,0 +1,95 @@
+# Breadth-first search for the shortest path through a character maze.
+# `S` is the start, `E` the exit, `#` a wall. The path found is drawn with `*`.
+
+frozen class Pos {
+  row: Int
+  col: Int
+  fn neighbors(self) -> List[Pos] {
+    [Pos.new(self.row - 1, self.col), Pos.new(self.row + 1, self.col),
+     Pos.new(self.row, self.col - 1), Pos.new(self.row, self.col + 1)]
+  }
+  fn key(self) -> (Int, Int) { (self.row, self.col) }
+}
+
+class Maze {
+  cells: List[List[String]]
+  fn rows(self) -> Int { self.cells.length }
+  fn cols(self) -> Int { self.cells[0].length }
+  fn at(self, p: Pos) -> String { self.cells[p.row][p.col] }
+  fn in_bounds(self, p: Pos) -> Bool {
+    p.row >= 0 and p.row < self.rows and p.col >= 0 and p.col < self.cols
+  }
+  fn locate(self, ch: String) -> Pos? {
+    for r in 0...self.rows {
+      if let c = self.cells[r].index_of(ch) { return Pos.new(r, c) }
+    }
+    nil
+  }
+  fn render(self) -> String {
+    sb = StringBuilder.new()
+    for line in self.cells {
+      for ch in line { sb.push(ch) }
+      sb.push("\n")
+    }
+    sb.to_s
+  }
+}
+
+fn parse_maze(text: String) -> Maze {
+  Maze.new(text.lines().map { |l| l.chars })
+}
+
+# Returns the path from start to goal (inclusive), or nil when unreachable.
+fn shortest_path(maze: Maze, start: Pos, goal: Pos) -> List[Pos]? {
+  came_from: Dict[(Int, Int), Pos] = [:]
+  seen: Set[(Int, Int)] = Set.new()
+  seen.add(start.key)
+  queue: List[Pos] = [start]
+  while not queue.is_empty() {
+    cur = queue.shift()!
+    if cur.key == goal.key {
+      path: List[Pos] = [cur]
+      step = cur
+      while came_from.has_key(step.key) {
+        step = came_from[step.key]!
+        path.unshift(step)
+      }
+      return path
+    }
+    for n in cur.neighbors() {
+      if maze.in_bounds(n) and maze.at(n) != "#" and not seen.contains(n.key) {
+        seen.add(n.key)
+        came_from[n.key] = cur
+        queue.push(n)
+      }
+    }
+  }
+  nil
+}
+
+
+fn solve(name: String, text: String) {
+  maze = parse_maze(text)
+  start = maze.locate("S")!
+  goal = maze.locate("E")!
+  puts("#{name}: start #{start.key}, exit #{goal.key}")
+  if let path = shortest_path(maze, start, goal) {
+    puts("shortest path: #{path.length - 1} steps")
+    for p in path {
+      if maze.at(p) == "." { maze.cells[p.row][p.col] = "*" }
+    }
+    print(maze.render())
+  } else {
+    puts("no path")
+  }
+}
+
+solve("maze 1", "S.#.....
+.##.###.
+....#...
+.##...#E
+....#...")
+
+solve("maze 2", "S#.
+##.
+..E")

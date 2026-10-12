@@ -1,0 +1,3 @@
+# expect: E0354
+n = 42
+puts(n[0])

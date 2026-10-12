@@ -1,0 +1,78 @@
+# Several producers feed one consumer through a small bounded channel. The channel's capacity
+# applies back-pressure: a producer blocks in `send` while the buffer is full.
+
+const PRODUCERS = 4
+const ITEMS = 25
+
+frozen class Item {
+  producer: Int
+  seq: Int
+  payload: Int
+}
+
+fn make_payload(p: Int, seq: Int) -> Int { (p * 7919 + seq * 104729) % 10007 }
+
+queue: Channel[Item] = Channel.new(capacity: 3)
+finished = Atomic.new(0)
+max_backlog = Atomic.new(0)
+
+producers = (1..PRODUCERS).to_list().map { |p|
+  spawn {
+    for seq in 0...ITEMS {
+      queue.send(Item.new(p, seq, make_payload(p, seq)))
+      backlog = queue.length()
+      loop {
+        cur = max_backlog.get()
+        if backlog <= cur or max_backlog.compare_and_set(cur, backlog) { break }
+      }
+    }
+    # The last producer to finish closes the channel; Atomic.add returns the new value.
+    if finished.add(1) == PRODUCERS { queue.close() }
+  }
+}
+
+# The consumer runs on the main thread.
+received = 0
+checksum = 0
+per_producer = List.filled(PRODUCERS + 1, 0)
+next_seq = List.filled(PRODUCERS + 1, 0)
+in_order = true
+for item in queue {
+  received += 1
+  checksum = checksum ^ (item.payload * item.producer + item.seq)
+  per_producer[item.producer] += item.payload
+  if item.seq != next_seq[item.producer] { in_order = false }
+  next_seq[item.producer] = item.seq + 1
+}
+for t in producers { t.join() }
+
+expected = 0
+expected_checksum = 0
+for p in 1..PRODUCERS {
+  for seq in 0...ITEMS {
+    expected += make_payload(p, seq)
+    expected_checksum = expected_checksum ^ (make_payload(p, seq) * p + seq)
+  }
+}
+total = per_producer.reduce(0) { |a, b| a + b }
+
+puts("received #{received} items from #{PRODUCERS} producers")
+for p in 1..PRODUCERS { puts("  producer #{p}: payload sum #{per_producer[p]}") }
+puts("total #{total}, expected #{expected}, match: #{total == expected}")
+puts("xor checksum #{checksum}, expected #{expected_checksum}")
+puts("each producer's items arrived in order: #{in_order}")
+puts("backlog never exceeded capacity: #{max_backlog.get() <= 3}")
+puts("channel closed: #{queue.is_closed()}")
+puts("recv after close: #{queue.recv()}")
+
+# try_recv never blocks: it returns nil when nothing is buffered.
+mailbox: Channel[String] = Channel.new(capacity: 2)
+puts("empty try_recv: #{mailbox.try_recv()}")
+mailbox.send("first")
+mailbox.send("second")
+puts("buffered: #{mailbox.length()}")
+puts("try_recv: #{mailbox.try_recv() ?? "none"}")
+puts("try_recv: #{mailbox.try_recv() ?? "none"}")
+puts("try_recv: #{mailbox.try_recv() ?? "none"}")
+mailbox.close()
+puts("closed: #{mailbox.is_closed()}, try_recv: #{mailbox.try_recv() ?? "none"}")

@@ -1,0 +1,94 @@
+# Caesar cipher: shift letters (keeping case and punctuation), then crack an unknown shift by
+# scoring every candidate against English letter frequencies (chi-squared).
+
+const A_LOWER = 97
+const A_UPPER = 65
+
+# Relative frequencies (percent) of a..z in English text.
+const ENGLISH = [8.2, 1.5, 2.8, 4.3, 12.7, 2.2, 2.0, 6.1, 7.0, 0.15, 0.77, 4.0, 2.4,
+                 6.7, 7.5, 1.9, 0.095, 6.0, 6.3, 9.1, 2.8, 0.98, 2.4, 0.15, 2.0, 0.074]
+
+fn shift_char(c: String, k: Int) -> String {
+  code = c.ord
+  if code >= A_LOWER and code < A_LOWER + 26 {
+    (A_LOWER + (code - A_LOWER + k) % 26).chr
+  } else if code >= A_UPPER and code < A_UPPER + 26 {
+    (A_UPPER + (code - A_UPPER + k) % 26).chr
+  } else {
+    c
+  }
+}
+
+fn encrypt(text: String, k: Int) -> String {
+  sb = StringBuilder.new()
+  for c in text { sb.push(shift_char(c, k)) }
+  sb.to_s
+}
+
+# Floor modulo makes negative shifts wrap correctly.
+fn decrypt(text: String, k: Int) -> String { encrypt(text, -k) }
+
+fn letter_counts(text: String) -> List[Int] {
+  counts = List.filled(26, 0)
+  for c in text.downcase {
+    code = c.ord
+    if code >= A_LOWER and code < A_LOWER + 26 { counts[code - A_LOWER] += 1 }
+  }
+  counts
+}
+
+fn chi_squared(text: String) -> Float {
+  counts = letter_counts(text)
+  total = counts.reduce(0) { |a, b| a + b }
+  if total == 0 { return Math.INFINITY }
+  score = 0.0
+  for i in 0...26 {
+    expected = ENGLISH[i] / 100.0 * total.to_f
+    diff = counts[i].to_f - expected
+    score += diff * diff / expected
+  }
+  score
+}
+
+# Tries all 26 shifts; returns (best shift, plaintext).
+fn crack(cipher: String) -> (Int, String) {
+  best_k = 0
+  best_score = Math.INFINITY
+  for k in 0...26 {
+    s = chi_squared(decrypt(cipher, k))
+    if s < best_score {
+      best_score = s
+      best_k = k
+    }
+  }
+  (best_k, decrypt(cipher, best_k))
+}
+
+msg = "Attack at dawn! Meet me by the old oak tree, Zulu."
+for k in [1, 3, 13, 25, 26, -1] {
+  c = encrypt(msg, k)
+  ok = decrypt(c, k) == msg
+  puts("k=#{k.to_s.rjust(2)}: #{c} (round trip: #{ok})")
+}
+
+# ROT13 is its own inverse.
+rot = encrypt("Hello, World", 13)
+puts("rot13: #{rot} -> #{encrypt(rot, 13)}")
+
+secrets = [
+  ("The quick brown fox jumps over the lazy dog while the farmer sleeps in the barn", 7),
+  ("It was the best of times, it was the worst of times, it was the age of wisdom", 19),
+  ("Programming languages are tools for thinking about computation and data", 4),
+]
+for (plain, k) in secrets {
+  cipher = encrypt(plain, k)
+  let (found, text) = crack(cipher)
+  status = if found == k and text == plain { "ok" } else { "MISSED" }
+  puts("cracked shift #{found} (#{status}): #{text.slice(0, 30)}...")
+}
+
+counts = letter_counts(msg)
+top = (0...26).to_list().sort_with { |a, b|
+  if counts[a] != counts[b] { counts[b] <=> counts[a] } else { a <=> b }
+}
+puts("most common letters in msg: #{top.slice(0, 3).map { |i| (A_LOWER + i).chr }}")

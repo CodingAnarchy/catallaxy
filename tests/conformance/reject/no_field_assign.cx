@@ -1,0 +1,4 @@
+# expect: E0327
+class Point { x: Int }
+p = Point.new(1)
+p.z = 3

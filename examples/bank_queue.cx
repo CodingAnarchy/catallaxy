@@ -1,0 +1,107 @@
+# A bank with several tellers and one first-come-first-served queue.
+# Arrivals and service times come from a seeded linear congruential generator, so every run
+# produces the same report.
+
+class Lcg {
+  state: Int
+
+  fn next(self) -> Int {
+    self.state = (self.state * 1103515245 + 12345) % 2147483648
+    self.state
+  }
+
+  # Uniform integer in lo..hi (inclusive), using the better-mixed high bits.
+  fn between(self, lo: Int, hi: Int) -> Int { lo + (self.next() / 65536) % (hi - lo + 1) }
+}
+
+frozen class Customer {
+  id: Int
+  arrival: Int
+  service: Int
+}
+
+class Teller {
+  name: String
+  free_at: Int = 0
+  busy_time: Int = 0
+  served: Int = 0
+}
+
+class Stats {
+  total_wait: Int = 0
+  max_wait: Int = 0
+  waited: Int = 0
+  last_departure: Int = 0
+}
+
+fn generate(rng: Lcg, count: Int) -> List[Customer] {
+  out: List[Customer] = []
+  clock = 0
+  for id in 1..count {
+    clock += rng.between(0, 5)
+    out.push(Customer.new(id, clock, rng.between(3, 10)))
+  }
+  out
+}
+
+fn pick_teller(tellers: List[Teller]) -> Teller {
+  best = tellers[0]
+  for t in tellers {
+    if t.free_at < best.free_at { best = t }
+  }
+  best
+}
+
+fn clock_str(minutes: Int) -> String {
+  h = 9 + minutes / 60
+  m = minutes % 60
+  "#{h.to_s.rjust(2, "0")}:#{m.to_s.rjust(2, "0")}"
+}
+
+fn simulate(customers: List[Customer], tellers: List[Teller], verbose: Bool) -> Stats {
+  stats = Stats.new()
+  for c in customers {
+    t = pick_teller(tellers)
+    start = c.arrival.max(t.free_at)
+    wait = start - c.arrival
+    t.free_at = start + c.service
+    t.busy_time += c.service
+    t.served += 1
+    stats.total_wait += wait
+    stats.max_wait = stats.max_wait.max(wait)
+    if wait > 0 { stats.waited += 1 }
+    stats.last_departure = stats.last_departure.max(t.free_at)
+    if verbose {
+      puts("#{clock_str(c.arrival)}  customer #{c.id.to_s.rjust(2)} -> #{t.name}  wait #{wait.to_s.rjust(2)}  done #{clock_str(t.free_at)}")
+    }
+  }
+  stats
+}
+
+fn report(customers: List[Customer], tellers: List[Teller], stats: Stats) {
+  n = customers.length
+  avg = stats.total_wait.to_f / n.to_f
+  puts("customers: #{n}, waited: #{stats.waited}, max wait: #{stats.max_wait} min, average wait: #{avg.format(2)} min")
+  for t in tellers {
+    util = 100.0 * t.busy_time.to_f / stats.last_departure.to_f
+    puts("  #{t.name}: served #{t.served}, busy #{t.busy_time} min, utilisation #{util.format(1)}%")
+  }
+}
+
+customers = generate(Lcg.new(2024), 20)
+
+puts("== two tellers ==")
+two = [Teller.new("Ann"), Teller.new("Bob")]
+stats = simulate(customers, two, true)
+report(customers, two, stats)
+
+# Same customers, different staffing levels: how does the average wait change?
+puts()
+puts("== staffing comparison ==")
+names = ["Ann", "Bob", "Cy", "Di"]
+for k in 1..4 {
+  staff = names.slice(0, k).map { |nm| Teller.new(nm) }
+  s = simulate(customers, staff, false)
+  avg = s.total_wait.to_f / customers.length.to_f
+  puts("#{k} teller(s): average wait #{avg.format(2)} min, max wait #{s.max_wait} min, closes at #{clock_str(s.last_departure)}")
+}

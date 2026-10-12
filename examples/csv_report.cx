@@ -1,0 +1,117 @@
+# CSV report: parses CSV text with quoted fields (commas and doubled quotes inside quotes),
+# validates rows into records, aggregates sales per category and prints a table.
+
+const DATA = "region,category,item,units,unit_price
+north,Hardware,\"Hammer, claw\",12,9.50
+south,Hardware,Wrench,5,12.00
+north,Garden,\"Hose \"\"50ft\"\"\",3,24.99
+east,Garden,Rake,7,15.25
+south,Kitchen,Kettle,4,30.00
+east,Hardware,Screwdriver set,10,7.75
+north,Kitchen,\"Pan, cast iron\",2,45.00
+west,Garden,Shovel,oops,18.00
+west,Kitchen,Toaster,1
+south,Garden,Seeds,40,1.10"
+
+# Splits one CSV line into fields, honoring double-quoted fields.
+fn parse_line(line: String) -> List[String] {
+  fields: List[String] = []
+  sb = StringBuilder.new()
+  in_quotes = false
+  chars = line.chars
+  i = 0
+  while i < chars.length {
+    c = chars[i]
+    if in_quotes {
+      if c == "\"" {
+        if i + 1 < chars.length and chars[i + 1] == "\"" {
+          sb.push("\"")
+          i += 1
+        } else {
+          in_quotes = false
+        }
+      } else {
+        sb.push(c)
+      }
+    } else if c == "\"" {
+      in_quotes = true
+    } else if c == "," {
+      fields.push(sb.to_s)
+      sb.clear()
+    } else {
+      sb.push(c)
+    }
+    i += 1
+  }
+  fields.push(sb.to_s)
+  fields
+}
+
+class Sale {
+  region: String
+  category: String
+  item: String
+  units: Int
+  price: Float
+
+  fn total(self) -> Float { self.units.to_f * self.price }
+}
+
+fn to_sale(fields: List[String], line_no: Int) -> Result[Sale, String] {
+  if fields.length != 5 {
+    return Err("line #{line_no}: expected 5 fields, got #{fields.length}")
+  }
+  units = fields[3].to_i
+  if units == nil { return Err("line #{line_no}: bad units `#{fields[3]}`") }
+  price = fields[4].to_f
+  if price == nil { return Err("line #{line_no}: bad price `#{fields[4]}`") }
+  Ok(Sale.new(fields[0], fields[1], fields[2], units, price))
+}
+
+class Totals {
+  units: Int = 0
+  revenue: Float = 0.0
+  items: Int = 0
+}
+
+lines = DATA.lines()
+header = parse_line(lines[0])
+puts("columns: #{header}")
+
+sales: List[Sale] = []
+errors: List[String] = []
+rows = lines.slice(1, lines.length - 1)
+rows.each_with_index { |line, i|
+  match to_sale(parse_line(line), i + 2) {
+    Ok(s) => sales.push(s)
+    Err(e) => errors.push(e)
+  }
+}
+puts("parsed #{sales.length} rows, #{errors.length} rejected")
+for e in errors { puts("  ! #{e}") }
+puts()
+
+by_cat: Dict[String, Totals] = [:]
+for s in sales {
+  t = by_cat.get_or_insert(s.category, Totals.new())
+  t.units += s.units
+  t.revenue += s.total()
+  t.items += 1
+}
+
+puts("Category".ljust(10) + "Items".rjust(6) + "Units".rjust(7) + "Revenue".rjust(10))
+puts("-" * 33)
+grand = 0.0
+for cat in by_cat.keys.sorted() {
+  t = by_cat[cat]!
+  grand += t.revenue
+  puts(cat.ljust(10) + t.items.to_s.rjust(6) + t.units.to_s.rjust(7) + t.revenue.format(2).rjust(10))
+}
+puts("-" * 33)
+puts("Total".ljust(23) + grand.format(2).rjust(10))
+puts()
+
+best = sales.reduce(sales[0]) { |acc, s| if s.total() > acc.total() { s } else { acc } }
+puts("best line: #{best.item} (#{best.region}) = #{best.total().format(2)}")
+quoted = sales.select { |s| s.item.contains(",") or s.item.contains("\"") }
+puts("items needing quotes: #{quoted.map { |s| s.item }}")

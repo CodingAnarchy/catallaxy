@@ -1,0 +1,98 @@
+# Palindromes: phrase checks that ignore case and punctuation, the longest palindromic substring
+# (expand around centers), palindromic numbers, and the reverse-and-add process.
+
+fn normalize(s: String) -> String {
+  sb = StringBuilder.new()
+  for c in s.downcase {
+    if c.is_alnum { sb.push(c) }
+  }
+  sb.to_s
+}
+
+fn is_palindrome(s: String) -> Bool {
+  t = normalize(s)
+  i = 0
+  j = t.length - 1
+  while i < j {
+    if t[i] != t[j] { return false }
+    i += 1
+    j -= 1
+  }
+  true
+}
+
+# Longest palindromic substring by expanding around each of the 2n-1 centers.
+fn longest_palindrome(s: String) -> String {
+  chars = s.chars
+  n = chars.length
+  if n == 0 { return "" }
+  best_start = 0
+  best_len = 1
+  for center in 0...(2 * n - 1) {
+    lo = center / 2
+    hi = lo + center % 2
+    while lo >= 0 and hi < n and chars[lo] == chars[hi] {
+      lo -= 1
+      hi += 1
+    }
+    len = hi - lo - 1
+    if len > best_len {
+      best_len = len
+      best_start = lo + 1
+    }
+  }
+  s.slice(best_start, best_len)
+}
+
+fn is_palindromic_number(n: Int, base: Int = 10) -> Bool {
+  s = n.to_s_radix(base)
+  s == s.reverse
+}
+
+fn reverse_number(n: Int) -> Int { n.to_s.reverse.to_i! }
+
+# Repeatedly adds a number to its reverse until it becomes a palindrome (or gives up).
+fn reverse_and_add(n: Int, limit: Int) -> (Int, Int)? {
+  x = n
+  for step in 1..limit {
+    x = x + reverse_number(x)
+    if is_palindromic_number(x) { return (step, x) }
+  }
+  nil
+}
+
+phrases = [
+  "A man, a plan, a canal: Panama!",
+  "Was it a car or a cat I saw?",
+  "No 'x' in Nixon",
+  "Hello, world",
+  "Step on no pets",
+  "Palindrome",
+  "",
+]
+for p in phrases {
+  mark = if is_palindrome(p) { "yes" } else { "no " }
+  puts("#{mark}  #{inspect(p)}")
+}
+puts()
+
+for s in ["babad", "cbbd", "forgeeksskeegfor", "abacdfgdcaba", "x", "racecar level"] {
+  puts("#{s.ljust(18)} -> #{longest_palindrome(s)}")
+}
+puts()
+
+pals = (1..200).to_list().select { |n| n > 100 and is_palindromic_number(n) }
+puts("palindromes in 101..200: #{pals}")
+both = (1..600).to_list().select { |n| n > 9 and is_palindromic_number(n) and is_palindromic_number(n, 2) }
+puts("palindromic in base 10 and 2: #{both}")
+puts("585 in binary: #{585.to_s_radix(2)}")
+puts()
+
+for n in [56, 87, 89, 196] {
+  if let found = reverse_and_add(n, 30) {
+    let (steps, value) = found
+    puts("#{n}: #{steps} steps -> #{value}")
+  } else {
+    puts("#{n}: no palindrome within 30 steps")
+  }
+}

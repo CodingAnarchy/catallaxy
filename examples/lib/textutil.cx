@@ -1,0 +1,49 @@
+# Helper module for examples/modules_demo.cx: small text utilities.
+
+pub const VERSION = "1.2"
+
+# Top-level statements of a module run once, when it is first imported.
+puts("[textutil #{VERSION} loaded]")
+
+fn capitalize_word(w: String) -> String {
+  if w.is_empty() { w } else { w[0].upcase + w.substring(1, w.length).downcase }
+}
+
+pub fn join_words(words: List[String], sep: String) -> String {
+  sb = StringBuilder.new()
+  words.each_with_index { |w, i|
+    if i > 0 { sb.push(sep) }
+    sb.push(w)
+  }
+  sb.to_s
+}
+
+pub fn title_case(s: String) -> String {
+  join_words(s.split().map { |w| capitalize_word(w) }, " ")
+}
+
+# Greedy word wrap.
+pub fn wrap(text: String, width: Int) -> List[String] {
+  lines: List[String] = []
+  current = ""
+  for w in text.split() {
+    if current.is_empty() {
+      current = w
+    } else if current.length + 1 + w.length <= width {
+      current = current + " " + w
+    } else {
+      lines.push(current)
+      current = w
+    }
+  }
+  if not current.is_empty() { lines.push(current) }
+  lines
+}
+
+pub extend String {
+  fn is_palindrome(self) -> Bool {
+    letters = self.downcase.chars.select { |c| c.is_alnum }
+    letters == letters.reverse()
+  }
+  fn word_count(self) -> Int { self.split().length }
+}

@@ -1,0 +1,2 @@
+# expect: E0104
+var hits = 0

@@ -1,0 +1,6 @@
+build: ["fetch", "docs", "lint", "compile", "link", "package"]
+clothes: ["shirt", "socks", "tie", "underwear", "pants", "belt", "jacket", "shoes"]
+cyclic: error, cycle among ["a", "b", "c"]
+malformed: error, malformed line: "this line has no arrow"
+empty target: error, malformed line: "a -> b,"
+nothing: []

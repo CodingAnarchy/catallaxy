@@ -1,0 +1,119 @@
+# Topological sorting with Kahn's algorithm. Dependency specs are parsed from text, and both
+# parsing and sorting report problems through Result instead of panicking.
+
+enum GraphError {
+  Malformed(line: String)
+  Cycle(nodes: List[String])
+
+  fn message(self) -> String {
+    match self {
+      .Malformed(line) => "malformed line: #{inspect(line)}"
+      .Cycle(nodes) => "cycle among #{nodes}"
+    }
+  }
+}
+
+class DepGraph {
+  nodes: List[String] = []                # in first-seen order
+  deps: Dict[String, List[String]] = [:]  # node -> nodes that must come after it
+
+  fn add_node(self, n: String) {
+    if not self.deps.has_key(n) {
+      self.deps[n] = []
+      self.nodes.push(n)
+    }
+  }
+
+  # "a -> b, c" means a must come before b and c.
+  fn parse(text: String) -> Result[DepGraph, GraphError] {
+    g = DepGraph.new()
+    for raw in text.lines() {
+      line = raw.strip
+      if line.is_empty() or line.starts_with("#") { continue }
+      parts = line.split("->")
+      if parts.length != 2 { return Err(GraphError.Malformed(line)) }
+      from = parts[0].strip
+      if from.is_empty() { return Err(GraphError.Malformed(line)) }
+      g.add_node(from)
+      for t in parts[1].split(",") {
+        to = t.strip
+        if to.is_empty() { return Err(GraphError.Malformed(line)) }
+        g.add_node(to)
+        g.deps[from]!.push(to)
+      }
+    }
+    Ok(g)
+  }
+
+  fn sort(self) -> Result[List[String], GraphError] {
+    indegree: Dict[String, Int] = [:]
+    for n in self.nodes { indegree[n] = 0 }
+    for n in self.nodes {
+      for m in self.deps[n]! { indegree[m] = indegree[m]! + 1 }
+    }
+    # Always take the alphabetically smallest ready node, so the order is deterministic.
+    ready = self.nodes.select { |n| indegree[n]! == 0 }.sorted()
+    order: List[String] = []
+    while not ready.is_empty() {
+      n = ready.shift()!
+      order.push(n)
+      for m in self.deps[n]! {
+        indegree[m] = indegree[m]! - 1
+        if indegree[m]! == 0 {
+          ready.push(m)
+          ready.sort_in_place()
+        }
+      }
+    }
+    if order.length < self.nodes.length {
+      stuck = self.nodes.reject { |n| order.contains(n) }
+      return Err(GraphError.Cycle(stuck))
+    }
+    Ok(order)
+  }
+}
+
+fn plan(text: String) -> Result[List[String], GraphError] {
+  g = DepGraph.parse(text)?
+  g.sort()
+}
+
+fn report(title: String, text: String) {
+  match plan(text) {
+    Ok(order) => puts("#{title}: #{order}")
+    Err(e) => puts("#{title}: error, #{e.message()}")
+  }
+}
+
+report("build", "
+  # compile before link, link before package
+  fetch -> compile, docs
+  compile -> link
+  link -> package
+  docs -> package
+  lint -> compile
+")
+
+report("clothes", "
+  underwear -> pants, shoes
+  pants -> belt, shoes
+  shirt -> belt, tie
+  tie -> jacket
+  belt -> jacket
+  socks -> shoes
+")
+
+report("cyclic", "
+  a -> b
+  b -> c
+  c -> a
+  start -> a
+  x -> y
+")
+
+report("malformed", "
+  a -> b
+  this line has no arrow
+")
+report("empty target", "a -> b,")
+report("nothing", "")

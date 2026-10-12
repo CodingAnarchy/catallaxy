@@ -1,0 +1,72 @@
+# Spawning threads, joining them, and handling a thread that panics.
+
+fn fib(n: Int) -> Int {
+  a = 0
+  b = 1
+  n.times { |_i|
+    t = a + b
+    a = b
+    b = t
+  }
+  a
+}
+
+fn sum_range(lo: Int, hi: Int) -> Int {
+  total = 0
+  for i in lo..hi { total += i }
+  total
+}
+
+# Independent computations run in parallel; join collects them in spawn order.
+jobs = [10, 20, 30, 90]
+threads = jobs.map { |n| spawn { fib(n) } }
+for i in 0...threads.length {
+  t = threads[i]
+  match t.join() {
+    Ok(v) => puts("fib(#{jobs[i]}) = #{v}")
+    Err(e) => puts("fib(#{jobs[i]}) failed: #{e}")
+  }
+}
+
+# Split a large sum into chunks, one thread per chunk.
+chunk = 250_000
+parts = (0...4).to_list().map { |k| spawn { sum_range(k * chunk + 1, (k + 1) * chunk) } }
+total = 0
+for p in parts { total += p.join().unwrap() }
+puts("sum 1..1000000 = #{total}")
+puts("formula       = #{1_000_000 * 1_000_001 / 2}")
+
+# A panic stays inside its thread; the joiner sees an Err with the message.
+fn checked_div(a: Int, b: Int) -> Int {
+  if b == 0 { panic("division by zero: #{a} / 0") }
+  a / b
+}
+divisors = [5, 0, 3]
+outcomes = divisors.map { |d| spawn { checked_div(60, d) } }
+for i in 0...outcomes.length {
+  t = outcomes[i]
+  r = t.join()
+  if let Ok(v) = r {
+    puts("60 / #{divisors[i]} = #{v}")
+  } else {
+    puts("60 / #{divisors[i]} -> error: #{r.err() ?? "?"}")
+  }
+}
+
+# Moving owned data into a thread: the list now belongs to the worker.
+readings = [12, 7, 19, 3, 25, 8]
+stats = spawn move {
+  hi = readings.reduce(readings[0]) { |m, x| m.max(x) }
+  lo = readings.reduce(readings[0]) { |m, x| m.min(x) }
+  acc = readings.reduce(0) { |a, b| a + b }
+  (lo, hi, acc)
+}
+let (lo, hi, tot) = stats.join().unwrap()
+puts("min=#{lo} max=#{hi} total=#{tot}")
+
+# unwrap_or gives a fallback for a failed thread.
+risky = spawn {
+  xs = [1, 2, 3]
+  xs[10]
+}
+puts("fallback: #{risky.join().unwrap_or(-1)}")

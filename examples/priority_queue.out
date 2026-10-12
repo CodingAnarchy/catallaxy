@@ -1,0 +1,14 @@
+min first: [-4, 0, 3, 7, 7, 19, 42, 51, 88]
+max first: 88, then 42, 3 left
+next up: fix prod outage
+09:00  [p9] fix prod outage
+10:00  [p9] security patch
+11:00  [p5] review PR
+12:00  [p6] address review comments
+13:00  [p5] plan sprint
+14:00  [p2] write report
+15:00  [p2] reply to email
+16:00  [p1] lunch
+[0, 1, 2, 3, 4, 5, 9, 10, 11]
+nil
+nothing queued

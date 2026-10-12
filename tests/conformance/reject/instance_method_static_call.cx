@@ -1,0 +1,6 @@
+# expect: E0347
+class Circle {
+  r: Float
+  fn area(self) -> Float { 3.14 * self.r * self.r }
+}
+puts(Circle.area())

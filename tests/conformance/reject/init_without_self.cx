@@ -1,0 +1,5 @@
+# expect: E0224
+class Acct {
+  balance: Int
+  fn init(start: Int) { }
+}

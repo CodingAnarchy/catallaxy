@@ -1,0 +1,47 @@
+# Helper module for examples/modules_demo.cx: plane geometry.
+
+pub const ORIGIN_LABEL = "O"
+
+pub frozen class Point {
+  x: Float
+  y: Float
+
+  fn dist(self, other: Point) -> Float { Math.hypot(self.x - other.x, self.y - other.y) }
+  fn translate(self, dx: Float, dy: Float) -> Point { Point.new(self.x + dx, self.y + dy) }
+  fn to_s(self) -> String { "(#{self.x}, #{self.y})" }
+}
+
+pub enum Quadrant {
+  First
+  Second
+  Third
+  Fourth
+  OnAxis
+}
+
+pub fn quadrant(p: Point) -> Quadrant {
+  if p.x == 0.0 or p.y == 0.0 { return Quadrant.OnAxis }
+  if p.x > 0.0 {
+    if p.y > 0.0 { Quadrant.First } else { Quadrant.Fourth }
+  } else {
+    if p.y > 0.0 { Quadrant.Second } else { Quadrant.Third }
+  }
+}
+
+# Twice the signed area (shoelace formula); private to this module.
+fn cross_sum(pts: List[Point]) -> Float {
+  total = 0.0
+  pts.each_with_index { |p, i|
+    q = pts[(i + 1) % pts.length]
+    total += p.x * q.y - q.x * p.y
+  }
+  total
+}
+
+pub fn area(pts: List[Point]) -> Float { cross_sum(pts).abs / 2.0 }
+
+pub fn perimeter(pts: List[Point]) -> Float {
+  total = 0.0
+  pts.each_with_index { |p, i| total += p.dist(pts[(i + 1) % pts.length]) }
+  total
+}

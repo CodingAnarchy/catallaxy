@@ -1,0 +1,95 @@
+# A vending machine as a state machine: enum states and events, match with guards, an event log.
+
+enum State {
+  Idle
+  Collecting(cents: Int)
+  OutOfService(reason: String)
+
+  fn label(self) -> String {
+    match self {
+      .Idle => "idle"
+      .Collecting(c) => "collecting(#{c})"
+      .OutOfService(r) => "out-of-service(#{r})"
+    }
+  }
+}
+
+enum Event {
+  Coin(Int)
+  Select(String)
+  Cancel
+  Fault(String)
+  Repair
+}
+
+const PRICES = ["cola": 125, "chips": 90, "candy": 65]
+const VALID_COINS = [5, 10, 25, 100]
+
+class Machine {
+  state: State = State.Idle
+  stock: Dict[String, Int] = ["cola": 2, "chips": 1, "candy": 0]
+  bank: Int = 0
+  log: List[String] = []
+
+  fn handle(self, event: Event) {
+    let (next, note) = self.transition(event)
+    self.log.push("#{self.state.label()} --#{event}--> #{next.label()}: #{note}")
+    self.state = next
+  }
+
+  fn transition(self, event: Event) -> (State, String) {
+    match (self.state, event) {
+      (.OutOfService(r), .Repair) => (State.Idle, "repaired #{r}")
+      (.OutOfService(_), _) => (self.state, "ignored, machine is out of service")
+      (_, .Fault(why)) => (State.OutOfService(why), "fault reported")
+      (.Idle, .Coin(c)) if VALID_COINS.contains(c) => (State.Collecting(c), "accepted #{c}")
+      (.Collecting(have), .Coin(c)) if VALID_COINS.contains(c) => (State.Collecting(have + c), "accepted #{c}")
+      (_, .Coin(c)) => (self.state, "rejected coin #{c}")
+      (.Collecting(have), .Select(item)) => self.vend(have, item)
+      (.Idle, .Select(item)) => (State.Idle, "insert coins first")
+      (.Collecting(have), .Cancel) => (State.Idle, "returned #{have}")
+      # Only Cancel/Repair in Idle remain; the checker needs a catch-all for tuple matches (BUGS.md).
+      _ => (self.state, "nothing to do")
+    }
+  }
+
+  fn vend(self, have: Int, item: String) -> (State, String) {
+    price = PRICES[item]
+    if price == nil { return (State.Collecting(have), "no such item #{item}") }
+    if self.stock.fetch(item, 0) == 0 { return (State.Collecting(have), "#{item} sold out") }
+    if have < price { return (State.Collecting(have), "#{item} costs #{price}, need #{price - have} more") }
+    self.stock[item] = self.stock[item]! - 1
+    self.bank += price
+    (State.Idle, "dispensed #{item}, change #{have - price}")
+  }
+}
+
+m = Machine.new()
+events = [
+  Event.Select("cola"),
+  Event.Coin(100),
+  Event.Coin(3),
+  Event.Select("cola"),
+  Event.Coin(25),
+  Event.Select("cola"),
+  Event.Coin(100),
+  Event.Select("candy"),
+  Event.Select("water"),
+  Event.Select("chips"),
+  Event.Cancel,
+  Event.Fault("coin jam"),
+  Event.Coin(25),
+  Event.Repair,
+  Event.Coin(100),
+  Event.Coin(25),
+  Event.Coin(10),
+  Event.Select("cola"),
+  Event.Coin(100),
+  Event.Select("cola"),
+  Event.Cancel,
+]
+for e in events { m.handle(e) }
+m.log.each_with_index { |line, i| puts("#{(i + 1).to_s.rjust(2)}. #{line}") }
+puts("final state: #{m.state.label()}")
+puts("bank: #{m.bank}")
+puts("stock: #{m.stock}")

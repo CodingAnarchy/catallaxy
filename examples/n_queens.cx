@@ -1,0 +1,84 @@
+# N-queens by backtracking: count all solutions for n = 1..8 and show the first board for n = 8.
+
+class Solver {
+  n: Int
+  cols: List[Bool] = []
+  diag1: List[Bool] = []      # row + col
+  diag2: List[Bool] = []      # row - col + n - 1
+  placement: List[Int] = []   # placement[row] = column of the queen in that row
+  count: Int = 0
+  first: List[Int]? = nil
+
+  fn init(self, n: Int) {
+    self.n = n
+    self.cols = List.filled(n, false)
+    self.diag1 = List.filled(2 * n, false)
+    self.diag2 = List.filled(2 * n, false)
+    self.placement = List.filled(n, -1)
+  }
+
+  fn free(self, row: Int, col: Int) -> Bool {
+    not self.cols[col] and not self.diag1[row + col] and not self.diag2[row - col + self.n - 1]
+  }
+
+  fn mark(self, row: Int, col: Int, value: Bool) {
+    self.cols[col] = value
+    self.diag1[row + col] = value
+    self.diag2[row - col + self.n - 1] = value
+  }
+
+  fn place(self, row: Int) -> Nil {
+    if row == self.n {
+      self.count += 1
+      if self.first == nil { self.first = self.placement.dup() }
+      return
+    }
+    for col in 0...self.n {
+      if self.free(row, col) {
+        self.mark(row, col, true)
+        self.placement[row] = col
+        self.place(row + 1)
+        self.mark(row, col, false)
+      }
+    }
+  }
+
+  fn solve(self) -> Int {
+    self.place(0)
+    self.count
+  }
+}
+
+fn render(cols: List[Int]) -> String {
+  n = cols.length
+  sb = StringBuilder.new()
+  for c in cols {
+    for i in 0...n { sb.push(if i == c { "Q " } else { ". " }) }
+    sb.push("\n")
+  }
+  sb.to_s
+}
+
+counts: List[Int] = []
+for n in 1..8 {
+  counts.push(Solver.new(n).solve())
+}
+puts("solutions for n = 1..8: #{counts}")
+
+eight = Solver.new(8)
+puts("n = 8: #{eight.solve()} solutions; first one (columns by row): #{eight.first}")
+if let board = eight.first {
+  print(render(board))
+}
+
+# Every solution is valid: no two queens share a column or a diagonal.
+fn valid(cols: List[Int]) -> Bool {
+  for r1 in 0...cols.length {
+    for r2 in (r1 + 1)...cols.length {
+      dc = (cols[r1] - cols[r2]).abs
+      if dc == 0 or dc == r2 - r1 { return false }
+    }
+  }
+  true
+}
+puts("valid: #{valid(eight.first!)}, broken board valid: #{valid([0, 1, 2, 3])}")

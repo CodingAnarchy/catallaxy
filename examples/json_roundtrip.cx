@@ -1,0 +1,96 @@
+# JSON round trips: parse a document into Dyn, pull typed values out with `as?`, convert to typed
+# classes, transform, and serialize back. Malformed input comes back as Err.
+
+const INPUT = "{
+  \"store\": \"Corner Books\",
+  \"open\": true,
+  \"rating\": 4.5,
+  \"books\": [
+    {\"title\": \"Dune\", \"price\": 9.99, \"tags\": [\"scifi\", \"classic\"], \"stock\": 3},
+    {\"title\": \"Emma\", \"price\": 7.5, \"tags\": [\"classic\"], \"stock\": 0},
+    {\"title\": \"Neuromancer\", \"price\": 11.25, \"tags\": [\"scifi\", \"cyberpunk\"], \"stock\": 5},
+    {\"title\": \"Untitled\", \"price\": \"free\", \"stock\": 1}
+  ],
+  \"owner\": null
+}"
+
+class Book {
+  title: String
+  price: Float
+  tags: List[String]
+  stock: Int
+
+  fn to_dyn(self) -> Dyn {
+    tags: List[Dyn] = self.tags.map { |t| t }
+    d: Dict[String, Dyn] = ["title": self.title, "price": self.price, "tags": tags, "stock": self.stock]
+    d
+  }
+}
+
+# Converts one JSON object into a Book, explaining what is wrong if it does not fit.
+fn book_from(v: Dyn) -> Result[Book, String] {
+  title = v["title"] as? String
+  if title == nil { return Err("book without a title") }
+  price = v["price"] as? Float
+  if price == nil { return Err("#{title}: price is not a number (#{Json.stringify(v["price"])})") }
+  stock = (v["stock"] as? Int) ?? 0
+  tags: List[String] = []
+  if let raw = v["tags"] as? List[Dyn] {
+    for t in raw {
+      if let s = t as? String { tags.push(s) }
+    }
+  }
+  Ok(Book.new(title, price, tags, stock))
+}
+
+fn load(text: String) -> Result[List[Book], String] {
+  doc = Json.parse(text)?
+  raw = doc["books"] as? List[Dyn]
+  if raw == nil { return Err("no `books` array") }
+  books: List[Book] = []
+  for item in raw {
+    match book_from(item) {
+      Ok(b) => books.push(b)
+      Err(e) => puts("skipping: #{e}")
+    }
+  }
+  Ok(books)
+}
+
+doc = Json.parse(INPUT).unwrap()
+puts("store: #{(doc["store"] as? String) ?? "?"}")
+puts("open: #{(doc["open"] as? Bool) ?? false}")
+puts("rating: #{doc["rating"]}")
+puts("owner is null: #{doc["owner"] == nil}")
+puts("first tag of first book: #{doc["books"][0]["tags"][0]}")
+
+books = load(INPUT).unwrap()
+puts("loaded #{books.length} books")
+in_stock = books.select { |b| b.stock > 0 }
+puts("in stock: #{in_stock.map { |b| b.title }}")
+value = books.reduce(0.0) { |acc, b| acc + b.price * b.stock.to_f }
+puts("inventory value: #{value.format(2)}")
+
+# Discount every scifi book by 20% and write the catalog back out.
+for b in books {
+  if b.tags.contains("scifi") { b.price = (b.price * 0.8).round_to(2) }
+}
+catalog: List[Dyn] = books.map { |b| b.to_dyn() }
+out: Dict[String, Dyn] = ["count": books.length, "books": catalog]
+text = Json.stringify(out)
+puts(text)
+
+# The serialized text parses back to an equal structure.
+again = Json.parse(text).unwrap()
+puts("round trip stable: #{Json.stringify(again) == text}")
+puts("second title: #{again["books"][1]["title"]}")
+
+small: Dict[String, Dyn] = ["ok": true, "ids": [1, 2]]
+puts(Json.pretty(small))
+
+for bad in ["{\"a\": 1,}", "[1, 2", "", "{\"books\": 3}"] {
+  match load(bad) {
+    Ok(bs) => puts("ok with #{bs.length} books")
+    Err(e) => puts("error: #{e}")
+  }
+}

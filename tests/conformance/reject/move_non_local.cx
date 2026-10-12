@@ -1,0 +1,4 @@
+# expect: E0606
+xs = [[1], [2]]
+ch: Channel[List[Int]] = Channel.new()
+ch.send(move xs[0])

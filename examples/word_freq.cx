@@ -1,0 +1,61 @@
+# Word frequency: reads text from stdin, counts words case-insensitively (ignoring punctuation,
+# keeping apostrophes inside words) and prints the most frequent ones.
+
+const TOP_N = 5
+
+# Splits a line into lowercase words. A word is a run of letters, digits or inner apostrophes.
+fn words_of(line: String) -> List[String] {
+  out: List[String] = []
+  sb = StringBuilder.new()
+  for c in line.downcase {
+    if c.is_alnum or (c == "'" and sb.length > 0) {
+      sb.push(c)
+    } else if sb.length > 0 {
+      out.push(sb.to_s.delete_suffix("'"))
+      sb.clear()
+    }
+  }
+  if sb.length > 0 { out.push(sb.to_s.delete_suffix("'")) }
+  out
+}
+
+# Higher count first; equal counts in alphabetical order.
+fn by_frequency(a: (String, Int), b: (String, Int)) -> Int {
+  if a.1 != b.1 { b.1 <=> a.1 } else { a.0 <=> b.0 }
+}
+
+counts: Dict[String, Int] = [:]
+lines = 0
+total = 0
+longest = ""
+loop {
+  if let line = read_line() {
+    lines += 1
+    for w in words_of(line) {
+      counts[w] = (counts[w] ?? 0) + 1
+      total += 1
+      if w.length > longest.length { longest = w }
+    }
+  } else {
+    break
+  }
+}
+
+puts("lines: #{lines}")
+puts("words: #{total}")
+puts("distinct: #{counts.length}")
+puts("longest: #{longest}")
+puts()
+
+ranked = counts.entries().sort_with { |a, b| by_frequency(a, b) }
+puts("top #{TOP_N}:")
+ranked.slice(0, TOP_N).each_with_index { |entry, i|
+  let (word, n) = entry
+  bar = "#" * n
+  puts("#{(i + 1).to_s.rjust(2)}. #{word.ljust(6)} #{n.to_s.rjust(2)} #{bar}")
+}
+
+singles = ranked.select { |e| e.1 == 1 }.map { |e| e.0 }
+puts()
+puts("hapax legomena: #{singles.length}")
+puts(singles.sorted())

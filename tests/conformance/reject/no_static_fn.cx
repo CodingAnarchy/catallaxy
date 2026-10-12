@@ -1,0 +1,3 @@
+# expect: E0348
+class Circle { r: Float }
+c = Circle.unit()

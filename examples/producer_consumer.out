@@ -1,0 +1,17 @@
+received 100 items from 4 producers
+  producer 1: payload sum 124646
+  producer 2: payload sum 132488
+  producer 3: payload sum 120316
+  producer 4: payload sum 118151
+total 495601, expected 495601, match: true
+xor checksum 64082, expected 64082
+each producer's items arrived in order: true
+backlog never exceeded capacity: true
+channel closed: true
+recv after close: nil
+empty try_recv: nil
+buffered: 2
+try_recv: first
+try_recv: second
+try_recv: none
+closed: true, try_recv: none

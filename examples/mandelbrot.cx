@@ -1,0 +1,61 @@
+# An ASCII Mandelbrot set. Rows are computed in parallel with par_map; the results come back
+# in row order, so the picture is identical however the work is scheduled.
+
+const WIDTH = 64
+const HEIGHT = 25
+const MAX_ITER = 60
+const PALETTE = " .:-=+*%@"
+
+fn escape_time(cx: Float, cy: Float) -> Int {
+  x = 0.0
+  y = 0.0
+  n = 0
+  while n < MAX_ITER and x * x + y * y <= 4.0 {
+    xt = x * x - y * y + cx
+    y = 2.0 * x * y + cy
+    x = xt
+    n += 1
+  }
+  n
+}
+
+fn row_iterations(row: Int) -> List[Int] {
+  cy = -1.2 + row * 2.4 / (HEIGHT - 1)
+  (0...WIDTH).to_list().map { |col| escape_time(-2.1 + col * 3.0 / WIDTH, cy) }
+}
+
+fn render(iters: List[Int]) -> String {
+  sb = StringBuilder.new()
+  for n in iters {
+    if n == MAX_ITER {
+      sb.push("#")
+    } else {
+      sb.push(PALETTE[n * (PALETTE.length - 1) / MAX_ITER])
+    }
+  }
+  sb.to_s.rstrip
+}
+
+rows = (0...HEIGHT).to_list()
+rows_iters = rows.par_map { |r| row_iterations(r) }
+picture = rows_iters.map { |it| render(it) }
+for line in picture { puts(line) }
+
+# Freeze the rows so that further parallel passes can read them from every thread.
+grid = freeze(rows_iters)
+
+# Statistics, again in parallel: points inside the set and total iterations per row.
+inside_per_row = grid.par_map { |it| it.select { |n| n == MAX_ITER }.length }
+inside = inside_per_row.par_reduce(0) { |a, b| a + b }
+work = grid.par_map { |it| it.reduce(0) { |a, b| a + b } }.par_reduce(0) { |a, b| a + b }
+puts("points inside: #{inside} of #{WIDTH * HEIGHT}")
+puts("total iterations: #{work}")
+area = 3.0 * 2.4 * inside.to_f / (WIDTH * HEIGHT).to_f
+puts("area estimate: #{area.format(3)}")
+
+# The set is symmetric about the real axis, so row r mirrors row HEIGHT - 1 - r.
+symmetric = true
+for r in 0...HEIGHT {
+  if grid[r] != grid[HEIGHT - 1 - r] { symmetric = false }
+}
+puts("symmetric: #{symmetric}")

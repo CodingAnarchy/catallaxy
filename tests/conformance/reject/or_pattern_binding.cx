@@ -1,0 +1,7 @@
+# expect: E0363
+enum Msg { Ping(Int), Pong(Int) }
+fn id(m: Msg) -> Int {
+  match m {
+    .Ping(n) | .Pong(n) => n
+  }
+}

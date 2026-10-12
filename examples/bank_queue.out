@@ -1,0 +1,30 @@
+== two tellers ==
+09:02  customer  1 -> Ann  wait  0  done 09:05
+09:04  customer  2 -> Bob  wait  0  done 09:08
+09:05  customer  3 -> Ann  wait  0  done 09:14
+09:10  customer  4 -> Bob  wait  0  done 09:14
+09:11  customer  5 -> Ann  wait  3  done 09:22
+09:15  customer  6 -> Bob  wait  0  done 09:19
+09:18  customer  7 -> Bob  wait  1  done 09:23
+09:18  customer  8 -> Ann  wait  4  done 09:26
+09:19  customer  9 -> Bob  wait  4  done 09:27
+09:21  customer 10 -> Ann  wait  5  done 09:31
+09:25  customer 11 -> Bob  wait  2  done 09:36
+09:25  customer 12 -> Ann  wait  6  done 09:34
+09:30  customer 13 -> Ann  wait  4  done 09:42
+09:35  customer 14 -> Bob  wait  1  done 09:44
+09:35  customer 15 -> Ann  wait  7  done 09:50
+09:36  customer 16 -> Bob  wait  8  done 09:52
+09:40  customer 17 -> Ann  wait 10  done 10:00
+09:41  customer 18 -> Bob  wait 11  done 10:01
+09:41  customer 19 -> Ann  wait 19  done 10:03
+09:45  customer 20 -> Bob  wait 16  done 10:07
+customers: 20, waited: 15, max wait: 19 min, average wait: 5.05 min
+  Ann: served 10, busy 61 min, utilisation 91.0%
+  Bob: served 10, busy 60 min, utilisation 89.6%
+
+== staffing comparison ==
+1 teller(s): average wait 30.60 min, max wait 73 min, closes at 11:03
+2 teller(s): average wait 5.05 min, max wait 19 min, closes at 10:07
+3 teller(s): average wait 0.90 min, max wait 5 min, closes at 09:55
+4 teller(s): average wait 0.20 min, max wait 2 min, closes at 09:52

@@ -1,0 +1,3 @@
+# expect: E0343
+enum Color { Red, Green }
+c = Color.Blue

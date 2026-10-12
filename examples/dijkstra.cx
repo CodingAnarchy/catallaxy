@@ -1,0 +1,120 @@
+# Dijkstra's shortest paths over a weighted directed graph, using a hand-written binary min-heap.
+
+class MinHeap {
+  # Entries are (priority, node) pairs ordered by priority, then by node name.
+  items: List[(Int, String)] = []
+
+  fn size(self) -> Int { self.items.length }
+  fn is_empty(self) -> Bool { self.items.is_empty() }
+
+  fn less(self, i: Int, j: Int) -> Bool {
+    a = self.items[i]
+    b = self.items[j]
+    if a.0 != b.0 { a.0 < b.0 } else { a.1 < b.1 }
+  }
+
+  fn push(self, priority: Int, node: String) {
+    self.items.push((priority, node))
+    i = self.items.length - 1
+    while i > 0 {
+      parent = (i - 1) / 2
+      if not self.less(i, parent) { break }
+      self.items.swap(i, parent)
+      i = parent
+    }
+  }
+
+  fn pop(self) -> (Int, String)? {
+    if self.items.is_empty() { return nil }
+    top = self.items[0]
+    last = self.items.pop()!
+    if not self.items.is_empty() {
+      self.items[0] = last
+      i = 0
+      n = self.items.length
+      loop {
+        l = 2 * i + 1
+        r = l + 1
+        smallest = i
+        if l < n and self.less(l, smallest) { smallest = l }
+        if r < n and self.less(r, smallest) { smallest = r }
+        if smallest == i { break }
+        self.items.swap(i, smallest)
+        i = smallest
+      }
+    }
+    top
+  }
+}
+
+class Graph {
+  edges: Dict[String, List[(String, Int)]] = [:]
+
+  fn add_edge(self, from: String, to: String, weight: Int) {
+    self.edges.get_or_insert(from, []).push((to, weight))
+    self.edges.get_or_insert(to, [])
+  }
+
+  fn neighbors(self, node: String) -> List[(String, Int)] { self.edges.fetch(node, []) }
+
+  # Returns (distance, previous-node) tables from `source`.
+  fn dijkstra(self, source: String) -> (Dict[String, Int], Dict[String, String]) {
+    dist: Dict[String, Int] = [:]
+    dist[source] = 0
+    prev: Dict[String, String] = [:]
+    heap = MinHeap.new()
+    heap.push(0, source)
+    while not heap.is_empty() {
+      let (d, node) = heap.pop()!
+      if d > dist[node]! { continue }          # stale entry
+      for (next, w) in self.neighbors(node) {
+        candidate = d + w
+        if dist[next] == nil or candidate < dist[next]! {
+          dist[next] = candidate
+          prev[next] = node
+          heap.push(candidate, next)
+        }
+      }
+    }
+    (dist, prev)
+  }
+}
+
+
+fn path_to(prev: Dict[String, String], target: String) -> List[String] {
+  path = [target]
+  cur = target
+  while prev.has_key(cur) {
+    cur = prev[cur]!
+    path.unshift(cur)
+  }
+  path
+}
+
+# Heap sanity check: pops come out in priority order.
+h = MinHeap.new()
+for (p, name) in [(5, "e"), (1, "a"), (4, "d"), (1, "b"), (3, "c")] { h.push(p, name) }
+order: List[String] = []
+while not h.is_empty() { order.push(h.pop()!.1) }
+puts("heap order: #{order}")
+
+g = Graph.new()
+g.add_edge("A", "B", 4)
+g.add_edge("A", "C", 2)
+g.add_edge("C", "B", 1)
+g.add_edge("B", "D", 5)
+g.add_edge("C", "D", 8)
+g.add_edge("C", "E", 10)
+g.add_edge("D", "E", 2)
+g.add_edge("D", "F", 6)
+g.add_edge("E", "F", 2)
+g.add_edge("G", "A", 1)
+
+let (dist, prev) = g.dijkstra("A")
+for node in g.edges.keys().sorted() {
+  if let d = dist[node] {
+    puts("#{node}: #{d.to_s.rjust(2)} via #{path_to(prev, node)}")
+  } else {
+    puts("#{node}: unreachable")
+  }
+}

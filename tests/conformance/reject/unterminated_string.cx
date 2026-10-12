@@ -1,0 +1,3 @@
+# expect: E0004
+name = "unterminated
+puts(name)

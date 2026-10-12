@@ -1,0 +1,100 @@
+# Conway's Game of Life on a small torus (edges wrap around).
+
+class Grid {
+  width: Int
+  height: Int
+  cells: List[Bool]
+
+  fn blank(width: Int, height: Int) -> Grid {
+    Grid.new(width, height, List.filled(width * height, false))
+  }
+
+  fn index(self, x: Int, y: Int) -> Int {
+    # `%` floors, so negative coordinates wrap to the far edge.
+    (y % self.height) * self.width + (x % self.width)
+  }
+
+  fn alive(self, x: Int, y: Int) -> Bool { self.cells[self.index(x, y)] }
+
+  fn set(self, x: Int, y: Int) { self.cells[self.index(x, y)] = true }
+
+  fn neighbours(self, x: Int, y: Int) -> Int {
+    n = 0
+    for dy in -1..1 {
+      for dx in -1..1 {
+        if (dx != 0 or dy != 0) and self.alive(x + dx, y + dy) { n += 1 }
+      }
+    }
+    n
+  }
+
+  fn step(self) -> Grid {
+    next = Grid.blank(self.width, self.height)
+    for y in 0...self.height {
+      for x in 0...self.width {
+        n = self.neighbours(x, y)
+        lives = if self.alive(x, y) { n == 2 or n == 3 } else { n == 3 }
+        if lives { next.set(x, y) }
+      }
+    }
+    next
+  }
+
+  fn population(self) -> Int { self.cells.select { |c| c }.length }
+
+  fn render(self) -> String {
+    sb = StringBuilder.new()
+    for y in 0...self.height {
+      for x in 0...self.width { sb.push(if self.alive(x, y) { "#" } else { "." }) }
+      if y < self.height - 1 { sb.push("\n") }
+    }
+    sb.to_s
+  }
+
+  fn ==(self, other: Grid) -> Bool { self.cells == other.cells }
+}
+
+fn place(g: Grid, pattern: frozen List[(Int, Int)], ox: Int, oy: Int) {
+  for (x, y) in pattern { g.set(ox + x, oy + y) }
+}
+
+const GLIDER = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)]
+const BLINKER = [(0, 0), (1, 0), (2, 0)]
+
+g = Grid.blank(10, 8)
+place(g, GLIDER, 0, 0)
+place(g, BLINKER, 6, 5)
+
+for gen in 0..4 {
+  puts("generation #{gen} (population #{g.population()}):")
+  puts(g.render())
+  puts()
+  g = g.step()
+}
+
+# The blinker alone has period 2; the glider alone returns to its shape every 4 generations,
+# shifted one cell diagonally.
+b = Grid.blank(5, 5)
+place(b, BLINKER, 1, 2)
+puts("blinker period 2: #{b.step().step() == b}, period 1: #{b.step() == b}")
+
+lone = Grid.blank(6, 6)
+place(lone, GLIDER, 0, 0)
+moved = Grid.blank(6, 6)
+place(moved, GLIDER, 1, 1)
+after4 = lone
+4.times { |_i| after4 = after4.step() }
+puts("glider moved diagonally after 4 generations: #{after4 == moved}")
+
+# On a 6x6 torus the glider comes home after 24 generations.
+back = lone
+24.times { |_i| back = back.step() }
+puts("glider back home after 24 generations: #{back == lone}")
+
+# Let the original world run on: the glider collides with the blinker and both die out.
+history: List[Int] = []
+for _gen in 5..20 {
+  history.push(g.population())
+  g = g.step()
+}
+puts("populations, generations 5-20: #{history}")

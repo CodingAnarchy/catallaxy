@@ -1,0 +1,11 @@
+job 1: primes <= 100: 25
+job 2: primes <= 1000: 168
+job 3: failed (negative limit -5)
+job 4: primes <= 10000: 1229
+job 5: primes <= 2: 1
+job 6: primes <= 50: 15
+job 7: primes <= 0: 0
+job 8: primes <= 5000: 669
+processed 8 jobs (7 ok, 1 failed)
+workers reported 8 jobs in total
+busiest worker handled at least one job: true

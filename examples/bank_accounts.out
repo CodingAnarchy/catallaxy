@@ -1,0 +1,20 @@
+ann deposit: ok, balance 1250
+bob withdraw: ok, balance -72
+bob withdraw again: failed, insufficient funds: need 100, have 28
+cat withdraw: failed, insufficient funds: need 1, have 0
+cat deposit: failed, invalid amount -5
+ann -> cat: ok, balance 300
+cat -> bob: failed, insufficient funds: need 500, have 300
+frozen deposit: failed, account is frozen
+savings ann: 978
+checking bob: -72
+account cat: 300
+total holdings: 1206
+true
+false
+ann's log:
+  1. open 1000
+  2. deposit 250
+  3. withdraw 300
+  4. interest 28
+bob's log: ["open 50", "withdraw 120", "fee 2"]

@@ -1,0 +1,127 @@
+# A generic singly linked list. Defining `each` makes it Enumerable, so it gets map, select,
+# reduce, find, take, with_index and friends for free.
+
+class Node[T] {
+  value: T
+  next: Node[T]? = nil
+}
+
+class LinkedList[T] {
+  head: Node[T]? = nil
+  tail: Node[T]? = nil
+  len: Int = 0
+
+  fn from(items: List[T]) -> LinkedList[T] {
+    out = LinkedList[T].new()
+    for x in items { out.push_back(x) }
+    out
+  }
+
+  fn push_front(self, x: T) {
+    node = Node.new(x, self.head)
+    self.head = node
+    if self.tail == nil { self.tail = node }
+    self.len += 1
+  }
+
+  fn push_back(self, x: T) {
+    node = Node[T].new(x)
+    if let t = self.tail {
+      t.next = node
+    } else {
+      self.head = node
+    }
+    self.tail = node
+    self.len += 1
+  }
+
+  fn pop_front(self) -> T? {
+    h = self.head?
+    self.head = h.next
+    if self.head == nil { self.tail = nil }
+    self.len -= 1
+    h.value
+  }
+
+  fn each(self, f: fn(T)) {
+    cur = self.head
+    while cur != nil {
+      f(cur.value)
+      cur = cur.next
+    }
+  }
+
+  fn reverse(self) {
+    prev: Node[T]? = nil
+    cur = self.head
+    self.tail = cur
+    while cur != nil {
+      nxt = cur.next
+      cur.next = prev
+      prev = cur
+      cur = nxt
+    }
+    self.head = prev
+  }
+
+  fn get(self, index: Int) -> T? {
+    i = 0
+    for x in self {
+      if i == index { return x }
+      i += 1
+    }
+    nil
+  }
+
+  fn to_s(self) -> String {
+    sb = StringBuilder.new()
+    sb.push("(")
+    first = true
+    for x in self {
+      if not first { sb.push(" -> ") }
+      sb.push_value(x)
+      first = false
+    }
+    sb.push(")")
+    sb.to_s
+  }
+}
+
+nums = LinkedList.from([3, 1, 4, 1, 5, 9, 2, 6])
+puts(nums.to_s())
+puts("length #{nums.len}, size via Enumerable #{nums.size()}")
+puts(nums.map { |x| x * 10 })
+puts(nums.select { |x| x.is_odd })
+puts(nums.reduce(0) { |a, b| a + b })
+puts(nums.sum())
+puts(nums.find { |x| x > 4 })
+puts(nums.any { |x| x == 9 })
+puts(nums.all { |x| x > 0 })
+puts(nums.count { |x| x == 1 })
+puts(nums.take(3))
+puts(nums.with_index().select { |p| p.1 % 3 == 0 })
+puts(nums.uniq())
+puts(nums.get(4))
+puts(nums.get(40))
+
+nums.reverse()
+puts(nums.to_s())
+nums.push_front(0)
+nums.push_back(100)
+puts(nums.to_s())
+puts(nums.pop_front())
+puts(nums.pop_front())
+puts(nums.len)
+
+words = LinkedList[String].new()
+for w in ["delta", "alpha", "charlie", "bravo"] { words.push_front(w) }
+puts(words.to_s())
+puts(words.join(", "))
+puts(words.map { |w| w.length })
+puts(words.partition { |w| w.length > 5 })
+
+empty = LinkedList[Int].new()
+puts(empty.pop_front())
+puts(empty.to_s())
+empty.reverse()
+puts(empty.len)

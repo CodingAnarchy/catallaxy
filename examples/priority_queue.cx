@@ -1,0 +1,113 @@
+# A generic binary-heap priority queue ordered by a comparator closure.
+
+class PriorityQueue[T] {
+  before: fn(T, T) -> Int     # negative when the first argument should come out first
+  items: List[T] = []
+
+  fn size(self) -> Int { self.items.length }
+  fn is_empty(self) -> Bool { self.items.length == 0 }
+  fn peek(self) -> T? { self.items.first() }
+
+  fn less(self, i: Int, j: Int) -> Bool {
+    cmp = self.before
+    cmp(self.items[i], self.items[j]) < 0
+  }
+
+  fn push(self, x: T) {
+    self.items.push(x)
+    i = self.items.length - 1
+    while i > 0 {
+      parent = (i - 1) / 2
+      if not self.less(i, parent) { break }
+      self.items.swap(i, parent)
+      i = parent
+    }
+  }
+
+  fn pop(self) -> T? {
+    if self.items.length == 0 { return nil }
+    top = self.items[0]
+    last = self.items.pop()!
+    if self.items.length > 0 {
+      self.items[0] = last
+      i = 0
+      n = self.items.length
+      loop {
+        l = 2 * i + 1
+        r = l + 1
+        best = i
+        if l < n and self.less(l, best) { best = l }
+        if r < n and self.less(r, best) { best = r }
+        if best == i { break }
+        self.items.swap(i, best)
+        i = best
+      }
+    }
+    top
+  }
+
+  fn drain(self) -> List[T] {
+    out: List[T] = []
+    while not self.is_empty() { out.push(self.pop()!) }
+    out
+  }
+}
+
+# --- heap sort of plain integers ---
+ints = PriorityQueue[Int].new({ |a, b| a <=> b })
+for n in [42, 7, 19, 3, 88, 7, 51, 0, -4] { ints.push(n) }
+puts("min first: #{ints.drain()}")
+
+maxq = PriorityQueue[Int].new({ |a, b| b <=> a })
+for n in [42, 7, 19, 3, 88] { maxq.push(n) }
+puts("max first: #{maxq.pop()}, then #{maxq.pop()}, #{maxq.size()} left")
+
+# --- task scheduling ---
+class Task {
+  name: String
+  priority: Int
+  seq: Int
+}
+
+fn by_urgency(a: Task, b: Task) -> Int {
+  if a.priority != b.priority { b.priority <=> a.priority } else { a.seq <=> b.seq }
+}
+
+tasks = PriorityQueue[Task].new(by_urgency)
+incoming = [("write report", 2), ("fix prod outage", 9), ("lunch", 1), ("review PR", 5),
+  ("reply to email", 2), ("security patch", 9), ("plan sprint", 5)]
+seq = 0
+for (name, p) in incoming {
+  tasks.push(Task.new(name, p, seq))
+  seq += 1
+}
+puts("next up: #{tasks.peek()!.name}")
+clock = 9
+while not tasks.is_empty() {
+  t = tasks.pop()!
+  puts("#{clock.to_s.rjust(2, "0")}:00  [p#{t.priority}] #{t.name}")
+  clock += 1
+  if t.name == "review PR" {
+    tasks.push(Task.new("address review comments", 6, seq))
+    seq += 1
+  }
+}
+
+# --- merging sorted lists ---
+fn merge_sorted(lists: List[List[Int]]) -> List[Int] {
+  # entries are (value, list index, position)
+  heap = PriorityQueue[(Int, Int, Int)].new({ |a, b| a.0 <=> b.0 })
+  lists.each_with_index { |xs, li| if xs.length > 0 { heap.push((xs[0], li, 0)) } }
+  out: List[Int] = []
+  while not heap.is_empty() {
+    let (v, li, pos) = heap.pop()!
+    out.push(v)
+    if pos + 1 < lists[li].length { heap.push((lists[li][pos + 1], li, pos + 1)) }
+  }
+  out
+}
+puts(merge_sorted([[1, 4, 9], [2, 3, 10, 11], [], [0, 5]]))
+
+empty = PriorityQueue[String].new({ |a, b| a <=> b })
+puts(empty.pop())
+puts(empty.peek() ?? "nothing queued")

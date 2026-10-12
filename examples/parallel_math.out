@@ -1,0 +1,9 @@
+sum of squares 1..100000 = 333338333350000
+closed form          = 333338333350000
+primes below 50000: 5133
+last five: [49943, 49957, 49991, 49993, 49999]
+largest gap: 72 after 31397
+longest collatz chain below 100000: start 77031, 350 steps
+par_reduce agrees: true
+perfect numbers: [6, 28, 496, 8128] (count 4, sum 8658)
+pi ~ 3.14159

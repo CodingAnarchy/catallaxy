@@ -1,0 +1,4 @@
+# expect: E0607
+class Counter { n: Int = 0 }
+c = Counter.new()
+with lock(c) { c.n += 1 }
