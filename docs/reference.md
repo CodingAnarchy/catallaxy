@@ -68,6 +68,7 @@ Module-wide state uses:
 | `Result[T, E]` | `Ok(T)` or `Err(E)` |
 | `StringBuilder` | mutable string buffer |
 | `NativeHandle` | opaque frozen native data (inside `Regex`, `Subprocess`; see §11) |
+| `Duration`, `Instant`, `DateTime` | time spans, monotonic clock readings, dates (frozen; §3.3) |
 
 Generic type arguments use square brackets. Plain types never hold `nil`.
 
@@ -91,6 +92,27 @@ Local variables, block parameters and generic arguments are inferred. Annotation
 Non-`pub` functions may omit result types (inferred from the body; a recursive function needs one) and
 may omit parameter types entirely (implicit generics, §6.3). An empty literal (`[]`, `[:]`, `nil`) takes
 its type from later uses within the same function, or from an annotation: `xs: List[Int] = []`.
+
+### 3.3 Time
+
+The prelude's time types are frozen classes, so they cross threads freely:
+
+- `Duration`: a signed span in nanoseconds. `Duration.from_secs(90)` (also `from_nanos`,
+  `from_micros`, `from_millis`, `from_mins`, `from_hours`, `from_days`, `from_secs_f(1.5)`);
+  `+`, `-`, `* Int`, `/ Int`, comparisons; `as_secs`, `as_millis`, `as_secs_f`, ...; `to_s` gives
+  `1h2m3.5s`, `250ms`.
+- `Instant`: a reading of the monotonic clock. `start = Instant.now()`, `start.elapsed()`,
+  `b.since(a)`, `+`/`-` a `Duration`.
+- `DateTime`: an instant with a fixed UTC offset (seconds east), on the proleptic Gregorian
+  calendar. `DateTime.now()` (at the OS's local offset), `DateTime.now_utc()`,
+  `DateTime.of(2024, 2, 29, 13, 5, offset: 3600)`, `DateTime.from_unix(secs)`,
+  `DateTime.parse("2024-02-29T13:05:00+01:00")` (ISO 8601 / RFC 3339; a `Result`). Fields
+  `year month day hour minute second nanosecond weekday` (0 = Sunday) `yday offset unix`;
+  `+`/`-` a `Duration`, `b.since(a)`; `==` and `<=>` compare instants, whatever the offsets;
+  `to_utc`, `to_local`, `with_offset`; `format("%Y-%m-%d %H:%M")` (`strftime` directives);
+  `to_s` is RFC 3339.
+- `Time.now()` is wall-clock seconds since the Unix epoch (a `Float`), `Time.millis()` the same
+  in milliseconds (an `Int`), and `Time.monotonic()` monotonic seconds since the program started.
 
 ## 4. Expressions and statements
 
@@ -291,7 +313,7 @@ Every type has a capability:
 
 | Capability | Types | Crosses threads |
 | --- | --- | --- |
-| frozen | `Int Float Bool Nil String Range NativeHandle`, `frozen T`, `frozen class` (e.g. `Regex`), enums/tuples of frozen | freely |
+| frozen | `Int Float Bool Nil String Range NativeHandle`, `frozen T`, `frozen class` (e.g. `Regex`, `DateTime`), enums/tuples of frozen | freely |
 | shareable | `Mutex[T] Atomic[T] Channel[T] Thread[T]`, `shared class` | by reference |
 | owned | everything else (`List`, `Dict`, ordinary classes, closures) | only by `move` |
 

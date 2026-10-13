@@ -32,7 +32,7 @@ for f in ["core.cx", "builtins.cx"]:
                     head = f"{name} (where {kind[7:-1]})"
                 out += ["", f"## {head}", ""]
                 section = head
-            elif line.startswith(("pub native fn", "pub fn", "native fn", "fn")):
+            elif line.startswith(("pub native fn", "pub fn")):  # private helpers are not visible
                 if section != "Global functions":
                     out += ["", "## Global functions", ""]
                     section = "Global functions"

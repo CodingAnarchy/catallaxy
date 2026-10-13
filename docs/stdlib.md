@@ -429,13 +429,6 @@ Everything here is available in every module without an import.
 - `fn is_done(self) -> Bool`
 - `fn yield()`
 
-## Global functions
-
-- `fn __fiber_spawn[T](handle: Fiber[T], f: fn() -> T)`
-- `fn __fiber_join[T](handle: Fiber[T]) -> Result[T, String]`
-- `fn __fiber_done(id: Int) -> Bool`
-- `fn __fiber_yield()`
-
 ## Math
 
 - `const PI: Float = 3.141592653589793`
@@ -545,6 +538,82 @@ Everything here is available in every module without an import.
 - `fn now() -> Float`
 - `fn monotonic() -> Float`
 - `fn millis() -> Int`
+
+## Duration (frozen)
+
+- field `nanos: Int`
+- `fn from_nanos(n: Int) -> Duration`
+- `fn from_micros(n: Int) -> Duration`
+- `fn from_millis(n: Int) -> Duration`
+- `fn from_secs(n: Int) -> Duration`
+- `fn from_mins(n: Int) -> Duration`
+- `fn from_hours(n: Int) -> Duration`
+- `fn from_days(n: Int) -> Duration`
+- `fn from_secs_f(secs: Float) -> Duration`
+- `fn as_nanos(self) -> Int`
+- `fn as_micros(self) -> Int`
+- `fn as_millis(self) -> Int`
+- `fn as_secs(self) -> Int`
+- `fn as_secs_f(self) -> Float`
+- `fn is_zero(self) -> Bool`
+- `fn is_negative(self) -> Bool`
+- `fn abs(self) -> Duration`
+- `fn neg(self) -> Duration`
+- `fn +(self, other: Duration) -> Duration`
+- `fn -(self, other: Duration) -> Duration`
+- `fn *(self, k: Int) -> Duration`
+- `fn /(self, k: Int) -> Duration`
+- `fn <=>(self, other: Duration) -> Int`
+- `fn ==(self, other: Duration) -> Bool`
+- `fn hash(self) -> Int`
+- `fn to_s(self) -> String`
+
+## Instant (frozen)
+
+- field `nanos: Int`
+- `fn now() -> Instant`
+- `fn elapsed(self) -> Duration`
+- `fn since(self, earlier: Instant) -> Duration`
+- `fn +(self, d: Duration) -> Instant`
+- `fn -(self, d: Duration) -> Instant`
+- `fn <=>(self, other: Instant) -> Int`
+- `fn ==(self, other: Instant) -> Bool`
+- `fn hash(self) -> Int`
+
+## DateTime (frozen)
+
+- field `unix: Int`
+- field `nanosecond: Int`
+- field `offset: Int`
+- `fn now() -> DateTime`
+- `fn now_utc() -> DateTime`
+- `fn from_unix(secs: Int, nanosecond: Int = 0, offset: Int = 0) -> DateTime`
+- `fn from_unix_millis(ms: Int, offset: Int = 0) -> DateTime`
+- `fn of(year: Int, month: Int, day: Int, hour: Int = 0, minute: Int = 0, second: Int = 0, nanosecond: Int = 0, offset: Int = 0) -> DateTime`
+- `fn parse(text: String) -> Result[DateTime, String]`
+- `fn year(self) -> Int`
+- `fn month(self) -> Int`
+- `fn day(self) -> Int`
+- `fn hour(self) -> Int`
+- `fn minute(self) -> Int`
+- `fn second(self) -> Int`
+- `fn weekday(self) -> Int`
+- `fn yday(self) -> Int`
+- `fn days(self) -> Int`
+- `fn second_of_day(self) -> Int`
+- `fn unix_millis(self) -> Int`
+- `fn to_f(self) -> Float`
+- `fn with_offset(self, offset: Int) -> DateTime`
+- `fn to_utc(self) -> DateTime`
+- `fn to_local(self) -> DateTime`
+- `fn +(self, d: Duration) -> DateTime`
+- `fn -(self, d: Duration) -> DateTime`
+- `fn since(self, earlier: DateTime) -> Duration`
+- `fn <=>(self, other: DateTime) -> Int`
+- `fn ==(self, other: DateTime) -> Bool`
+- `fn hash(self) -> Int`
+- `fn to_s(self) -> String`
+- `fn format(self, pattern: String) -> String`
 
 ## Random
 

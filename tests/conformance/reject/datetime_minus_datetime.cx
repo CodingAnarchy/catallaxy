@@ -1,0 +1,5 @@
+# expect: E0315
+# The difference of two DateTimes is `b.since(a)`; `-` subtracts a Duration.
+a = DateTime.of(2024, 1, 1)
+b = DateTime.of(2024, 1, 2)
+d = b - a

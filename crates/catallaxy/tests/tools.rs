@@ -1,4 +1,5 @@
-//! End-to-end tests of `catx lsp`, `catx repl`, `catx fmt` and `catx check`.
+//! End-to-end tests of `catx lsp`, `catx repl`, `catx fmt` and `catx check`, and of `catx run`
+//! under a fixed `TZ`.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -587,5 +588,21 @@ fn fmt_and_check_walk_directories() {
     let (code, _, err) = catx(&["check".as_ref(), dir.as_os_str()]);
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("E0300"), "{err}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn local_offset_follows_tz() {
+    // `TZ=XYZ-5:30` (POSIX and the Windows CRT agree) is a fixed zone 5h30m east of UTC.
+    let dir = scratch_dir("tz");
+    let prog = dir.join("tz.cx");
+    std::fs::write(&prog, "t = DateTime.of(2024, 7, 1, 12)\nputs(t.to_local())\nputs(DateTime.now().offset)\n")
+        .unwrap();
+    let cases = [("XYZ-5:30", "2024-07-01T17:30:00+05:30\n19800\n"), ("XYZ+3", "2024-07-01T09:00:00-03:00\n-10800\n")];
+    for (tz, want) in cases {
+        let out = Command::new(CATX).arg("run").arg(&prog).env("TZ", tz).output().expect("run catx");
+        let got = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+        assert_eq!(got, want, "TZ={tz}: {}", String::from_utf8_lossy(&out.stderr));
+    }
     std::fs::remove_dir_all(&dir).ok();
 }
