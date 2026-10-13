@@ -1,0 +1,10 @@
+30
+["a1", "b1", "a2", "b2"]
+55
+15
+sent
+45
+caught: IndexError: index 3 out of range for length 0
+true
+deep-list
+unjoined fiber ran

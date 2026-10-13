@@ -61,6 +61,21 @@ impl Mutator {
         unsafe { (*self.heap).set_young_alloc(on) }
     }
 
+    /// A second context for the same thread (a fiber): same heap and thread record, its own
+    /// handle stack. Release it with [`Mutator::free_handles`].
+    pub fn sharing(other: &Mutator) -> Self {
+        Mutator { tid: other.tid, rec: other.rec.clone(), heap: other.heap, handles: Box::into_raw(Box::new(Vec::new())) }
+    }
+
+    /// Frees the handle stack of a context made by [`Mutator::sharing`].
+    ///
+    /// # Safety
+    /// No root source may still reference the handles.
+    pub unsafe fn free_handles(&mut self) {
+        drop(Box::from_raw(self.handles));
+        self.handles = std::ptr::null_mut();
+    }
+
     /// Raw pointer to the allocator, for registration with the collector.
     pub fn heap_ptr(&self) -> *mut LocalHeap {
         self.heap
@@ -249,6 +264,7 @@ impl Mutator {
             not_empty: parking_lot::Condvar::new(),
             not_full: parking_lot::Condvar::new(),
             capacity,
+            waiters: parking_lot::Mutex::new(Vec::new()),
         });
         unsafe {
             std::ptr::write(&mut (*(h as *mut ChannelObj)).inner, inner);

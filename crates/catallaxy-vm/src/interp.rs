@@ -48,6 +48,12 @@ pub struct Vm {
     next_serial: u64,
     /// Stack trace captured where the current panic started.
     pub panic_trace: Option<Vec<String>>,
+    /// The root state of the thread's main VM, which also lists the thread's fiber VMs for the
+    /// collector. Equal to `rs` for a main VM.
+    root_rs: *mut RootState,
+    /// Nonzero while native code holds a lock keyed by the OS thread (`Mutex` closures): a fiber
+    /// must not park then, or a sibling fiber could enter the same lock.
+    pub no_park: u32,
 }
 
 /// VM state the collector scans.
@@ -57,12 +63,17 @@ pub(crate) struct RootState {
     held_locks: Vec<(usize, Value)>,
     /// Extra values rooted by the runtime (thread-pool jobs and the like).
     extra_roots: Vec<Value>,
+    /// Roots of the thread's fiber VMs (main VM only).
+    children: Vec<VmRoots>,
+    /// Values held for the thread's fibers, by fiber id (results awaiting `join`).
+    pinned: Vec<(u64, Value)>,
 }
 
 // SAFETY: a Vm is used by one thread at a time; it is created by a parent thread and handed to
 // the child before the child starts running code.
 unsafe impl Send for Vm {}
 
+#[derive(Clone, Copy)]
 struct VmRoots {
     stack: *const Value,
     rs: *const RootState,
@@ -88,6 +99,12 @@ impl RootSource for VmRoots {
             ops_mark(t, v);
         }
         for &(_, v) in &rs.held_locks {
+            ops_mark(t, v);
+        }
+        for child in &rs.children {
+            child.trace_roots(t);
+        }
+        for &(_, v) in &rs.pinned {
             ops_mark(t, v);
         }
     }
@@ -119,17 +136,22 @@ impl Vm {
     /// native state; the VM's roots are installed before this returns.
     pub fn new(rec: Arc<ThreadRecord>, stack_size: usize) -> Box<Vm> {
         let m = Mutator::new(rec);
+        let rs = Box::into_raw(Box::new(RootState {
+            frames: Vec::with_capacity(256),
+            held_locks: Vec::new(),
+            extra_roots: Vec::new(),
+            children: Vec::new(),
+            pinned: Vec::new(),
+        }));
         let vm = Box::new(Vm {
             m,
             stack: alloc_stack(stack_size),
             stack_cap: stack_size,
-            rs: Box::into_raw(Box::new(RootState {
-                frames: Vec::with_capacity(256),
-                held_locks: Vec::new(),
-                extra_roots: Vec::new(),
-            })),
+            rs,
             next_serial: 1,
             panic_trace: None,
+            root_rs: rs,
+            no_park: 0,
         });
         let roots: Box<dyn RootSource> =
             Box::new(VmRoots { stack: vm.stack, rs: vm.rs, handles: vm.m.handles_ptr() });
@@ -138,6 +160,64 @@ impl Vm {
         unsafe { catallaxy_gc::install(&vm.m.rec, roots_ptr, heap_ptr) };
         // The root source box is leaked deliberately; it is tiny and lives as long as the thread.
         vm
+    }
+
+    /// Creates a VM for a fiber of this VM's thread: it shares the thread's heap and collector
+    /// record, and its roots are scanned as part of the thread's. Release it with
+    /// [`Vm::release_fiber`] on the same thread.
+    pub fn new_fiber(&mut self, stack_size: usize) -> Box<Vm> {
+        let rs = Box::into_raw(Box::new(RootState {
+            frames: Vec::with_capacity(16),
+            held_locks: Vec::new(),
+            extra_roots: Vec::new(),
+            children: Vec::new(),
+            pinned: Vec::new(),
+        }));
+        let vm = Box::new(Vm {
+            m: Mutator::sharing(&self.m),
+            stack: alloc_stack(stack_size),
+            stack_cap: stack_size,
+            rs,
+            next_serial: 1,
+            panic_trace: None,
+            root_rs: self.root_rs,
+            no_park: 0,
+        });
+        let roots = VmRoots { stack: vm.stack, rs: vm.rs, handles: vm.m.handles_ptr() };
+        // SAFETY: the root state belongs to this thread, which is running (not being scanned).
+        unsafe { (*self.root_rs).children.push(roots) };
+        vm
+    }
+
+    /// Unregisters a fiber VM from its thread's roots and frees it. It takes the box
+    /// `new_fiber` returned: the VM's address was handed to the fiber's coroutine.
+    #[allow(clippy::boxed_local)]
+    pub fn release_fiber(mut vm: Box<Vm>) {
+        unsafe {
+            (*vm.root_rs).children.retain(|c| !std::ptr::eq(c.rs, vm.rs));
+            let layout = std::alloc::Layout::array::<Value>(vm.stack_cap).unwrap();
+            std::alloc::dealloc(vm.stack as *mut u8, layout);
+            drop(Box::from_raw(vm.rs));
+            vm.m.free_handles();
+        }
+    }
+
+    /// Keeps `v` alive under `key` in the thread's main VM until [`Vm::unpin`].
+    pub fn pin(&mut self, key: u64, v: Value) {
+        unsafe { (*self.root_rs).pinned.push((key, v)) };
+    }
+
+    /// Removes and returns the value pinned under `key`.
+    pub fn unpin(&mut self, key: u64) -> Option<Value> {
+        let pinned = unsafe { &mut (*self.root_rs).pinned };
+        let i = pinned.iter().position(|&(k, _)| k == key)?;
+        Some(pinned.swap_remove(i).1)
+    }
+
+    /// Whether a fiber running on this VM may park: not while it holds `with lock` object
+    /// locks or a `Mutex`, which are keyed by OS thread and so would let sibling fibers in.
+    pub fn park_allowed(&self) -> bool {
+        self.no_park == 0 && self.rs().held_locks.is_empty()
     }
 
     /// Registers the current thread and creates its VM, leaving it in the running state.

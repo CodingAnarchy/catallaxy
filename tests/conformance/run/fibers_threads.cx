@@ -1,0 +1,38 @@
+# Fibers inside a spawned thread, woken by another OS thread through a channel.
+ch: Channel[Int] = Channel.new()
+t = spawn {
+  waiters = (0...4).map { |k| Fiber.start { ch.recv() ?? -1 } }
+  ticker = Fiber.start {
+    n = 0
+    for i in 0...3 {
+      Fiber.yield()
+      n += 1
+    }
+    n
+  }
+  got = 0
+  for w in waiters { got += w.join().unwrap() }
+  got * 100 + ticker.join().unwrap()
+}
+for i in 1..4 { ch.send(i) }
+puts(t.join().unwrap())
+
+# File I/O in fibers runs on the I/O pool while other fibers continue.
+path = "/tmp/catx_fiber_io_#{Time.now().to_i}.txt"
+File.write(path, "hello fibers").unwrap()
+readers = (0...8).map { |i| Fiber.start { (File.read(path).unwrap()).length + i } }
+s = 0
+for r in readers { s += r.join().unwrap() }
+puts(s)
+File.delete(path).unwrap()
+
+# A Mutex closure must not park (its lock is keyed by OS thread): sleeping inside blocks the
+# thread instead, so the sibling fiber cannot interleave.
+m = Mutex.new(0)
+order: List[String] = []
+f1 = Fiber.start { m.update { |v| sleep(0.01); order.push("f1"); v + 1 } }
+f2 = Fiber.start { order.push("f2"); 0 }
+f1.join()
+f2.join()
+puts(order)
+puts(m.get())

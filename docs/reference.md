@@ -311,6 +311,29 @@ shared instead and a warning is logged. Single operations on shared objects are 
 `Atomic.add(n)` returns the new value. `Channel.recv()` blocks until a value arrives and returns
 `nil` once the channel is closed and drained; `for x in ch` iterates until then.
 
+### 8.2 Fibers
+
+A fiber is a lightweight cooperative thread for I/O-bound work. Thousands can run on one OS thread.
+
+```
+fs = urls.map { |u| Fiber.start { fetch(u) } }     # fetch waits on files, channels, sleep...
+pages = fs.map { |f| f.join().unwrap() }
+```
+
+- `Fiber.start { ... }` creates a fiber; `join()` waits for it and returns `Result[T, String]`
+  (`Err` holds the message of a panic, which ends only that fiber); `is_done()`;
+  `Fiber.yield()` lets the thread's other fibers run.
+- A fiber runs on the OS thread that started it, for its whole life. Fibers on one thread
+  interleave only where one of them waits: channel `send`/`recv`, `join`, `sleep`, file and
+  console I/O, `Fiber.yield()`. Their blocks may therefore capture and mutate owned values (no
+  capability rules apply), and code between two waits runs without interruption.
+- Waiting parks the fiber instead of blocking the thread. Blocking system calls (files, stdin)
+  run on a shared pool of I/O threads (`CATX_IO_THREADS`, default 16) meanwhile.
+- A fiber does not park while it holds a lock keyed by its OS thread (inside `with lock` or a
+  `Mutex` closure): it blocks the thread instead, so its sibling fibers cannot enter the lock.
+- A thread, and the program, finishes only after the fibers it started. A fiber is joined on
+  the thread that started it; its result is kept until then.
+
 ## 9. Dyn
 
 `Dyn` values come from `Json.parse` and other dynamic sources. Any operation on `Dyn` (`d["k"]`, `d[0]`,

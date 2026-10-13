@@ -110,7 +110,8 @@ Catallaxy 0.1 implements the v1 design (`docs/design.md`, phases 1–4 without f
   sets how many); `CATX_GC_STATS=1` prints collection and pause statistics and `CATX_GC_TRACE=1`
   the phases of each major collection;
 - threads, channels, `Mutex`, `Atomic`, `with lock`, `par_map`/`par_each`/`par_reduce` on a
-  work-stealing pool;
+  work-stealing pool, and fibers (thousands of cooperative threads per OS thread for I/O-bound
+  work);
 - tooling: `check --json`, formatter, REPL, language server, Rust extension API.
 
 Validation: a conformance suite of 110 programs (run + reject), 42 example programs with checked

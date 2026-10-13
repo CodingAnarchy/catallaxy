@@ -24,6 +24,19 @@ use crate::*;
 pub fn lookup(name: &str) -> Option<NativeFn> {
     Some(match name {
         "__spawn" => spawn,
+        "__fiber_spawn" => |vm, a| Ok(Value::small_int(crate::fiber::spawn(vm, a[0]) as i64)),
+        "__fiber_join" => |vm, a| {
+            let id = int(a[0])? as u64;
+            match crate::fiber::join(vm, id)? {
+                Ok(v) => Ok(ok(vm, v)),
+                Err(msg) => Ok(err(vm, &msg)),
+            }
+        },
+        "__fiber_done" => |_, a| Ok(Value::bool(crate::fiber::is_done(int(a[0])? as u64))),
+        "__fiber_yield" => |vm, _| {
+            crate::fiber::yield_now(vm);
+            Ok(Value::NIL)
+        },
         "Thread.join" => join,
         "Thread.is_done" => |_, a| {
             let inner = unsafe { as_thread(a[0]) }.inner.clone();
@@ -45,6 +58,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             inner.queue.lock().closed = true;
             inner.not_empty.notify_all();
             inner.not_full.notify_all();
+            inner.wake_fibers();
             Ok(Value::NIL)
         },
         "Channel.is_closed" => |_, a| Ok(Value::bool(unsafe { as_channel(a[0]) }.inner.queue.lock().closed)),
@@ -117,6 +131,8 @@ fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
             catallaxy_gc::leave_native(&child.m.rec);
             let closure = child.extra_roots()[0];
             let result = child.call_value(closure, &[]);
+            // Fibers the thread started finish before the thread does.
+            crate::fiber::drain(&mut child);
             let outcome = match result {
                 Ok(v) => {
                     ownership::transfer_deep(v, child.tid(), TRANSIT_TID);
@@ -153,7 +169,7 @@ fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 
 fn join(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let inner = unsafe { as_thread(a[0]) }.inner.clone();
-    let handle = blocking(vm, || {
+    let handle = crate::fiber::blocking_io(vm, || {
         let mut o = inner.outcome.lock();
         while matches!(*o, ThreadOutcome::Running) {
             inner.done.wait(&mut o);
@@ -205,8 +221,20 @@ fn chan_send(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
                 q.items.push_back(item);
                 drop(q);
                 inner.not_empty.notify_one();
+                inner.wake_fibers();
                 return Ok(Value::NIL);
             }
+        }
+        let cooperative = crate::fiber::wait_event(vm, |wake| {
+            let q = inner.queue.lock();
+            if q.closed || q.items.len() < inner.capacity {
+                return false;
+            }
+            inner.waiters.lock().push(wake);
+            true
+        });
+        if cooperative {
+            continue;
         }
         blocking(vm, || {
             let mut q = inner.queue.lock();
@@ -225,12 +253,24 @@ fn chan_recv(vm: &mut Vm, ch: Value, wait: bool) -> RtResult<Value> {
             if let Some(v) = q.items.pop_front() {
                 drop(q);
                 inner.not_full.notify_one();
+                inner.wake_fibers();
                 ownership::transfer_deep(v, TRANSIT_TID, vm.tid());
                 return Ok(v);
             }
             if q.closed || !wait {
                 return Ok(Value::NIL);
             }
+        }
+        let cooperative = crate::fiber::wait_event(vm, |wake| {
+            let q = inner.queue.lock();
+            if q.closed || !q.items.is_empty() {
+                return false;
+            }
+            inner.waiters.lock().push(wake);
+            true
+        });
+        if cooperative {
+            continue;
         }
         blocking(vm, || {
             let mut q = inner.queue.lock();
@@ -255,7 +295,10 @@ fn with_mutex(vm: &mut Vm, m: Value, f: impl FnOnce(&mut Vm, &MutexObj) -> RtRes
             g
         }
     };
+    // The lock is keyed by OS thread: a parked fiber holding it would let its siblings in.
+    vm.no_park += 1;
     let r = f(vm, mo);
+    vm.no_park -= 1;
     drop(guard);
     r
 }
@@ -440,6 +483,7 @@ fn worker_main() {
         };
         catallaxy_gc::leave_native(&vm.m.rec);
         run_task(&mut vm, task);
+        crate::fiber::drain(&mut vm);
         catallaxy_gc::enter_native(&vm.m.rec);
     }
 }

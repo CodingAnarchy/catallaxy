@@ -460,7 +460,7 @@ fn compare_values(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn read_line(vm: &mut Vm, _: &[Value]) -> RtResult<Value> {
-    let line = blocking(vm, || {
+    let line = crate::fiber::blocking_io(vm, || {
         let mut s = String::new();
         match std::io::stdin().read_line(&mut s) {
             Ok(0) | Err(_) => None,
@@ -493,7 +493,7 @@ fn exit_fn(_: &mut Vm, a: &[Value]) -> RtResult<Value> {
 
 fn sleep_fn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let secs = float(a[0])?.max(0.0);
-    blocking(vm, || std::thread::sleep(std::time::Duration::from_secs_f64(secs)));
+    crate::fiber::sleep(vm, std::time::Duration::from_secs_f64(secs));
     Ok(Value::NIL)
 }
 

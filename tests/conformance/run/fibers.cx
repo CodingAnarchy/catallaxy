@@ -1,0 +1,60 @@
+# Fibers: cooperative, pinned to their thread, interleaving where they wait.
+log: List[String] = []
+a = Fiber.start {
+  log.push("a1")
+  Fiber.yield()
+  log.push("a2")
+  10
+}
+b = Fiber.start {
+  log.push("b1")
+  Fiber.yield()
+  log.push("b2")
+  20
+}
+puts(a.join().unwrap() + b.join().unwrap())
+puts(log)
+
+# Owned values captured and mutated by fibers on the same thread.
+counts = ["x": 0]
+fs = (1..5).map { |i| Fiber.start { counts["x"] = (counts["x"] ?? 0) + i; i * i } }
+total = 0
+for f in fs { total += f.join().unwrap() }
+puts(total)
+puts(counts["x"])
+
+# Producer and consumer fibers over a channel.
+ch: Channel[Int] = Channel.new(2)
+producer = Fiber.start {
+  for i in 0...10 { ch.send(i) }
+  ch.close()
+  "sent"
+}
+consumer = Fiber.start {
+  sum = 0
+  ch.each { |x| sum += x }
+  sum
+}
+puts(producer.join().unwrap())
+puts(consumer.join().unwrap())
+
+# A panic ends only its fiber.
+bad = Fiber.start {
+  xs: List[Int] = []
+  xs[3]
+}
+match bad.join() {
+  Ok(v) => puts("unexpected #{v}")
+  Err(e) => puts("caught: #{e.lines()[0]}")
+}
+puts(bad.is_done())
+
+# Fibers started by fibers, and a result that is a fresh object.
+outer = Fiber.start {
+  inner = Fiber.start { ["deep", "list"] }
+  inner.join().unwrap().join("-")
+}
+puts(outer.join().unwrap())
+
+# A fiber that is never joined still runs before the program ends.
+Fiber.start { puts("unjoined fiber ran") }
