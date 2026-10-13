@@ -1,0 +1,40 @@
+# Frozen values that are still young (big integers, strings built at runtime) queued in a channel
+# must survive the sender's minor collections. CI also runs this under CATX_GC_STRESS=1.
+# (Found by tools/difffuzz.)
+ch: Channel[Int] = Channel.new()
+names: Channel[String] = Channel.new()
+for i in 0...40 {
+  junk = (0...30).to_list().map { |x| "junk #{x}" }
+  ch.send(12345678901234567890123 + i + junk.length)
+  names.send("name #{i}")
+}
+ch.close()
+names.close()
+got: List[Int] = []
+ch.each { |x| got.push(x) }
+puts(got.length)
+puts(got.first())
+puts(got.last())
+puts(got.sum())
+labels: List[String] = []
+names.each { |s| labels.push(s) }
+puts(labels.take(3))
+puts(labels.last())
+
+# The same between fibers, with a bounded channel.
+fch: Channel[Int] = Channel.new(2)
+prod = Fiber.start {
+  for i in 0...30 {
+    junk = (0...20).to_list().map { |x| "s#{x}" }
+    fch.send([1, 2, 3, 12345678901234567890123].par_reduce(0) { |a, b| a + b } + i + junk.length)
+  }
+  fch.close()
+}
+cons = Fiber.start {
+  out: List[Int] = []
+  fch.each { |x| out.push(x) }
+  out
+}
+seen = cons.join().unwrap()
+puts(seen.length)
+puts(seen.sum())

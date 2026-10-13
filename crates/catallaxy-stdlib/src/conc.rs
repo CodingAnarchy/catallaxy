@@ -219,6 +219,11 @@ fn chan_send(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
             if inner.capacity == 0 || q.items.len() < inner.capacity {
                 if owned {
                     ownership::transfer_deep(item, vm.tid(), TRANSIT_TID);
+                } else {
+                    // A frozen value (a string, a big integer, a frozen collection) may still be
+                    // young: the channel is reached only by major collections, so the value must
+                    // be old before it is queued, or this thread's next minor collection frees it.
+                    ownership::escape(item, vm.tid());
                 }
                 q.items.push_back(item);
                 drop(q);
