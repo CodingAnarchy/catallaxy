@@ -1,0 +1,11 @@
+[package]
+name = "catallaxy-difffuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+description = "Differential fuzzer: random well-typed Catallaxy programs run across builds and GC modes"
+
+[dependencies]
+
+# Standalone: not a member of the main workspace.
+[workspace]

@@ -192,6 +192,328 @@ fn lsp_diagnostics_hover_definition_completion() {
     assert!(status.success());
 }
 
+impl Lsp {
+    /// Starts a server and completes the initialize handshake, returning the capabilities.
+    fn init() -> (Lsp, Value) {
+        let mut lsp = Lsp::start();
+        let init = lsp.request(1, "initialize", json!({"processId": null, "rootUri": null, "capabilities": {}}));
+        lsp.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
+        let caps = init["result"]["capabilities"].clone();
+        (lsp, caps)
+    }
+
+    /// Opens a document (also written to disk, so imports resolve either way) and waits for its
+    /// diagnostics.
+    fn open(&mut self, name: &str, text: &str) -> String {
+        let (uri, path) = file_uri(name);
+        std::fs::write(&path, text).unwrap();
+        self.send(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+            "textDocument": {"uri": uri, "languageId": "catallaxy", "version": 1, "text": text}
+        }}));
+        let u = uri.clone();
+        self.wait("publishDiagnostics", move |v| {
+            v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == json!(u)
+        });
+        uri
+    }
+
+    fn finish(mut self) {
+        let r = self.request(999, "shutdown", Value::Null);
+        assert!(r.get("error").is_none(), "{r}");
+        self.send(json!({"jsonrpc": "2.0", "method": "exit"}));
+        assert!(self.child.wait().unwrap().success());
+    }
+}
+
+/// LSP position of the `nth` occurrence of `needle` on line `line` of `text`.
+fn pos(text: &str, line: usize, needle: &str, nth: usize) -> Value {
+    let l = text.lines().nth(line).unwrap();
+    let mut from = 0;
+    for _ in 0..nth {
+        from += l[from..].find(needle).unwrap() + needle.len();
+    }
+    let byte = from + l[from..].find(needle).unwrap_or_else(|| panic!("{needle} not on line {line}"));
+    json!({"line": line, "character": l[..byte].encode_utf16().count()})
+}
+
+/// `(uri, line, character)` of each location (or text edit with its uri), sorted.
+fn spots(items: impl IntoIterator<Item = (String, Value)>) -> Vec<(String, u64, u64)> {
+    let mut out: Vec<(String, u64, u64)> = items
+        .into_iter()
+        .map(|(u, r)| (u, r["start"]["line"].as_u64().unwrap(), r["start"]["character"].as_u64().unwrap()))
+        .collect();
+    out.sort();
+    out
+}
+
+fn spot(uri: &str, p: Value) -> (String, u64, u64) {
+    (uri.to_string(), p["line"].as_u64().unwrap(), p["character"].as_u64().unwrap())
+}
+
+/// Locations from a references response.
+fn ref_spots(r: &Value) -> Vec<(String, u64, u64)> {
+    let list = r["result"].as_array().unwrap_or_else(|| panic!("{r}"));
+    spots(list.iter().map(|l| (l["uri"].as_str().unwrap().to_string(), l["range"].clone())))
+}
+
+/// Edits of a rename response, checking every one inserts `new`.
+fn edit_spots(r: &Value, new: &str) -> Vec<(String, u64, u64)> {
+    let changes = r["result"]["changes"].as_object().unwrap_or_else(|| panic!("{r}"));
+    let mut items = Vec::new();
+    for (uri, edits) in changes {
+        for e in edits.as_array().unwrap() {
+            assert_eq!(e["newText"], new, "{r}");
+            items.push((uri.clone(), e["range"].clone()));
+        }
+    }
+    spots(items)
+}
+
+const GEO: &str = "pub class Point {
+  x: Int
+  y: Int = 0
+  pub fn sum(self) -> Int { self.x + self.y }
+}
+pub fn origin() -> Point { Point.new(0) }
+";
+
+const NAV_MAIN: &str = "import nav_geo.{Point, origin}
+fn scale(p: Point, by: Int = 2) -> Int { p.sum * by }
+x = 1
+fn twice(x: Int) -> Int { x + x }
+y = x + scale(Point.new(x, y: 2), by: 3)
+[1, 2].each { |x| puts(x) }
+puts(x + y + twice(y) + origin().x)
+";
+
+#[test]
+fn lsp_references_and_rename() {
+    let (mut lsp, caps) = Lsp::init();
+    assert_eq!(caps["referencesProvider"], true, "{caps}");
+    assert_eq!(caps["renameProvider"]["prepareProvider"], true, "{caps}");
+    let geo = lsp.open("nav_geo.cx", GEO);
+    let main = lsp.open("nav_main.cx", NAV_MAIN);
+    let t = NAV_MAIN;
+    let at = |p: Value| json!({"textDocument": {"uri": main}, "position": p});
+    let refs = |lsp: &mut Lsp, id: i64, p: Value, decl: bool| {
+        let mut params = at(p);
+        params["context"] = json!({"includeDeclaration": decl});
+        ref_spots(&lsp.request(id, "textDocument/references", params))
+    };
+
+    // The top-level `x` is distinct from the parameter `x` of `twice` and the block parameter `x`.
+    let top_x = vec![spot(&main, pos(t, 2, "x", 0)), spot(&main, pos(t, 4, "x", 0)), spot(&main, pos(t, 4, "(x", 0))];
+    let mut want = top_x.clone();
+    want[2].2 += 1;
+    want.push(spot(&main, pos(t, 6, "x", 0)));
+    want.sort();
+    assert_eq!(refs(&mut lsp, 2, pos(t, 4, "x", 0), true), want);
+    let mut no_decl = want.clone();
+    no_decl.retain(|s| s.1 != 2);
+    assert_eq!(refs(&mut lsp, 3, pos(t, 6, "x", 0), false), no_decl);
+
+    // Rename the top-level `x`: exactly its own occurrences change.
+    let mut p = at(pos(t, 2, "x", 0));
+    p["newName"] = json!("count");
+    let r = lsp.request(4, "textDocument/rename", p);
+    assert_eq!(edit_spots(&r, "count"), want);
+
+    // Rename the parameter `x` of `twice`: declaration and both uses, nothing else.
+    let mut p = at(pos(t, 3, "x", 1));
+    p["newName"] = json!("n");
+    let r = lsp.request(5, "textDocument/rename", p);
+    let want: Vec<_> = (0..3).map(|i| spot(&main, pos(t, 3, "x", i))).collect();
+    assert_eq!(edit_spots(&r, "n"), want);
+
+    // The block parameter `x` shadows the top-level one.
+    let mut p = at(pos(t, 5, "x", 1));
+    p["newName"] = json!("item");
+    let r = lsp.request(6, "textDocument/rename", p);
+    let want = vec![spot(&main, pos(t, 5, "x", 0)), spot(&main, pos(t, 5, "x", 1))];
+    assert_eq!(edit_spots(&r, "item"), want);
+
+    // A parameter with a default renames its named argument at the call site too.
+    let mut p = at(pos(t, 1, "by", 1));
+    p["newName"] = json!("factor");
+    let r = lsp.request(7, "textDocument/rename", p);
+    let want = vec![spot(&main, pos(t, 1, "by", 0)), spot(&main, pos(t, 1, "by", 1)), spot(&main, pos(t, 4, "by", 0))];
+    assert_eq!(edit_spots(&r, "factor"), want);
+
+    // Cross-file: the field `x`, from a use in main; `Point.new(x, y: 2)` names the field `y`.
+    let mut p = at(pos(t, 6, ".x", 0));
+    p["position"]["character"] = json!(p["position"]["character"].as_u64().unwrap() + 1);
+    p["newName"] = json!("px");
+    let r = lsp.request(8, "textDocument/rename", p);
+    let want = vec![spot(&geo, pos(GEO, 1, "x", 0)), spot(&geo, pos(GEO, 3, ".x", 0)), spot(&main, pos(t, 6, ".x", 0))];
+    let want: Vec<_> = want.into_iter().map(|(u, l, c)| if l == 1 { (u, l, c) } else { (u, l, c + 1) }).collect();
+    assert_eq!(edit_spots(&r, "px"), want);
+    let mut p = at(pos(t, 4, "y:", 0));
+    p["context"] = json!({"includeDeclaration": true});
+    let r = ref_spots(&lsp.request(9, "textDocument/references", p));
+    assert_eq!(
+        r,
+        vec![spot(&geo, pos(GEO, 2, "y", 0)), spot(&geo, pos(GEO, 3, ".y", 0)), spot(&main, pos(t, 4, "y:", 0))]
+            .into_iter()
+            .map(|(u, l, c)| if l == 3 { (u, l, c + 1) } else { (u, l, c) })
+            .collect::<Vec<_>>()
+    );
+
+    // The class across files: declaration, type annotations, constructor calls and the import.
+    let mut p = at(pos(t, 1, "Point", 0));
+    p["newName"] = json!("Pt");
+    let r = lsp.request(10, "textDocument/rename", p);
+    let want = vec![
+        spot(&geo, pos(GEO, 0, "Point", 0)),
+        spot(&geo, pos(GEO, 5, "Point", 0)),
+        spot(&geo, pos(GEO, 5, "Point", 1)),
+        spot(&main, pos(t, 0, "Point", 0)),
+        spot(&main, pos(t, 1, "Point", 0)),
+        spot(&main, pos(t, 4, "Point", 0)),
+    ];
+    let mut want = want;
+    want.sort();
+    assert_eq!(edit_spots(&r, "Pt"), want);
+
+    // Methods: references to `sum` from its use.
+    let r = refs(&mut lsp, 11, pos(t, 1, "sum", 0), true);
+    assert_eq!(r, vec![spot(&geo, pos(GEO, 3, "sum", 0)), spot(&main, pos(t, 1, "sum", 0))]);
+
+    // prepareRename: the name's range; refused for prelude functions and invalid new names.
+    let r = lsp.request(12, "textDocument/prepareRename", at(pos(t, 3, "twice", 0)));
+    assert_eq!(r["result"]["start"], pos(t, 3, "twice", 0), "{r}");
+    let r = lsp.request(13, "textDocument/prepareRename", at(pos(t, 6, "puts", 0)));
+    assert!(r["error"]["message"].as_str().unwrap_or_default().contains("puts"), "{r}");
+    let mut p = at(pos(t, 3, "twice", 0));
+    p["newName"] = json!("fn");
+    let r = lsp.request(14, "textDocument/rename", p);
+    assert!(r.get("error").is_some(), "{r}");
+    lsp.finish();
+}
+
+#[test]
+fn lsp_signature_help() {
+    let (mut lsp, caps) = Lsp::init();
+    assert!(caps["signatureHelpProvider"]["triggerCharacters"].as_array().unwrap().contains(&json!("(")), "{caps}");
+    let head = "fn scale(n: Int, by: Int = 2) -> Int { n * by }\nfn apply(n: Int, f: fn(Int) -> Int) -> Int { f(n) }\nclass Box {\n  w: Int\n  h: Int = 1\n}\n";
+    let cases: [(&str, i64, Option<&str>, &str); 5] = [
+        ("scale(1, ", 1, Some("by: Int = 2"), "fn scale(n: Int, by: Int = 2) -> Int"),
+        ("scale(", 0, Some("n: Int"), "fn scale("),
+        ("scale(1, by: ", 1, Some("by: Int = 2"), "fn scale("),
+        ("apply(3, ", 1, Some("f: fn(Int) -> Int"), "fn apply(n: Int, f: fn(Int) -> Int) -> Int"),
+        ("Box.new(2, ", 1, Some("h: Int = 1"), "fn Box.new(w: Int, h: Int = 1)"),
+    ];
+    let uri = lsp.open("sig.cx", head);
+    for (i, (call, active, param, label)) in cases.into_iter().enumerate() {
+        let text = format!("{head}{call}\n");
+        lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 2 + i}, "contentChanges": [{"text": text}]
+        }}));
+        let line = head.lines().count();
+        let r = lsp.request(
+            10 + i as i64,
+            "textDocument/signatureHelp",
+            json!({"textDocument": {"uri": uri}, "position": {"line": line, "character": call.len()}}),
+        );
+        let sig = &r["result"]["signatures"][0];
+        let lab = sig["label"].as_str().unwrap_or_else(|| panic!("{call}: {r}"));
+        assert!(lab.starts_with(label), "{call}: {lab}");
+        assert_eq!(r["result"]["activeParameter"], active, "{call}: {r}");
+        let [a, b] = [0, 1].map(|k| sig["parameters"][active as usize]["label"][k].as_u64().unwrap() as usize);
+        let utf16: Vec<u16> = lab.encode_utf16().collect();
+        assert_eq!(String::from_utf16(&utf16[a..b]).unwrap(), param.unwrap(), "{call}: {r}");
+        if call.starts_with("apply") {
+            let doc = sig["parameters"][1]["documentation"].as_str().unwrap_or_default();
+            assert!(doc.contains("block"), "{r}");
+        }
+    }
+    // Outside any call: no help.
+    let r = lsp.request(
+        30,
+        "textDocument/signatureHelp",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 0, "character": 0}}),
+    );
+    assert!(r["result"].is_null(), "{r}");
+    lsp.finish();
+}
+
+#[test]
+fn lsp_inlay_hints() {
+    let (mut lsp, caps) = Lsp::init();
+    assert_eq!(caps["inlayHintProvider"], true, "{caps}");
+    let text = "fn shout(x) { x.upcase }\nn = 41\nnames = [\"a\"]\ntyped: Int = 1\nfor s in names {\n  puts(shout(s))\n}\ntotal = names.map { |s| s.length }\n";
+    let uri = lsp.open("hints.cx", text);
+    let r = lsp.request(
+        2,
+        "textDocument/inlayHint",
+        json!({"textDocument": {"uri": uri}, "range": {"start": {"line": 0, "character": 0}, "end": {"line": 8, "character": 0}}}),
+    );
+    let hints: Vec<(u64, u64, String)> = r["result"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{r}"))
+        .iter()
+        .map(|h| {
+            assert_eq!(h["kind"], 1, "{h}");
+            (
+                h["position"]["line"].as_u64().unwrap(),
+                h["position"]["character"].as_u64().unwrap(),
+                h["label"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    let has = |line: u64, col: u64, label: &str| hints.iter().any(|h| h == &(line, col, label.to_string()));
+    assert!(has(1, 1, ": Int"), "{hints:?}");
+    assert!(has(2, 5, ": List[String]"), "{hints:?}");
+    assert!(has(4, 5, ": String"), "{hints:?}");
+    assert!(has(7, 5, ": List[Int]"), "{hints:?}");
+    assert!(has(7, 22, ": String"), "{hints:?}");
+    // The implicit-generic parameter shows its inferred requirement.
+    assert!(hints.iter().any(|h| h.0 == 0 && h.1 == 10 && h.2.contains("upcase")), "{hints:?}");
+    // Annotated variables get no hint.
+    assert!(!hints.iter().any(|h| h.0 == 3), "{hints:?}");
+    // Only hints in the requested range.
+    let r = lsp.request(
+        3,
+        "textDocument/inlayHint",
+        json!({"textDocument": {"uri": uri}, "range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 6}}}),
+    );
+    assert_eq!(r["result"].as_array().map(|a| a.len()), Some(1), "{r}");
+    lsp.finish();
+}
+
+#[test]
+fn lsp_document_and_workspace_symbols() {
+    let (mut lsp, caps) = Lsp::init();
+    assert_eq!(caps["documentSymbolProvider"], true, "{caps}");
+    assert_eq!(caps["workspaceSymbolProvider"], true, "{caps}");
+    let text = "class Shape {\n  sides: Int\n  fn describe(self) -> String { \"#{self.sides}\" }\n}\nenum Color {\n  Red\n  Green\n}\nconst LIMIT = 3\nfn main_shape() -> Shape { Shape.new(4) }\ncount = 2\n";
+    let uri = lsp.open("outline.cx", text);
+    let r = lsp.request(2, "textDocument/documentSymbol", json!({"textDocument": {"uri": uri}}));
+    let syms = r["result"].as_array().unwrap_or_else(|| panic!("{r}"));
+    let find = |list: &Vec<Value>, name: &str| list.iter().find(|s| s["name"] == name).cloned();
+    let shape = find(syms, "Shape").unwrap_or_else(|| panic!("{r}"));
+    assert_eq!(shape["kind"], 5); // class
+    assert_eq!(shape["selectionRange"]["start"], json!({"line": 0, "character": 6}));
+    let kids = shape["children"].as_array().unwrap();
+    assert_eq!(find(kids, "sides").unwrap()["kind"], 8); // field
+    let describe = find(kids, "describe").unwrap();
+    assert_eq!(describe["kind"], 6); // method
+    assert!(describe["detail"].as_str().unwrap().contains("-> String"), "{describe}");
+    let color = find(syms, "Color").unwrap();
+    assert_eq!(color["kind"], 10); // enum
+    assert_eq!(color["children"].as_array().unwrap().len(), 2);
+    assert_eq!(find(syms, "LIMIT").unwrap()["kind"], 14); // constant
+    assert_eq!(find(syms, "main_shape").unwrap()["kind"], 12); // function
+    assert_eq!(find(syms, "count").unwrap()["kind"], 13); // variable
+
+    let r = lsp.request(3, "workspace/symbol", json!({"query": "shape"}));
+    let names: Vec<&str> = r["result"].as_array().unwrap().iter().filter_map(|s| s["name"].as_str()).collect();
+    assert!(names.contains(&"Shape") && names.contains(&"main_shape"), "{names:?}");
+    assert!(!names.contains(&"Color"), "{names:?}");
+    let s = r["result"].as_array().unwrap().iter().find(|s| s["name"] == "Shape").unwrap();
+    assert_eq!(s["location"]["uri"], json!(uri));
+    lsp.finish();
+}
+
 #[test]
 fn repl_piped_session() {
     let input = "x = 40\nx + 2\nfn sq(n: Int) -> Int {\n  n * n\n}\nsq(3)\ny: Int = \"s\"\nputs(\"hi\")\n:type [x]\npanic(\"boom\")\nx\nnil\n:reset\n:quit\nputs(\"unreachable\")\n";

@@ -1,0 +1,19 @@
+# What freezing and moving still allow (see the reject tests for what they forbid).
+xs = [1, 2]
+f = freeze(xs)
+puts(xs.length + f.length)          # reading a frozen variable is fine
+xs = [9]                            # reassigning gives it a fresh, mutable list
+xs.push(10)
+puts(xs)
+a = [1, 2]
+b = a
+b = [3]                             # b no longer aliases a
+c = freeze(b)
+a.push(5)                           # so a stays mutable
+puts([a, c])
+m = [7]
+n = m
+ch: Channel[List[Int]] = Channel.new(1)
+ch.send(move n)
+m = [8]                             # reassigned after the move: usable again
+puts([m, ch.recv() ?? []])

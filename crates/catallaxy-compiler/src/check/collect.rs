@@ -29,6 +29,7 @@ const BUILTIN_CLASSES: &[(u32, &str, &[&str])] = &[
     (builtin::CHANNEL, "Channel", &["T"]),
     (builtin::THREAD, "Thread", &["T"]),
     (builtin::RANGE, "Range", &[]),
+    (builtin::NATIVE, "NativeHandle", &[]),
 ];
 
 impl Checker {

@@ -80,6 +80,47 @@ jobs:
           RUSTFLAGS: --cfg loom
         run: cargo test -p catallaxy-gc --test loom --release
 
+  tsan-suite:
+    # The whole interpreter (VM, stdlib threads, channels, Mutex/Atomic, par_*, fibers) under
+    # ThreadSanitizer, over the conformance suite and the examples. `catx test` runs each program
+    # in a child process; a TSan report makes the child exit with 66, which fails the test.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # `catx_tsan` turns on the fiber annotations in catallaxy-stdlib/src/fiber.rs.
+      RUSTFLAGS: -Zsanitizer=thread --cfg catx_tsan
+      CARGO_PROFILE_RELEASE_LTO: "off"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      TSAN_OPTIONS: suppressions=${{ github.workspace }}/tsan.supp
+      CATX: target/x86_64-unknown-linux-gnu/release/catx
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: tsan
+      # TSan's shadow memory layout does not fit the runner's default mmap ASLR entropy.
+      - run: sudo sysctl vm.mmap_rnd_bits=28
+      # The fiber switch code (stdlib, and corosensei inlined into it) is built without TSan's
+      # function entry/exit hooks, which a stack switch would unbalance: see `mod tsan` in fiber.rs.
+      - name: Build catx with ThreadSanitizer
+        run: >-
+          cargo build --release --locked -p catallaxy --bin catx --target x86_64-unknown-linux-gnu
+          -Zbuild-std -Zprofile-rustflags
+          --config 'profile.release.package.catallaxy-stdlib.rustflags=["-Cllvm-args=-tsan-instrument-func-entry-exit=0"]'
+          --config 'profile.release.package.corosensei.rustflags=["-Cllvm-args=-tsan-instrument-func-entry-exit=0"]'
+      - name: Conformance suite
+        timeout-minutes: 10
+        run: $CATX test tests/conformance
+      - name: Conformance suite under GC stress
+        timeout-minutes: 10
+        run: CATX_GC_STRESS=1 $CATX test tests/conformance/run
+      - name: Examples
+        timeout-minutes: 10
+        run: $CATX test examples
+
   fuzz:
     runs-on: ubuntu-latest
     steps:
@@ -91,3 +132,32 @@ jobs:
           mkdir -p fuzz/corpus/check
           cp tests/conformance/run/*.cx tests/conformance/reject/*.cx examples/*.cx fuzz/corpus/check/
           cd fuzz && cargo fuzz run check -- -max_total_time=120 -max_len=4096 -timeout=10
+
+  difffuzz:
+    # Keep this name stable: it may be made a required check.
+    name: Differential fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            tools/difffuzz
+      - name: Build catx (release and debug) and the fuzzer
+        run: |
+          cargo build --release --locked
+          cargo build --locked
+          cargo build --release --locked --manifest-path tools/difffuzz/Cargo.toml
+          cargo test --release --locked --manifest-path tools/difffuzz/Cargo.toml
+      - name: Differential fuzz (corpus, then 3 minutes of generated programs)
+        run: >
+          ./tools/difffuzz/target/release/catallaxy-difffuzz --time 180 --seed ${{ github.run_id }}000
+          --corpus tools/difffuzz/corpus --corpus tests/conformance/run --corpus examples
+          --out difffuzz-failures --minimize-secs 60
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: difffuzz-failures
+          path: difffuzz-failures

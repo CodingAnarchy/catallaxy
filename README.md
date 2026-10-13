@@ -87,7 +87,7 @@ catx lsp                        language server (stdio)
 | `catallaxy-runtime` | NaN-boxed values, object layouts, classes, ownership states |
 | `catallaxy-vm` | bytecode format, interpreter, inline caches, program loader |
 | `catallaxy-compiler` | lexer, parser, type checker, bytecode emitter, formatter |
-| `catallaxy-stdlib` | native standard library (strings, collections, threads, channels, JSON, files) |
+| `catallaxy-stdlib` | native standard library (strings, collections, threads, channels, JSON, files, directories, regexes, processes) |
 | `catallaxy` | the `catx` command-line tool, REPL and language server |
 | `catallaxy-capi` | C ABI for embedding and native extensions (`include/catallaxy.h`) |
 
@@ -116,8 +116,9 @@ lays out:
 - tooling: `check --json`, formatter, REPL, language server, Rust extension API.
 
 Validation: a conformance suite of 116 programs (run + reject), 42 example programs with checked
-output, Miri (Tree Borrows) and ThreadSanitizer on the collector and runtime, Loom models of the
-object-lock and mark protocols, continuous fuzzing of the compiler front end, and a GC stress mode
+output, Miri (Tree Borrows) and ThreadSanitizer on the collector and runtime, the whole corpus
+(threads, channels, `par_*` and fibers) under ThreadSanitizer, Loom models of the object-lock and
+mark protocols, continuous fuzzing of the compiler front end, and a GC stress mode
 (`CATX_GC_STRESS=1`) that the whole corpus passes. On an Apple M-series machine Catallaxy runs the
 `bench/` programs 1.5–7× faster than CPython 3.13 and type-checks 8,000 lines in about 20 ms. The design budgets 10–20% of
 single-thread speed for thread safety. Against a build with ownership checks and list memory

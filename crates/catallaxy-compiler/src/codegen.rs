@@ -5,7 +5,7 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::ast::{self, Arg, BinOp, Block, Expr, ExprKind, Item, Pattern, PatternKind, StrPart, UnOp};
+use crate::ast::{self, Arg, BinOp, Block, Expr, ExprKind, Item, NodeId, Pattern, PatternKind, StrPart, UnOp};
 use crate::check::*;
 use crate::diag::{SourceMap, Span};
 use crate::types::*;
@@ -514,6 +514,7 @@ impl<'a> Codegen<'a> {
         info: &ClosureInfo,
         body: &Block,
         pattern: Option<&Pattern>,
+        parallel: Option<NodeId>,
     ) -> FnId {
         let ck = self.ck;
         let fid = info.fn_id;
@@ -526,6 +527,12 @@ impl<'a> Codegen<'a> {
         let mut srcs = Vec::new();
         for (i, &l) in info.captures.iter().enumerate() {
             st.caps.insert(l, i as u8);
+            if let Some(node) = parallel {
+                if ck.locals[l as usize].name != "$frame" {
+                    srcs.push(self.parallel_capture(outer, l, ck.moved_captures.contains(&(node, l))));
+                    continue;
+                }
+            }
             let src = match outer.regs.get(&l) {
                 Some(&r) => CapSrc::Reg(r),
                 None => match outer.caps.get(&l) {
@@ -577,6 +584,46 @@ impl<'a> Codegen<'a> {
         let proto = self.finish(st, name, nparams, srcs);
         self.prog.funcs[fid as usize] = proto;
         fid
+    }
+
+    /// Captures `l` into a parallel block (`spawn`, `par_*`), which receives a copy of each
+    /// captured variable. A reassigned variable lives in a cell owned by this thread, so the block
+    /// gets a fresh cell holding the current value instead of sharing the original. A value that
+    /// is not moved is statically frozen or shareable; freezing it (a no-op for frozen and shared
+    /// objects) makes immutable-but-owned values such as enum values and tuples readable from the
+    /// other threads, and keeps `spawn` from transferring them away from this thread.
+    fn parallel_capture(&mut self, outer: &mut FnState, l: LocalId, moved: bool) -> CapSrc {
+        let t = self.alloc(outer);
+        match (outer.regs.get(&l), outer.caps.get(&l)) {
+            (Some(&r), _) => {
+                if self.ck.locals[l as usize].is_cell() {
+                    self.emit(outer, encode(Op::GetCell, t, r, 0));
+                } else {
+                    self.emit(outer, encode(Op::Move, t, r, 0));
+                }
+            }
+            (None, Some(&c)) => {
+                self.emit(outer, encode(Op::GetCap, t, c, 0));
+                if self.ck.locals[l as usize].is_cell() {
+                    self.emit(outer, encode(Op::GetCell, t, t, 0));
+                }
+            }
+            // A local declared later in the enclosing function: not yet assigned.
+            (None, None) => {
+                self.emit(outer, encode(Op::LoadNil, t, 0, 0));
+            }
+        }
+        if !moved {
+            self.emit(outer, encode(Op::Freeze, t, t, 0));
+        }
+        if self.ck.locals[l as usize].is_cell() {
+            self.emit(outer, encode(Op::NewCell, t, t, 0));
+            if !moved {
+                // Parallel blocks cannot assign captures, so the copy's cell is never written.
+                self.emit(outer, encode(Op::Freeze, t, t, 0));
+            }
+        }
+        CapSrc::Reg(t)
     }
 
     // ---- emission helpers --------------------------------------------------------------------
@@ -1168,7 +1215,8 @@ impl<'a> Codegen<'a> {
             }
             ExprKind::Closure { body, .. } => {
                 if let Some(info) = ck.closures.get(&e.id).cloned() {
-                    let fid = self.gen_closure_fn(st, &info, body, None);
+                    let par = ck.spawn_nodes.contains_key(&e.id).then_some(e.id);
+                    let fid = self.gen_closure_fn(st, &info, body, None, par);
                     self.emit(st, encode(Op::Closure, dst, 0, 0));
                     self.emit(st, fid);
                 }
@@ -1365,7 +1413,7 @@ impl<'a> Codegen<'a> {
             ExprKind::Try(x) => self.try_expr(st, e, x, dst),
             ExprKind::Spawn { body, .. } => {
                 if let Some(info) = ck.closures.get(&e.id).cloned() {
-                    let fid = self.gen_closure_fn(st, &info, body, None);
+                    let fid = self.gen_closure_fn(st, &info, body, None, Some(e.id));
                     let base = self.alloc_n(st, 2);
                     self.emit(st, encode(Op::Closure, base, 0, 0));
                     self.emit(st, fid);
@@ -2010,7 +2058,7 @@ impl<'a> Codegen<'a> {
                 let Some(info) = ck.for_bodies.get(&e.id).cloned() else { return };
                 let base = self.alloc_n(st, 2);
                 self.expr_to(st, iter, base);
-                let fid = self.gen_closure_fn(st, &info, body, Some(pattern));
+                let fid = self.gen_closure_fn(st, &info, body, Some(pattern), None);
                 self.emit(st, encode(Op::Closure, base + 1, 0, 0));
                 self.emit(st, fid);
                 self.call_dispatch(st, &d, base, 2);

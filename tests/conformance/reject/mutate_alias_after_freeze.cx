@@ -1,0 +1,6 @@
+# expect: E0614
+# Freezing through an alias freezes the original variable too.
+xs = [1, 2]
+ys = xs
+f = freeze(ys)
+xs.push(3)

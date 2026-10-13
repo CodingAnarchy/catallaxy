@@ -299,6 +299,15 @@ impl Mutator {
         Value::from_ptr(h)
     }
 
+    /// Allocates a frozen native handle: one whose data is immutable or synchronizes itself, so
+    /// it may be stored in frozen objects and used from any thread (`NativeHandle` in the prelude).
+    pub fn alloc_native_frozen(&mut self, data: Box<dyn NativeData>) -> Value {
+        let v = self.alloc_native(data);
+        // A leaf, like a string: no children to escape.
+        unsafe { (*v.as_ptr()).set_state(ObjState::Frozen) };
+        v
+    }
+
     pub fn alloc_range(&mut self, first: Value, last: Value, exclusive: bool) -> Value {
         let v = self.alloc_instance(BUILTINS.range);
         let r = unsafe { as_instance(v) };

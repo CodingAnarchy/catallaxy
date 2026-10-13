@@ -1,0 +1,38 @@
+a/b.txt
+a/b.txt
+b.txt
+/etc/x
+src/lib/main.cx
+file.tar.gz
+sub
+dir/sub
+.
+gz
+nil
+nil
+file.tar
+false
+true
+false
+true
+true
+true
+true
+true
+true
+false
+true
+15 true false
+true
+false true
+true
+["a.cx", "b.cx", "notes.txt", "x"]
+true
+["a.cx", "b.cx"]
+[0, 1, 2, 3, 4, 5]
+10
+true
+true
+true
+false
+false

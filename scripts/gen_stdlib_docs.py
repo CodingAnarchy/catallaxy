@@ -21,11 +21,13 @@ for f in ["core.cx", "builtins.cx"]:
     for raw in lines:
         line = raw.strip()
         if depth == 0:
-            m = re.match(r"(?:pub )?(interface|class|enum|extend(?:\[[^\]]*\])?)\s+([^{]+?)\s*\{", line)
+            m = re.match(r"(?:pub )?(?:(frozen|shared) )?(interface|class|enum|extend(?:\[[^\]]*\])?)\s+([^{]+?)\s*\{", line)
             if m:
-                kind, name = m.group(1), m.group(2).strip()
+                modifier, kind, name = m.group(1), m.group(2), m.group(3).strip()
                 title = {"interface": "interface", "class": "", "enum": "enum"}.get(kind, "")
                 head = f"{title} {name}".strip() if not kind.startswith("extend") else name
+                if modifier:
+                    head += f" ({modifier})"
                 if kind.startswith("extend") and "[" in kind:
                     head = f"{name} (where {kind[7:-1]})"
                 out += ["", f"## {head}", ""]
@@ -38,6 +40,8 @@ for f in ["core.cx", "builtins.cx"]:
         elif depth == 1 and section:
             if line.startswith(("fn ", "native fn ", "pub fn ", "mut fn")):
                 out.append(f"- `{sig_of(line)}`")
+            elif re.match(r"^[a-z_]\w*: ", line):
+                out.append(f"- field `{line}`")
             elif line.startswith("const "):
                 out.append(f"- `{line}`")
             elif re.match(r"^[A-Z]\w*(\(.*\))?$", line):
