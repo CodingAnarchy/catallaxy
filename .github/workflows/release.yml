@@ -14,7 +14,6 @@ on:
         description: Build the archives only (never publishes, whatever this says)
         type: boolean
         default: true
-  pull_request: # TEMPORARY: validates the build matrix on this PR; remove before merge.
 
 env:
   CARGO_TERM_COLOR: always
@@ -79,7 +78,9 @@ jobs:
               archive="$name.tar.gz"
               ;;
           esac
-          (cd dist && if command -v sha256sum >/dev/null; then sha256sum "$archive"; else shasum -a 256 "$archive"; fi > "$archive.sha256")
+          if command -v sha256sum >/dev/null; then sum=$(sha256sum "dist/$archive"); else sum=$(shasum -a 256 "dist/$archive"); fi
+          # `sha256sum -c` format, without the `*` (binary mode) Windows tools put before the name.
+          printf '%s  %s\n' "${sum%% *}" "$archive" > "dist/$archive.sha256"
           cat "dist/$archive.sha256"
           rm -rf "dist/$name"
           echo "VERSION=$version" >> "$GITHUB_ENV"
