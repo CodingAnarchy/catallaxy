@@ -6,7 +6,8 @@
 //! the requested document on demand and query the checker's side tables (see
 //! `catallaxy_compiler::query`). References, rename, signature help, inlay hints and symbol lists
 //! use the symbol index and outlines of `catallaxy_compiler::symbols`; references and rename cover
-//! every module of the compilation (the document and the modules it imports).
+//! every module of the compilation (the document and the modules it imports). Code actions
+//! offer the fixes attached to the document's diagnostics as quick fixes.
 
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -63,6 +64,11 @@ fn capabilities() -> lt::ServerCapabilities {
         inlay_hint_provider: Some(lt::OneOf::Left(true)),
         document_symbol_provider: Some(lt::OneOf::Left(true)),
         workspace_symbol_provider: Some(lt::OneOf::Left(true)),
+        code_action_provider: Some(lt::CodeActionProviderCapability::Options(lt::CodeActionOptions {
+            code_action_kinds: Some(vec![lt::CodeActionKind::QUICKFIX]),
+            resolve_provider: None,
+            work_done_progress_options: Default::default(),
+        })),
         ..Default::default()
     }
 }
@@ -184,50 +190,50 @@ impl Server<'_> {
         Some(lt::Location::new(uri, Self::range(sf, span.start, span.end)))
     }
 
+    /// The LSP form of a diagnostic of the checked document, or `None` if it belongs to another
+    /// file (diagnostics in imported modules are reported there).
+    fn lsp_diagnostic(ck: &Checked, d: &catallaxy_compiler::diag::Diagnostic) -> Option<lt::Diagnostic> {
+        let c = &ck.comp;
+        let range = if d.span.file == ck.file && (ck.file as usize) < c.sm.files.len() {
+            Self::range(c.sm.file(ck.file), d.span.start, d.span.end)
+        } else if d.span.file == u32::MAX {
+            lt::Range::default()
+        } else {
+            return None;
+        };
+        let mut message = d.message.clone();
+        let mut related = Vec::new();
+        for (note, sp) in &d.notes {
+            match sp.and_then(|sp| Self::location(c, sp)) {
+                Some(loc) => related.push(lt::DiagnosticRelatedInformation { location: loc, message: note.clone() }),
+                None => {
+                    message.push_str("\nnote: ");
+                    message.push_str(note);
+                }
+            }
+        }
+        for f in &d.fixes {
+            message.push_str("\nhelp: ");
+            message.push_str(&f.message);
+        }
+        Some(lt::Diagnostic {
+            range,
+            severity: Some(match d.severity {
+                Severity::Error => lt::DiagnosticSeverity::ERROR,
+                Severity::Warning => lt::DiagnosticSeverity::WARNING,
+            }),
+            code: Some(lt::NumberOrString::String(d.code.to_string())),
+            source: Some("catx".into()),
+            message,
+            related_information: if related.is_empty() { None } else { Some(related) },
+            ..Default::default()
+        })
+    }
+
     fn publish(&self, path: &Path) {
         let Some((uri, _)) = self.docs.get(path) else { return };
         let ck = self.compile(path, None);
-        let c = &ck.comp;
-        let mut out = Vec::new();
-        for d in &c.diags {
-            let range = if d.span.file == ck.file && (ck.file as usize) < c.sm.files.len() {
-                Self::range(c.sm.file(ck.file), d.span.start, d.span.end)
-            } else if d.span.file == u32::MAX {
-                lt::Range::default()
-            } else {
-                // Diagnostics in other files (imported modules) are reported there.
-                continue;
-            };
-            let mut message = d.message.clone();
-            let mut related = Vec::new();
-            for (note, sp) in &d.notes {
-                match sp.and_then(|sp| Self::location(c, sp)) {
-                    Some(loc) => {
-                        related.push(lt::DiagnosticRelatedInformation { location: loc, message: note.clone() })
-                    }
-                    None => {
-                        message.push_str("\nnote: ");
-                        message.push_str(note);
-                    }
-                }
-            }
-            for f in &d.fixes {
-                message.push_str("\nhelp: ");
-                message.push_str(&f.message);
-            }
-            out.push(lt::Diagnostic {
-                range,
-                severity: Some(match d.severity {
-                    Severity::Error => lt::DiagnosticSeverity::ERROR,
-                    Severity::Warning => lt::DiagnosticSeverity::WARNING,
-                }),
-                code: Some(lt::NumberOrString::String(d.code.to_string())),
-                source: Some("catx".into()),
-                message,
-                related_information: if related.is_empty() { None } else { Some(related) },
-                ..Default::default()
-            });
-        }
+        let out: Vec<lt::Diagnostic> = ck.comp.diags.iter().filter_map(|d| Self::lsp_diagnostic(&ck, d)).collect();
         let params = lt::PublishDiagnosticsParams { uri: uri.clone(), diagnostics: out, version: None };
         self.notify("textDocument/publishDiagnostics", params);
     }
@@ -294,6 +300,7 @@ impl Server<'_> {
             "textDocument/inlayHint" => parse(req.params).map(|p| to_json(self.inlay_hints(p))),
             "textDocument/documentSymbol" => parse(req.params).map(|p| to_json(self.document_symbols(p))),
             "workspace/symbol" => parse(req.params).map(|p| to_json(self.workspace_symbols(p))),
+            "textDocument/codeAction" => parse(req.params).map(|p| to_json(self.code_actions(p))),
             other => {
                 return Response::new_err(
                     id,
@@ -399,6 +406,63 @@ impl Server<'_> {
             })
             .collect();
         Some(lt::CompletionResponse::Array(items))
+    }
+
+    /// Quick fixes for the diagnostics that touch the requested range: one action per fix, the
+    /// first mechanically applicable fix of each diagnostic marked preferred.
+    #[allow(clippy::mutable_key_type)]
+    fn code_actions(&self, p: lt::CodeActionParams) -> Option<Vec<lt::CodeActionOrCommand>> {
+        if p.context.only.as_ref().is_some_and(|only| !only.iter().any(|k| k.as_str().starts_with("quickfix"))) {
+            return Some(Vec::new());
+        }
+        let path = uri_to_path(&p.text_document.uri)?;
+        let ck = self.compile(&path, None);
+        let c = &ck.comp;
+        let mut out = Vec::new();
+        for d in &c.diags {
+            if d.fixes.is_empty() {
+                continue;
+            }
+            let Some(diag) = Self::lsp_diagnostic(&ck, d) else { continue };
+            let (r, want) = (diag.range, p.range);
+            if (r.end.line, r.end.character) < (want.start.line, want.start.character)
+                || (want.end.line, want.end.character) < (r.start.line, r.start.character)
+            {
+                continue;
+            }
+            let preferred = d.fixes.iter().position(|f| f.applicable);
+            for (i, f) in d.fixes.iter().enumerate() {
+                let mut changes: std::collections::HashMap<lt::Uri, Vec<lt::TextEdit>> = Default::default();
+                let mut ok = true;
+                for e in &f.edits {
+                    match Self::location(c, e.span) {
+                        Some(loc) => changes
+                            .entry(loc.uri)
+                            .or_default()
+                            .push(lt::TextEdit { range: loc.range, new_text: e.replacement.clone() }),
+                        None => ok = false,
+                    }
+                }
+                if !ok || changes.is_empty() {
+                    continue;
+                }
+                // Locations name the document by its path; answer with the client's own URI.
+                if let Some(own) = Self::location(c, catallaxy_compiler::diag::Span::new(ck.file, 0, 0)) {
+                    if let Some(edits) = changes.remove(&own.uri) {
+                        changes.insert(p.text_document.uri.clone(), edits);
+                    }
+                }
+                out.push(lt::CodeActionOrCommand::CodeAction(lt::CodeAction {
+                    title: f.message.clone(),
+                    kind: Some(lt::CodeActionKind::QUICKFIX),
+                    diagnostics: Some(vec![diag.clone()]),
+                    edit: Some(lt::WorkspaceEdit { changes: Some(changes), ..Default::default() }),
+                    is_preferred: if preferred == Some(i) { Some(true) } else { None },
+                    ..Default::default()
+                }));
+            }
+        }
+        Some(out)
     }
 
     fn formatting(&self, p: lt::DocumentFormattingParams) -> Option<Vec<lt::TextEdit>> {
