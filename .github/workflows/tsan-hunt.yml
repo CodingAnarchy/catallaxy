@@ -34,8 +34,8 @@ jobs:
           --config 'profile.release.package.corosensei.rustflags=["-Cllvm-args=-tsan-instrument-func-entry-exit=0"]'
       - name: net_echo x30 with trace
         run: |
-          for i in $(seq 1 30); do
-            if ! CATX_NET_TRACE=1 timeout 60 $CATX run tests/conformance/run/net_echo.cx > out.txt 2> trace.txt; then
+          for i in $(seq 1 60); do
+            if ! env $([ ${{ matrix.shard }} -gt 3 ] && echo CATX_NET_TRACE=1) timeout 60 $CATX run tests/conformance/run/net_echo.cx > out.txt 2> trace.txt; then
               echo "HANG on iteration $i"; cat out.txt; echo "trace lines: $(wc -l < trace.txt)"
               cp trace.txt hung-trace.txt
               exit 1
