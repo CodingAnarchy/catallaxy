@@ -207,33 +207,95 @@ fn connect(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
             }
         };
         let token = new_token();
-        if let Err(e) = REACTOR.registry.register(&mut stream, token, Interest::READABLE | Interest::WRITABLE) {
-            return Ok(err(vm, &format!("cannot watch socket: {e}")));
-        }
-        // Connected once writable with no pending error and a peer address.
-        let probe = Mutex::new(Some(stream));
-        let r = io_wait(vm, token, deadline, || {
-            let g = probe.lock();
-            let s = g.as_ref().unwrap();
-            if let Some(e) = s.take_error()? {
-                return Err(e);
-            }
-            match s.peer_addr() {
-                Ok(_) => Ok(()),
-                Err(e) if e.kind() == ErrorKind::NotConnected => Err(ErrorKind::WouldBlock.into()),
-                Err(e) => Err(e),
-            }
-        });
-        let mut stream = probe.into_inner().unwrap();
-        match r {
+        match wait_connected(vm, &mut stream, token, deadline) {
             Ok(()) => {
                 let _ = REACTOR.registry.deregister(&mut stream);
                 return new_socket(vm, stream);
             }
-            Err(e) => last = e,
+            Err(e) => {
+                let _ = REACTOR.registry.deregister(&mut stream);
+                last = e;
+            }
         }
     }
     Ok(err(vm, &last))
+}
+
+/// Waits for a non-blocking connect to finish. The waiter is in place before the socket is
+/// registered, so the first readiness event cannot be missed. A connect has finished when its
+/// socket reports readiness: `take_error` then tells failure from success. `peer_addr` filters
+/// spurious wakeups on Unix (it fails until connected); on Windows it can succeed while the
+/// connect is still in flight, which is why readiness, not `peer_addr`, decides.
+fn wait_connected(vm: &mut Vm, stream: &mut TcpStream, token: Token, deadline: Option<Instant>) -> Result<(), String> {
+    let mut registered = false;
+    loop {
+        // Short slices: if a completion edge slips between a check and re-arming, the next
+        // slice still sees it.
+        let slice = Instant::now() + Duration::from_millis(50);
+        let until = Some(deadline.map_or(slice, |d| d.min(slice)));
+        let mut reg_err = None;
+        wait_wake(vm, until, |wake| {
+            REACTOR.waiters.lock().entry(token.0).or_default().push(wake);
+            if !registered {
+                registered = true;
+                if let Err(e) = REACTOR.registry.register(stream, token, Interest::READABLE | Interest::WRITABLE) {
+                    reg_err = Some(e);
+                    return false;
+                }
+            }
+            true
+        });
+        if let Some(e) = reg_err {
+            return Err(format!("cannot watch socket: {e}"));
+        }
+        match stream.take_error() {
+            Ok(Some(e)) | Err(e) => return Err(e.to_string()),
+            Ok(None) => {}
+        }
+        let woke = REACTOR.waiters.lock().get(&token.0).is_none_or(|w| w.is_empty());
+        if woke {
+            match stream.peer_addr() {
+                Ok(_) => return Ok(()),
+                Err(e) if e.kind() == ErrorKind::NotConnected => {}
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        if deadline.is_some_and(|d| Instant::now() >= d) {
+            return Err("timed out".into());
+        }
+    }
+}
+
+/// Waits until a waker registered by `arm` fires or `until` passes. `arm` registers the waker and
+/// returns false if waiting is not needed after all.
+fn wait_wake(vm: &mut Vm, until: Option<Instant>, arm: impl FnOnce(Wake) -> bool) {
+    let mut arm = Some(arm);
+    if wait_event_until(vm, until, |w| (arm.take().unwrap())(w)).is_some() {
+        return;
+    }
+    let pair = Arc::new((Mutex::new(false), Condvar::new()));
+    let p2 = pair.clone();
+    let wake: Wake = Arc::new(move || {
+        *p2.0.lock() = true;
+        p2.1.notify_all();
+    });
+    if !(arm.take().unwrap())(wake) {
+        return;
+    }
+    blocking(vm, || {
+        let mut fired = pair.0.lock();
+        while !*fired {
+            match until {
+                Some(d) => {
+                    let now = Instant::now();
+                    if now >= d || pair.1.wait_for(&mut fired, d - now).timed_out() {
+                        break;
+                    }
+                }
+                None => pair.1.wait(&mut fired),
+            }
+        }
+    });
 }
 
 fn read(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
