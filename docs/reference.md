@@ -331,8 +331,8 @@ pages = fs.map { |f| f.join().unwrap() }
   (`Err` holds the message of a panic, which ends only that fiber); `is_done()`;
   `Fiber.yield()` lets the thread's other fibers run.
 - A fiber runs on the OS thread that started it, for its whole life. Fibers on one thread
-  interleave only where one of them waits: channel `send`/`recv`, `join`, `sleep`, file,
-  directory, process and console I/O, `Fiber.yield()`. Their blocks may therefore capture and mutate owned values (no
+  interleave only where one of them waits: channel `send`/`recv`, `join`, `sleep`, socket,
+  file, directory, process and console I/O, HTTP requests, `Fiber.yield()`. Their blocks may therefore capture and mutate owned values (no
   capability rules apply), and code between two waits runs without interruption.
 - Waiting parks the fiber instead of blocking the thread. Blocking system calls (files,
   directories, stdin, starting and waiting for processes and reading or writing their pipes)
@@ -364,7 +364,15 @@ OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse`
 ## 10. Tooling
 
 `catx run file.cx [args]`, `catx check [--json] files...`, `catx fmt [--check] files...`, `catx repl`,
-`catx lsp`, `catx test dir` (runs `*.cx` programs and compares against `*.out`).
+`catx lsp`, `catx test dir`.
+
+`catx test dir` runs every `*.cx` file under `dir` (except those in `lib/` directories, which hold
+modules for tests to import) in its own process. A file whose first line is `# expect: CODE[, CODE...]`
+must fail `catx check` with those diagnostic codes. Any other file must run with standard output
+equal to its `.out` file and exit with status 0, or with the status given by a `# exit: N` line; a
+`.in` file next to it is fed to standard input. A program still running after `CATX_TEST_TIMEOUT`
+seconds (default 120) is killed and fails with its output so far. The exit status is 1 if anything
+failed.
 
 `catx fmt` rewrites files in place (`catx fmt -` filters stdin to stdout). It keeps comments and the
 program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
