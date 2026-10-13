@@ -68,6 +68,28 @@ Everything here is available in every module without an import.
 - `fn contains(self, item: T) -> Bool`
 - `fn include(self, item: T) -> Bool`
 - `fn to_set(self) -> Set[T]`
+- `fn lazy(self) -> Lazy[T]`
+
+## Lazy[T]
+
+- field `source: fn(fn(T))`
+- `fn iterate(seed: T, f: fn(T) -> T) -> Lazy[T]`
+- `fn repeat(value: T) -> Lazy[T]`
+- `fn each(self, f: fn(T))`
+- `fn lazy(self) -> Lazy[T]`
+- `fn map[U](self, f: fn(T) -> U) -> Lazy[U]`
+- `fn flat_map[U](self, f: fn(T) -> List[U]) -> Lazy[U]`
+- `fn select(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn filter(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn reject(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn take(self, n: Int) -> Lazy[T]`
+- `fn take_while(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn drop(self, n: Int) -> Lazy[T]`
+- `fn drop_while(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn with_index(self) -> Lazy[(T, Int)]`
+- `fn zip[U](self, other: List[U]) -> Lazy[(T, U)]`
+- `fn uniq(self) -> Lazy[T]`
+- `fn force(self) -> List[T]`
 
 ## Enumerable[T] (where T: Comparable)
 
