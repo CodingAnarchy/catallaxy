@@ -432,13 +432,6 @@ Everything here is available in every module without an import.
 - `fn is_done(self) -> Bool`
 - `fn yield()`
 
-## Global functions
-
-- `fn __fiber_spawn[T](handle: Fiber[T], f: fn() -> T)`
-- `fn __fiber_join[T](handle: Fiber[T]) -> Result[T, String]`
-- `fn __fiber_done(id: Int) -> Bool`
-- `fn __fiber_yield()`
-
 ## Math
 
 - `const PI: Float = 3.141592653589793`
