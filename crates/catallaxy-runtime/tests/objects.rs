@@ -164,7 +164,7 @@ fn string_char_positions_use_the_index() {
         assert!(o.alloc_size() >= StrObj::BASE + text.len());
     }
     // Concatenated parts with a known character count.
-    let v = h.m.alloc_str_parts(&[&"é".repeat(200), &"z".repeat(100)], Some(300));
+    let v = h.m.alloc_str_parts(&[&"é".repeat(200), &"z".repeat(100)]);
     let o = unsafe { as_str_obj(v) };
     assert_eq!(o.char_count(), 300);
     assert_eq!(o.char_at(250), "z");
@@ -505,6 +505,55 @@ fn minor_collection_frees_young_garbage_and_keeps_roots() {
     let keep = h.m.get(hk);
     assert_eq!(str_of(keep), Some("kept"));
     assert!(!young(keep), "survivors are promoted");
+    h.finish();
+}
+
+#[test]
+fn root_only_large_objects_stay_young_until_the_heap_references_them() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let text = "x".repeat(4096);
+    let list = h.m.alloc_list(Vec::new());
+    let hl = h.m.root(list);
+    h.gc(); // the list is old now
+    assert!(!young(h.m.get(hl)));
+
+    // Reachable only from a root: it survives a minor collection without being promoted.
+    let s = h.m.alloc_str(&text);
+    let hs = h.m.root(s);
+    h.minor();
+    let s = h.m.get(hs);
+    assert!(young(s), "a root-only large object stays young");
+    assert_eq!(str_of(s), Some(text.as_str()));
+
+    // Stored into an old list (through the write barrier) and dropped from the roots: the next
+    // minor collection finds it through the remembered set, and promotes it.
+    ownership::write_list(h.m, h.m.get(hl), |l, access| unsafe { l.push(s, access) }).unwrap();
+    h.m.set(hs, Value::NIL);
+    let _ = h.m.alloc_str(&"garbage ".repeat(600));
+    h.minor();
+    let s = ownership::read_list(h.m, h.m.get(hl)).unwrap().get(0).unwrap();
+    assert!(!young(s), "a heap-referenced large object is promoted");
+    assert_eq!(str_of(s), Some(text.as_str()));
+
+    // Referenced by a young object as well as a root: promoted with it.
+    let s2 = h.m.alloc_str(&text);
+    let pair = h.m.alloc_tuple(&[s2]);
+    let hp = h.m.root(pair);
+    h.m.root(s2);
+    h.minor();
+    let pair = h.m.get(hp);
+    assert!(!young(pair) && !young(unsafe { as_tuple(pair) }.elems()[0]));
+
+    // A root-only large object freed once the root lets go.
+    let s3 = h.m.alloc_str(&text);
+    let h3 = h.m.root(s3);
+    h.minor();
+    assert!(young(h.m.get(h3)));
+    h.m.set(h3, Value::NIL);
+    let before = catallaxy_gc::stats::minors().3;
+    h.minor();
+    assert!(catallaxy_gc::stats::minors().3 >= before + text.len(), "freed by the next minor collection");
     h.finish();
 }
 

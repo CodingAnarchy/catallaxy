@@ -120,9 +120,6 @@ impl StrObj {
         // SAFETY: strings are created from valid UTF-8 and never mutated.
         unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.data.as_ptr(), self.len)) }
     }
-    pub(crate) fn data_ptr(&mut self) -> *mut u8 {
-        self.data.as_mut_ptr()
-    }
     pub fn char_count(&self) -> usize {
         let c = self.chars.load(Ordering::Relaxed) & !Self::INDEX_READY;
         if c != 0 {
