@@ -199,6 +199,12 @@ extend String {
     for c in self.chars { f(c) }
   }
   fn repeat(self, n: Int) -> String { self * n }
+  # Regex conveniences: `re.matches(self)`, the texts of `re.find_all(self)`, `re.replace(self, r)`
+  # and `re.replace_all(self, r)`.
+  fn matches(self, re: Regex) -> Bool { re.matches(self) }
+  fn scan(self, re: Regex) -> List[String] { re.find_all(self).map { |m| m.text } }
+  fn sub(self, re: Regex, replacement: String) -> String { re.replace(self, replacement) }
+  fn gsub(self, re: Regex, replacement: String) -> String { re.replace_all(self, replacement) }
 }
 
 extend List[T] {
@@ -621,6 +627,120 @@ pub class File {
   native fn delete(path: String) -> Result[Nil, String]
   native fn read_lines(path: String) -> Result[List[String], String]
   native fn list_dir(path: String) -> Result[List[String], String]
+  native fn metadata(path: String) -> Result[Metadata, String]
+}
+
+# What `File.metadata` reports. `modified` is in seconds since the Unix epoch, like `Time.now`.
+pub class Metadata {
+  size: Int
+  is_dir: Bool
+  is_file: Bool
+  modified: Float
+}
+
+pub class Dir {
+  # Entry names (not paths), sorted.
+  native fn list(path: String) -> Result[List[String], String]
+  # With `recursive`, creates missing parents too and succeeds if the directory exists.
+  native fn create(path: String, recursive: Bool = false) -> Result[Nil, String]
+  # Without `recursive` the directory must be empty.
+  native fn remove(path: String, recursive: Bool = false) -> Result[Nil, String]
+  native fn exists(path: String) -> Bool
+  native fn current() -> String
+}
+
+# Path strings. `join` uses `/`, which every supported OS accepts; the others accept the host
+# separators.
+pub class Path {
+  # `base/part`, or `part` alone if it is absolute.
+  native fn join(base: String, part: String) -> String
+  native fn join_all(parts: List[String]) -> String
+  # The last component: `Path.basename("a/b.txt") == "b.txt"`.
+  native fn basename(path: String) -> String
+  # Everything before the last component, or "." if there is none.
+  native fn dirname(path: String) -> String
+  # The extension without its dot, or nil: `Path.extension("a/b.tar.gz") == "gz"`.
+  native fn extension(path: String) -> String?
+  # The last component without its extension.
+  native fn stem(path: String) -> String
+  native fn is_absolute(path: String) -> Bool
+}
+
+# A compiled regular expression, in the syntax of Rust's `regex` crate (no look-around or
+# backreferences; matching takes linear time). A Regex is frozen: compile it once and share it
+# freely between threads and fibers.
+pub frozen class Regex {
+  pattern: String
+  handle: NativeHandle
+  # Compiles `pattern`, or returns the syntax error.
+  native fn new(pattern: String) -> Result[Regex, String]
+  # `text` with every regex metacharacter escaped.
+  native fn escape(text: String) -> String
+  native fn matches(self, text: String) -> Bool
+  # The leftmost match, or nil.
+  native fn find(self, text: String) -> Match?
+  # All non-overlapping matches, left to right.
+  native fn find_all(self, text: String) -> List[Match]
+  # Replaces the first match. In `replacement`, `$1` / `${1}` insert a positional group, `$name` /
+  # `${name}` a named one, and `$$` a literal `$`.
+  native fn replace(self, text: String, replacement: String) -> String
+  native fn replace_all(self, text: String, replacement: String) -> String
+  # The pieces of `text` between matches.
+  native fn split(self, text: String) -> List[String]
+  native fn capture_names(self) -> List[String]
+  fn to_s(self) -> String { self.pattern }
+}
+
+# One regex match. `start` and `end` are character positions (`end` exclusive), like `String`
+# indexing. `groups[0]` is the whole match; a group that did not participate is nil.
+pub class Match {
+  text: String
+  start: Int
+  end: Int
+  groups: List[String?]
+  named_groups: Dict[String, String]
+  # Group `index` (0 is the whole match), or nil.
+  fn [](self, index: Int) -> String? { self.groups.get(index) ?? nil }
+  # The positional groups after the whole match.
+  fn captures(self) -> List[String?] { self.groups.drop(1) }
+  # A named group, or nil.
+  fn named(self, name: String) -> String? { self.named_groups.get(name) }
+  fn to_s(self) -> String { self.text }
+}
+
+# Running other programs. `cmd` is looked up on the PATH; `args` are passed as they are (no
+# shell). `env` adds to (or overrides) the inherited environment; `dir` sets the working
+# directory. Waiting parks the calling fiber (the I/O pool waits) instead of blocking its thread.
+pub class Process {
+  # Runs to completion, feeding it `input` on stdin (or none), and captures its output.
+  native fn run(cmd: String, args: List[String] = [], env: Dict[String, String] = [:], dir: String? = nil, input: String? = nil) -> Result[Output, String]
+  # Starts a process with piped stdin and stdout (stderr goes to ours).
+  native fn start(cmd: String, args: List[String] = [], env: Dict[String, String] = [:], dir: String? = nil) -> Result[Subprocess, String]
+}
+
+# The result of `Process.run`. `status` is the exit code, or -1 if a signal ended the process.
+pub class Output {
+  status: Int
+  stdout: String
+  stderr: String
+  fn success(self) -> Bool { self.status == 0 }
+}
+
+# A process started by `Process.start`. Its pipes are locked separately, so one fiber may write
+# while another reads.
+pub class Subprocess {
+  pid: Int
+  handle: NativeHandle
+  native fn write(self, text: String) -> Result[Nil, String]
+  # Sends end-of-file on its stdin.
+  native fn close_stdin(self)
+  # The next line of its stdout without the line ending, or nil at end of output.
+  native fn read_line(self) -> String?
+  # The rest of its stdout.
+  native fn read_all(self) -> String
+  # Closes stdin and waits for the process to exit; returns its status (-1 if a signal ended it).
+  native fn wait(self) -> Result[Int, String]
+  native fn kill(self) -> Result[Nil, String]
 }
 
 pub class Time {

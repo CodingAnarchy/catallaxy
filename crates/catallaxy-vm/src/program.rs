@@ -165,6 +165,15 @@ pub fn result_classes() -> (u32, u32) {
     ((v >> 32) as u32, v as u32)
 }
 
+static NAMED_CLASSES: LazyLock<RwLock<FxHashMap<String, u32>>> = LazyLock::new(Default::default);
+
+/// The id of the first loaded class with this name. The prelude loads first, so for a prelude
+/// class name this is the prelude's class even if the program declares one with the same name;
+/// natives use it to build instances of prelude classes (`Regex`, `Match`, ...).
+pub fn class_named(name: &str) -> Option<u32> {
+    NAMED_CLASSES.read().get(name).copied()
+}
+
 /// Lookup of native implementations by name, provided by the standard library.
 pub type NativeLookup = dyn Fn(&str) -> Option<NativeFn>;
 
@@ -238,6 +247,7 @@ fn load_inner(p: &Program, m: &mut Mutator, natives: &NativeLookup) -> Result<()
         if cls.id != c.id {
             return Err(LoadError(format!("class id mismatch for {}: {} != {}", c.name, cls.id, c.id)));
         }
+        NAMED_CLASSES.write().entry(c.name.clone()).or_insert(c.id);
         if c.name == "Ok" || c.name == "Err" {
             if c.name == "Ok" {
                 meta.ok_class = Some(c.id);

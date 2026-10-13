@@ -22,9 +22,13 @@ impl Checker {
         let t = self.types.shallow_resolve(t);
         match self.types.get(t).clone() {
             Ty::Class(c, args) => match c {
-                builtin::INT | builtin::FLOAT | builtin::BOOL | builtin::NIL | builtin::STRING | builtin::RANGE => {
-                    Cap::Frozen
-                }
+                builtin::INT
+                | builtin::FLOAT
+                | builtin::BOOL
+                | builtin::NIL
+                | builtin::STRING
+                | builtin::RANGE
+                | builtin::NATIVE => Cap::Frozen,
                 builtin::LIST | builtin::DICT | builtin::SET | builtin::STRING_BUILDER => Cap::Owned,
                 builtin::MUTEX | builtin::CHANNEL | builtin::THREAD | builtin::ATOMIC => Cap::Shareable,
                 _ => match self.classes.get(&c).map(|ci| ci.modifier) {
