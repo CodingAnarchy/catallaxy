@@ -827,6 +827,9 @@ impl Checker {
                 ),
                 _ => {}
             }
+            if !self.mods[m as usize].is_prelude {
+                self.check_mutable_key(&format!("field `{}`", f.name.name), ty, f.ty.span);
+            }
             fields.push(FieldInfo {
                 name: f.name.name.clone(),
                 ty,

@@ -307,6 +307,19 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
     }
 }
 
+/// `x[i]` on a `Dyn` value: a list index out of range is nil, like a missing object key.
+pub fn dyn_index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
+    if kind_of(x) == ObjKind::List {
+        if let Some(idx) = ops::int_as_i64(i) {
+            let len = ownership::read_list(&vm.m, x)?.len() as i64;
+            if idx >= len || idx < -len {
+                return Ok(Value::NIL);
+            }
+        }
+    }
+    index_get(vm, x, i)
+}
+
 pub fn index_set(vm: &mut Vm, x: Value, i: Value, v: Value) -> RtResult<()> {
     match kind_of(x) {
         ObjKind::List => list_set(vm, x, i, v),

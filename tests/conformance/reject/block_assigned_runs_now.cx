@@ -1,0 +1,4 @@
+# expect: E0372
+# A bare block runs immediately: `inc` would be nil, not code to run later.
+count = 0
+inc = { count += 1 }

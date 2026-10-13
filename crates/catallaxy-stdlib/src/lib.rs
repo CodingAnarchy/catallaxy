@@ -5,6 +5,7 @@
 
 mod coll;
 mod conc;
+pub use conc::report_unjoined_panics;
 mod core;
 mod data;
 pub mod fiber;

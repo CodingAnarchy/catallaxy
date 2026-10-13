@@ -175,10 +175,12 @@ fn run_program(program: &Program) -> i32 {
                         eprintln!("    ... {} more", trace.len() - 30);
                     }
                 }
+                catallaxy_stdlib::report_unjoined_panics();
                 return 101;
             }
             Err(RtTrap::Exit(code)) => {
                 catallaxy_stdlib::flush();
+                catallaxy_stdlib::report_unjoined_panics();
                 return code;
             }
             Err(RtTrap::Unwind { .. }) => {
@@ -191,6 +193,7 @@ fn run_program(program: &Program) -> i32 {
     // The program ends when its fibers do.
     catallaxy_stdlib::fiber::drain(&mut vm);
     catallaxy_stdlib::flush();
+    catallaxy_stdlib::report_unjoined_panics();
     if std::env::var_os("CATX_GC_STATS").is_some() {
         let (total, max) = catallaxy_gc::stats::pauses();
         eprintln!(

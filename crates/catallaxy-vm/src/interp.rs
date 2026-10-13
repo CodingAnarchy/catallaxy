@@ -413,6 +413,11 @@ impl Vm {
         }
     }
 
+    /// Number of active frames on this VM's stack.
+    pub fn frame_depth(&self) -> usize {
+        self.rs().frames.len()
+    }
+
     pub fn backtrace(&self) -> Vec<String> {
         let mut out = Vec::new();
         for f in self.rs().frames.iter().rev() {

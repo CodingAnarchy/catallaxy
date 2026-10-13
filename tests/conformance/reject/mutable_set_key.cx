@@ -1,0 +1,6 @@
+# expect: E0373
+# A list key can change after insertion, making its entry unreachable.
+seen = Set.new()
+key = [1, 2]
+seen.add(key)
+key.push(3)

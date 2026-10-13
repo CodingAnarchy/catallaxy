@@ -261,7 +261,9 @@ impl Checker {
                             self.mark_moved(l, e.span);
                         }
                     }
-                    _ => self.err("E0606", "only local variables can be moved", x.span),
+                    // A fresh literal has no other reference: moving it is a no-op.
+                    ExprKind::List(_) | ExprKind::Dict(_) | ExprKind::Tuple(_) => {}
+                    _ => self.err("E0606", "only local variables (or fresh literals) can be moved", x.span),
                 }
                 t
             }
@@ -1278,6 +1280,20 @@ impl Checker {
 
     // ---- assignment --------------------------------------------------------------------------
 
+    /// `x = { ... }` runs the block now and stores its value; a block with no value (it ends in
+    /// a statement such as `count += 1`) was almost certainly meant to be a closure.
+    fn check_block_value(&mut self, value: &Expr, vt: TyId) {
+        if matches!(value.kind, ExprKind::Block(_)) && self.types.shallow_resolve(vt) == self.types.nil {
+            let msg = "this block runs now and its value is `nil`".to_string();
+            let open = Span::new(value.span.file, value.span.start + 1, value.span.start + 1);
+            self.emit(
+                Diag::error("E0372", msg, value.span)
+                    .note("to store code to run later, write a closure: `{ || ... }` or `fn() { ... }`")
+                    .suggest("make it a closure", open, " ||"),
+            );
+        }
+    }
+
     fn check_assign(&mut self, e: &Expr, target: &Expr, op: Option<BinOp>, value: &Expr, annot: Option<&TypeExpr>) {
         match &target.kind {
             ExprKind::Ident(name) => {
@@ -1319,6 +1335,9 @@ impl Checker {
                         None => self.check_expr(value, Some(declared)),
                         Some(o) => self.compound_rhs(e, o, target, value, declared),
                     };
+                    if op.is_none() {
+                        self.check_block_value(value, vt);
+                    }
                     if !self.assignable(vt, declared) {
                         if self.try_int_to_float(vt, declared) {
                             self.coerce.insert(value.id, Coercion::IntToFloat);
@@ -1386,6 +1405,7 @@ impl Checker {
                 }
                 // First assignment declares a local.
                 let vt = self.check_expr(value, None);
+                self.check_block_value(value, vt);
                 let ty = if self.types.shallow_resolve(vt) == self.types.nil {
                     let v = self.types.fresh_var();
                     self.types.optional(v)
@@ -2987,7 +3007,7 @@ impl Checker {
                 None => self.types.fresh_var(),
             },
         };
-        let fid = self.new_closure_fn(e, spawn_like.is_some());
+        let fid = self.new_closure_fn(e, spawn_like.map(|_| matches!(e.kind, ExprKind::Spawn { .. })));
         let kind = match spawn_like {
             Some(is_move) => CtxKind::Spawn { is_move },
             None => CtxKind::Closure,
@@ -3060,13 +3080,21 @@ impl Checker {
         self.types.func(fn_params, final_ret)
     }
 
-    fn new_closure_fn(&mut self, e: &Expr, is_spawn: bool) -> FnId {
+    /// A function for a closure body. `is_spawn`: None for a block, Some(true) for `spawn`,
+    /// Some(false) for a parallel (`par_*`) block.
+    fn new_closure_fn(&mut self, e: &Expr, is_spawn: Option<bool>) -> FnId {
         let id = self.fns.len() as FnId;
         let mut f = self.fns[self.ctxs.last().map(|c| c.fn_id).unwrap_or(0) as usize].clone();
-        f.name = if is_spawn {
-            "<spawn>".into()
-        } else {
-            format!("<block in {}>", f.name.trim_start_matches("<block in ").trim_end_matches('>'))
+        // Named after the enclosing function: `<block in f>`, `<spawn in main>`. A parallel
+        // (`par_*`) block runs on worker threads, so its frame says so.
+        let outer = match f.name.strip_prefix('<').and_then(|n| n.strip_suffix('>')) {
+            Some(inner) => inner.rsplit(" in ").next().unwrap_or(inner).to_string(),
+            None => f.name.clone(),
+        };
+        f.name = match is_spawn {
+            Some(true) => format!("<spawn in {outer}>"),
+            Some(false) => format!("<parallel block in {outer}>"),
+            None => format!("<block in {outer}>"),
         };
         f.owner = Owner::None;
         f.type_params = Vec::new();
@@ -3180,7 +3208,7 @@ impl Checker {
         self.fors.insert(e.id, kind);
         if is_each {
             // The body becomes a block passed to `each`.
-            let fid = self.new_closure_fn(e, false);
+            let fid = self.new_closure_fn(e, None);
             let nil = self.types.nil;
             self.push_ctx(fid, CtxKind::ForBody, nil, e.span);
             self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: true });
