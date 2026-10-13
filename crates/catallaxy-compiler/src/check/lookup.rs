@@ -182,6 +182,12 @@ impl Checker {
                 Some(m)
             }
             Ty::Union(parts) => {
+                // Methods of the optional itself (`extend[T] T?`: `ok_or`, ...).
+                if parts.contains(&self.types.nil) {
+                    if let Some(m) = self.lookup_ext(r, name, false) {
+                        return Some(m);
+                    }
+                }
                 let mut first = None;
                 for p in parts {
                     let m = self.lookup_method(p, name, allow_getters)?;
@@ -272,6 +278,19 @@ impl Checker {
             dispatch: Dispatch::Dynamic(name.to_string(), fallback),
             frozen: false,
         })
+    }
+
+    /// Whether `name` is a method of the optional type `r` itself (an extension of `T?`), which
+    /// can be called without unwrapping.
+    pub fn has_optional_method(&mut self, r: TyId, name: &str) -> bool {
+        let r = self.types.shallow_resolve(r);
+        if !matches!(self.types.get(r), Ty::Union(p) if p.contains(&self.types.nil)) {
+            return false;
+        }
+        let cp = self.checkpoint();
+        let found = self.lookup_ext(r, name, false).is_some();
+        self.rollback(cp);
+        found
     }
 
     /// Extension methods visible in the current module whose target matches `r`.

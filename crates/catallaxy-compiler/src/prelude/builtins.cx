@@ -33,6 +33,17 @@ pub enum Result[T, E] {
   fn and_then[U](self, f: fn(T) -> Result[U, E]) -> Result[U, E] { match self { Ok(v) => f(v), Err(e) => Err(e) } }
 }
 
+# Optionals: a nil-able value as a `Result`, so `?` can propagate a missing value from a function
+# that returns a `Result`: `port = env["PORT"].ok_or("PORT is not set")?`.
+extend[T] T? {
+  fn ok_or[E](self, error: E) -> Result[T, E] {
+    if let v = self { Ok(v) } else { Err(error) }
+  }
+  fn ok_or_else[E](self, f: fn() -> E) -> Result[T, E] {
+    if let v = self { Ok(v) } else { Err(f()) }
+  }
+}
+
 extend Int {
   # Digits in `base` (2 to 36, lowercase letters above 9), with a leading `-` if negative.
   native fn to_s(self, base: Int = 10) -> String
