@@ -646,11 +646,30 @@ impl<'a> Codegen<'a> {
         self.emit(st, encode_sbx(op, a, 0))
     }
 
+    /// Emits a fused compare-and-jump (offset patched later), returning its position.
+    fn emit_fused(&self, st: &mut FnState, op: Op, a: u8, b: u8) -> usize {
+        let at = self.emit(st, encode(op, a, b, 0));
+        self.emit(st, 0);
+        at
+    }
+
     /// Points a forward jump at the current position.
     fn patch(&self, st: &mut FnState, at: usize) {
         let off = st.code.len() as isize - at as isize - 1;
         let w = st.code[at];
         let op = Op::from_u8(op_of(w));
+        if matches!(op, Op::JNLtI | Op::JNLeI | Op::JNLtF | Op::JNLeF | Op::JNEqI | Op::JEqI) {
+            // The offset counts from after the data word: in C when it fits, else in the data word.
+            let off = off - 1;
+            let (a, b) = (a_of(w) as u8, b_of(w) as u8);
+            if (0..0x80).contains(&off) {
+                st.code[at] = encode(op, a, b, off as u8);
+            } else {
+                st.code[at] = encode(op, a, b, 0xff);
+                st.code[at + 1] = off as i32 as u32;
+            }
+            return;
+        }
         st.code[at] = if op == Op::Jmp {
             encode_sax(Op::Jmp, off as i32)
         } else {
@@ -763,6 +782,17 @@ impl<'a> Codegen<'a> {
         self.release_to(st, mark);
     }
 
+    /// Emits a block whose value is discarded (loop bodies).
+    fn block_stmts(&mut self, st: &mut FnState, b: &Block) {
+        let mark = st.next;
+        let saved: Vec<LocalId> = st.regs.keys().copied().collect();
+        for s in &b.stmts {
+            self.stmt(st, s);
+        }
+        st.regs.retain(|l, _| saved.contains(l));
+        self.release_to(st, mark);
+    }
+
     fn block_to(&mut self, st: &mut FnState, b: &Block, dst: u8) {
         let mark = st.next;
         let saved: Vec<LocalId> = st.regs.keys().copied().collect();
@@ -816,6 +846,30 @@ impl<'a> Codegen<'a> {
                             self.expr_to(st, value, t);
                             self.emit(st, encode(Op::SetCell, r, t, 0));
                             return;
+                        }
+                        if let (Some(o), Some(&x)) = (op, st.regs.get(&l)) {
+                            let plain = !declare && !ck.locals[l as usize].is_cell() && !st.caps.contains_key(&l);
+                            let arith = matches!(ck.bins.get(&e.id), Some(BinRes::Arith(_) | BinRes::Bitwise));
+                            if plain && arith && !matches!(o, BinOp::Or | BinOp::And | BinOp::Coalesce) {
+                                // `x op= v` on a register local: evaluate v first (it may read x),
+                                // then combine in place.
+                                let mark = st.next;
+                                if let (Some(BinRes::Arith(ArithKind::Int)), BinOp::Add | BinOp::Sub, ExprKind::Int(lit)) =
+                                    (ck.bins.get(&e.id), o, &value.kind)
+                                {
+                                    if let Ok(i) = lit.parse::<i64>() {
+                                        let i = if *o == BinOp::Sub { -i } else { i };
+                                        if (-128..=127).contains(&i) {
+                                            self.emit(st, encode(Op::AddIK, x, x, i as i8 as u8));
+                                            return;
+                                        }
+                                    }
+                                }
+                                let v = self.expr_reg(st, value);
+                                self.combine(st, e, *o, x, x, v, value);
+                                self.release_to(st, mark);
+                                return;
+                            }
                         }
                         let t = self.alloc(st);
                         match op {
@@ -1139,8 +1193,7 @@ impl<'a> Codegen<'a> {
                 let start = st.code.len();
                 let fails = self.cond_jump(st, cond);
                 st.loops.push(LoopLabels { start, breaks: fails, continues: Vec::new(), result: None, with_depth: st.withs.len(), continue_patch: false });
-                let t = self.alloc(st);
-                self.block_to(st, body, t);
+                self.block_stmts(st, body);
                 self.jmp_back(st, start);
                 let lp = st.loops.pop().unwrap();
                 for b in lp.breaks {
@@ -1515,6 +1568,27 @@ impl<'a> Codegen<'a> {
                 self.expr_to(st, x, r);
                 vec![self.emit_jump(st, Op::JmpIf, r)]
             }
+            ExprKind::Binary(op @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne), l, r)
+                if match self.ck.bins.get(&cond.id) {
+                    Some(BinRes::Compare(ArithKind::Int)) => true,
+                    Some(BinRes::Compare(ArithKind::Float)) => !matches!(op, BinOp::Eq | BinOp::Ne),
+                    _ => false,
+                } =>
+            {
+                let int = matches!(self.ck.bins.get(&cond.id), Some(BinRes::Compare(ArithKind::Int)));
+                let a = self.expr_reg(st, l);
+                let b = self.expr_reg(st, r);
+                let (lt, le) = if int { (Op::JNLtI, Op::JNLeI) } else { (Op::JNLtF, Op::JNLeF) };
+                let (fop, x, y) = match op {
+                    BinOp::Lt => (lt, a, b),
+                    BinOp::Le => (le, a, b),
+                    BinOp::Gt => (lt, b, a),
+                    BinOp::Ge => (le, b, a),
+                    BinOp::Eq => (Op::JNEqI, a, b),
+                    _ => (Op::JEqI, a, b),
+                };
+                vec![self.emit_fused(st, fop, x, y)]
+            }
             ExprKind::Binary(op @ (BinOp::Eq | BinOp::Ne), l, r)
                 if matches!(r.kind, ExprKind::Nil) || matches!(l.kind, ExprKind::Nil) =>
             {
@@ -1563,6 +1637,20 @@ impl<'a> Codegen<'a> {
             .collect()
     }
 
+    /// Registers for a call frame of `n` slots whose result goes to `dst`. When `dst` is the
+    /// newest temporary, the frame starts at `dst` so the callee returns straight into it.
+    fn call_base(&mut self, st: &mut FnState, dst: u8, n: usize) -> u8 {
+        let fresh = dst as usize + 1 == st.next && !st.regs.values().any(|&r| r == dst);
+        if fresh {
+            for _ in 1..n.max(1) {
+                self.alloc(st);
+            }
+            dst
+        } else {
+            self.alloc_n(st, n.max(1))
+        }
+    }
+
     fn fill_args(&mut self, st: &mut FnState, base: u8, vals: &[Option<&Expr>]) {
         for (i, v) in vals.iter().enumerate() {
             let r = base + i as u8;
@@ -1588,7 +1676,7 @@ impl<'a> Codegen<'a> {
             CallRes::Fn { dispatch, recv: has_recv, args: slots, safe } => {
                 let vals = self.arg_values(&slots, args, block);
                 let n = vals.len() + has_recv as usize;
-                let base = self.alloc_n(st, n.max(1));
+                let base = self.call_base(st, dst, n);
                 let mut skip = None;
                 if has_recv {
                     if let Some(rv) = recv {
@@ -1611,7 +1699,7 @@ impl<'a> Codegen<'a> {
             }
             CallRes::Closure { args: slots } => {
                 let vals = self.arg_values(&slots, args, block);
-                let base = self.alloc_n(st, vals.len() + 1);
+                let base = self.call_base(st, dst, vals.len() + 1);
                 if let Some(c) = callee {
                     self.expr_to(st, c, base);
                 }
@@ -1623,7 +1711,7 @@ impl<'a> Codegen<'a> {
             }
             CallRes::Construct { ctor, args: slots, .. } => {
                 let vals = self.arg_values(&slots, args, block);
-                let base = self.alloc_n(st, vals.len().max(1));
+                let base = self.call_base(st, dst, vals.len());
                 self.fill_args(st, base, &vals);
                 self.emit(st, encode(Op::Call, base, vals.len() as u8, 0));
                 self.emit(st, ctor);
@@ -1768,13 +1856,12 @@ impl<'a> Codegen<'a> {
                 self.emit(st, encode(Op::Move, i, lo, 0));
                 let c = self.alloc(st);
                 let start = st.code.len();
-                self.emit(st, encode(if excl == Some(true) { Op::LtI } else { Op::LeI }, c, i, hi));
-                let exit = self.emit_jump(st, Op::JmpIfNot, c);
+                let _ = c;
+                let exit = self.emit_fused(st, if excl == Some(true) { Op::JNLtI } else { Op::JNLeI }, i, hi);
                 st.loops.push(LoopLabels { start, breaks: vec![exit], continues: Vec::new(), result: None, with_depth: st.withs.len(), continue_patch: true });
                 let mut fails = Vec::new();
                 self.pattern(st, pattern, i, &mut fails);
-                let t = self.alloc(st);
-                self.block_to(st, body, t);
+                self.block_stmts(st, body);
                 let lp_conts: Vec<usize> = std::mem::take(&mut st.loops.last_mut().unwrap().continues);
                 for cj in lp_conts {
                     self.patch(st, cj);
@@ -1803,15 +1890,14 @@ impl<'a> Codegen<'a> {
                 let c = self.alloc(st);
                 let start = st.code.len();
                 self.emit(st, encode(Op::ListLen, n, list, 0));
-                self.emit(st, encode(Op::LtI, c, i, n));
-                let exit = self.emit_jump(st, Op::JmpIfNot, c);
+                let _ = c;
+                let exit = self.emit_fused(st, Op::JNLtI, i, n);
                 st.loops.push(LoopLabels { start, breaks: vec![exit], continues: Vec::new(), result: None, with_depth: st.withs.len(), continue_patch: true });
                 let item = self.alloc(st);
                 self.emit(st, encode(Op::ListGet, item, list, i));
                 let mut fails = Vec::new();
                 self.pattern(st, pattern, item, &mut fails);
-                let t = self.alloc(st);
-                self.block_to(st, body, t);
+                self.block_stmts(st, body);
                 let lp_conts: Vec<usize> = std::mem::take(&mut st.loops.last_mut().unwrap().continues);
                 for cj in lp_conts {
                     self.patch(st, cj);

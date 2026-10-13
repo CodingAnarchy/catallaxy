@@ -36,6 +36,8 @@ serde = "1"
 # Document formatting in the language server; requires `catallaxy_compiler::fmt::format_source`.
 default = ["fmt"]
 fmt = []
+# Print executed-opcode and opcode-pair counts after `catx run` (slows the interpreter).
+op-profile = ["catallaxy-vm/op-profile"]
 
 [dev-dependencies]
 serde_json = "1"

@@ -381,6 +381,15 @@ impl Vm {
                 }
             };
         }
+        // Takes a fused compare-and-jump: short offsets live in C (0..=127), long ones in the
+        // data word, so the common case has no load on the path to the next instruction.
+        macro_rules! fused_jump {
+            ($w:expr) => {{
+                let c = c_of($w);
+                let off = if c < 0x80 { c as isize } else { (unsafe { *code.add(pc) }) as i32 as isize };
+                pc = (pc as isize + 1 + off) as usize;
+            }};
+        }
         macro_rules! data {
             () => {{
                 let d = unsafe { *code.add(pc) };
@@ -433,6 +442,8 @@ impl Vm {
             let w = unsafe { *code.add(pc) };
             pc += 1;
             let a = a_of(w);
+            #[cfg(feature = "op-profile")]
+            crate::profile::record(op_of(w));
             match Op::from_u8(op_of(w)) {
                 Op::Nop => {}
                 Op::Move => set!(a, r!(b_of(w))),
@@ -755,6 +766,64 @@ impl Vm {
                     if off < 0 && catallaxy_gc::is_gc_requested() {
                         save!();
                         catallaxy_gc::safepoint_slow(&self.m.rec);
+                    }
+                }
+                Op::JNLtI => {
+                    let (x, y) = (r!(a), r!(b_of(w)));
+                    let jump = if Value::both_small_ints(x, y) {
+                        x.as_small_int() >= y.as_small_int()
+                    } else {
+                        save!();
+                        tri!(slow::fused_jump(Op::JNLtI, x, y))
+                    };
+                    if jump {
+                        fused_jump!(w);
+                    } else {
+                        pc += 1;
+                    }
+                }
+                Op::JNLeI => {
+                    let (x, y) = (r!(a), r!(b_of(w)));
+                    let jump = if Value::both_small_ints(x, y) {
+                        x.as_small_int() > y.as_small_int()
+                    } else {
+                        save!();
+                        tri!(slow::fused_jump(Op::JNLeI, x, y))
+                    };
+                    if jump {
+                        fused_jump!(w);
+                    } else {
+                        pc += 1;
+                    }
+                }
+                Op::JNEqI | Op::JEqI => {
+                    let (x, y) = (r!(a), r!(b_of(w)));
+                    let eq = if Value::both_small_ints(x, y) {
+                        x.0 == y.0
+                    } else {
+                        ops::is_int(x) && ops::is_int(y) && ops::int_cmp(x, y).is_eq()
+                    };
+                    if eq == (op_of(w) == Op::JEqI as u8) {
+                        fused_jump!(w);
+                    } else {
+                        pc += 1;
+                    }
+                }
+                Op::JNLtF | Op::JNLeF => {
+                    let (x, y) = (r!(a), r!(b_of(w)));
+                    // Negated on purpose: a NaN comparison is false, so it jumps.
+                    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+                    let jump = if x.is_float() && y.is_float() {
+                        let (x, y) = (x.as_f64(), y.as_f64());
+                        if op_of(w) == Op::JNLtF as u8 { !(x < y) } else { !(x <= y) }
+                    } else {
+                        save!();
+                        tri!(slow::fused_jump(Op::from_u8(op_of(w)), x, y))
+                    };
+                    if jump {
+                        fused_jump!(w);
+                    } else {
+                        pc += 1;
                     }
                 }
                 Op::JmpIf => {

@@ -11,6 +11,29 @@ use crate::bytecode::{Op, RtType};
 use crate::interp::Vm;
 use crate::program;
 
+/// Whether a fused compare-and-jump jumps, for operands off the small-int fast path.
+#[cold]
+#[inline(never)]
+#[allow(clippy::neg_cmp_op_on_partial_ord)] // a NaN comparison is false, so it jumps
+pub fn fused_jump(op: Op, x: Value, y: Value) -> RtResult<bool> {
+    Ok(match op {
+        Op::JNLtF | Op::JNLeF => {
+            let (x, y) = (f(x)?, f(y)?);
+            if op == Op::JNLtF { !(x < y) } else { !(x <= y) }
+        }
+        Op::JNEqI | Op::JEqI => {
+            // As EqI: non-Int operands are simply unequal.
+            let eq = ops::is_int(x) && ops::is_int(y) && ops::int_cmp(x, y).is_eq();
+            eq == (op == Op::JEqI)
+        }
+        _ => {
+            expect_ints(x, y, if op == Op::JNLtI { "<" } else { "<=" })?;
+            let ord = ops::int_cmp(x, y);
+            if op == Op::JNLtI { !ord.is_lt() } else { !ord.is_le() }
+        }
+    })
+}
+
 pub fn expect_ints(x: Value, y: Value, op: &str) -> RtResult<()> {
     if ops::is_int(x) && ops::is_int(y) {
         Ok(())

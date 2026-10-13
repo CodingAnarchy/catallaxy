@@ -9,3 +9,5 @@ pub mod slow;
 pub use bytecode::Program;
 pub use interp::Vm;
 pub use program::{load, NativeFn};
+#[cfg(feature = "op-profile")]
+pub mod profile;

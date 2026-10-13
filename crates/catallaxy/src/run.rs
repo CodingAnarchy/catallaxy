@@ -45,7 +45,10 @@ pub fn cmd_run(args: &[String]) -> i32 {
         catallaxy_runtime::ownership::PROMOTE_ON_ACCESS.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let _ = catallaxy_stdlib::ARGS.set(prog_args);
-    execute(program)
+    let code = execute(program);
+    #[cfg(feature = "op-profile")]
+    eprint!("{}", catallaxy_vm::profile::report(25));
+    code
 }
 
 pub use catallaxy::execute;

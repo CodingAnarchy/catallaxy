@@ -183,12 +183,28 @@ pub enum Op {
     /// R[A] = R[B].name on a `Dyn` value: record key, field or zero-argument method; d = inline
     /// cache index (caches the record's shape and slot)
     DynGet,
+
+    // Superinstructions: a typed comparison fused with the conditional jump that consumes it.
+    // The forward offset, counted from the instruction after the data word, is in C when it is
+    // below 0x80; otherwise C is 0xff and the offset is the data word.
+    /// if !(R[A] < R[B]) (Int) { pc += d }
+    JNLtI,
+    /// if !(R[A] <= R[B]) (Int) { pc += d }
+    JNLeI,
+    /// if !(R[A] < R[B]) (Float) { pc += d }
+    JNLtF,
+    /// if !(R[A] <= R[B]) (Float) { pc += d }
+    JNLeF,
+    /// if R[A] != R[B] (Int) { pc += d }
+    JNEqI,
+    /// if R[A] == R[B] (Int) { pc += d }
+    JEqI,
 }
 
 /// `IsKind` operand for tuples (`catallaxy_runtime::ObjKind::Tuple as u8`, checked at load).
 pub const KIND_TUPLE: u8 = 7;
 
-pub const NUM_OPS: usize = Op::DynGet as usize + 1;
+pub const NUM_OPS: usize = Op::JEqI as usize + 1;
 
 impl Op {
     pub fn from_u8(b: u8) -> Op {
@@ -207,6 +223,12 @@ impl Op {
                 | Op::CallNative
                 | Op::CallMethod
                 | Op::DynGet
+                | Op::JNLtI
+                | Op::JNLeI
+                | Op::JNLtF
+                | Op::JNLeF
+                | Op::JNEqI
+                | Op::JEqI
                 | Op::CallVirtual
                 | Op::New
                 | Op::Closure
@@ -418,6 +440,11 @@ pub fn disassemble(p: &Program, f: &FuncProto) -> String {
                 }
                 Op::CallNative => {
                     let _ = write!(out, "  ; native {}", p.natives.get(d as usize).map(|s| s.as_str()).unwrap_or("?"));
+                }
+                Op::JNLtI | Op::JNLeI | Op::JNLtF | Op::JNLeF | Op::JNEqI | Op::JEqI => {
+                    let c = c_of(f.code[pc - 1]);
+                    let off = if c < 0x80 { c as isize } else { d as i32 as isize };
+                    let _ = write!(out, "  ; -> {}", pc as isize + 1 + off);
                 }
                 Op::CallMethod | Op::DynGet => {
                     let _ = write!(out, "  ; .{}", f.ics.get(d as usize).map(|i| i.name.as_str()).unwrap_or("?"));

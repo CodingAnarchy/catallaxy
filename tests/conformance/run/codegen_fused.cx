@@ -1,0 +1,123 @@
+# Compound assignment in place and fused compare-and-branch: edge cases.
+x = 3
+x += x * 2                    # the value reads the target
+puts(x)
+x -= 1
+x *= x
+puts(x)
+f = 1.5
+f += 2                        # Int value into a Float local
+puts(f)
+b = 1
+b <<= 4
+b |= 3
+puts(b)
+
+# Comparisons that cross the small-integer boundary (big integers).
+big = 140737488355327         # 2^47 - 1, the largest small int
+n = 0
+while big < 140737488355330 {
+  big += 1
+  n += 1
+}
+puts(n)
+puts(big)
+if big >= 140737488355330 { puts("ge") } else { puts("lt") }
+
+# Every comparison direction as a loop condition.
+i = 10
+while i > 0 { i -= 3 }
+puts(i)
+j = 0
+while j <= 5 { j += 2 }
+puts(j)
+k = 0
+while k != 4 { k += 1 }
+puts(k)
+m = 0
+while m == 0 { m = 7 }
+puts(m)
+
+# NaN never compares true, so these loops never run.
+nan = 0.0 / 0.0
+c = 0
+while nan < 1.0 { c += 1 }
+while 1.0 <= nan { c += 1 }
+puts(c)
+fl = 0.0
+while fl < 1.0 { fl += 0.25 }
+puts(fl)
+
+# Ranges, inclusive and exclusive, including big bounds.
+s = 0
+for v in 1..4 { s += v }
+for v in 140737488355326...140737488355329 { s += 1 }
+puts(s)
+
+# A loop body longer than 127 instructions: the exit offset lives in the data word.
+acc = 0
+q = 0
+while q < 3 {
+  acc += q * 1
+  acc += q * 2
+  acc += q * 3
+  acc += q * 4
+  acc += q * 5
+  acc += q * 6
+  acc += q * 7
+  acc += q * 8
+  acc += q * 9
+  acc += q * 10
+  acc += q * 11
+  acc += q * 12
+  acc += q * 13
+  acc += q * 14
+  acc += q * 15
+  acc += q * 16
+  acc += q * 17
+  acc += q * 18
+  acc += q * 19
+  acc += q * 20
+  acc += q * 21
+  acc += q * 22
+  acc += q * 23
+  acc += q * 24
+  acc += q * 25
+  acc += q * 26
+  acc += q * 27
+  acc += q * 28
+  acc += q * 29
+  acc += q * 30
+  acc += q * 31
+  acc += q * 32
+  acc += q * 33
+  acc += q * 34
+  acc += q * 35
+  acc += q * 36
+  acc += q * 37
+  acc += q * 38
+  acc += q * 39
+  acc += q * 40
+  acc += q * 41
+  acc += q * 42
+  acc += q * 43
+  acc += q * 44
+  acc += q * 45
+  acc += q * 46
+  acc += q * 47
+  acc += q * 48
+  acc += q * 49
+  acc += q * 50
+  acc += q * 51
+  acc += q * 52
+  acc += q * 53
+  acc += q * 54
+  acc += q * 55
+  acc += q * 56
+  acc += q * 57
+  acc += q * 58
+  acc += q * 59
+  acc += q * 60
+  q += 1
+}
+puts(acc)
