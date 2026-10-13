@@ -422,11 +422,22 @@ unsaved edits. It provides:
   block parameters, and the inferred requirement of each untyped parameter of an implicit-generic
   function (`fn shout(x)` shows `x: { fn upcase(self) -> _ }`);
 - document symbols (an outline of items, members and top-level variables) and workspace symbols
-  (over the open documents and the modules they import).
+  (over the open documents and the modules they import);
+- code actions: every fix attached to a diagnostic is offered as a quick fix, and the first
+  applicable one (see `catx fix`) is marked preferred.
+
+`catx fix [--dry-run] paths...` applies the checker's fixes. For each file (directories are walked as
+for `catx fmt`, skipping `reject/`) it applies the first applicable fix of every diagnostic, checks
+again, and repeats until nothing more applies (at most 10 rounds). Fixes that guess (`did you mean`)
+or leave a placeholder (`: Int`, `?? <default>`) are suggestions only and are never applied. Only the
+named files are edited, not the modules they import. A file that was formatted before is formatted
+again afterwards. It prints each fix it applies; `--dry-run` prints them without writing. The exit
+status is 1 if errors remain, 2 if a file could not be read or written.
 
 `check --json` prints `{"diagnostics": [...]}` where each diagnostic has `code`, `severity`, `message`,
 `file`, `span` (`start`/`end` as `{line, col, offset}`, 1-based lines and columns), `notes`, and `fixes`
-(each a list of `{span, replacement}` edits).
+(each with a `message`, `applicable` (false for a suggestion a person must check), and a list of
+`{span, replacement}` `edits`).
 
 ## 11. Embedding and native extensions
 
