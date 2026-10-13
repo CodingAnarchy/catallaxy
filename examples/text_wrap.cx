@@ -49,7 +49,11 @@ fn justify_line(words: List[String], width: Int) -> String {
 fn justify(text: String, width: Int) -> List[String] {
   lines = wrap(text, width)
   lines.map_with_index { |words, i|
-    if i == lines.length - 1 { join_words(words, " ").ljust(width) } else { justify_line(words, width) }
+    if i == lines.length - 1 {
+      join_words(words, " ").ljust(width)
+    } else {
+      justify_line(words, width)
+    }
   }
 }
 

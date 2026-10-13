@@ -22,7 +22,9 @@ puts(total)
 fact: fn(Int) -> Int = fn(n: Int) -> Int { if n <= 1 { 1 } else { n * fact(n - 1) } }
 puts(fact(10))
 
-compose = fn(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int { fn(x: Int) -> Int { g(f(x)) } }
+compose = fn(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+  fn(x: Int) -> Int { g(f(x)) }
+}
 inc_then_double = compose({ |x| x + 1 }, { |x| x * 2 })
 puts(inc_then_double(5))
 

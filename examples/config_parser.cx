@@ -68,7 +68,9 @@ class Server {
 
 fn load_server(cfg: Config) -> Result[Server, String] {
   host = cfg.get_str("server.host")?
-  port = cfg.get_int("server.port").and_then(in_range(1, 65535)).map_err { |e| "server.port: #{e}" }?
+  port = cfg.get_int("server.port").and_then(in_range(1, 65535)).map_err { |e|
+    "server.port: #{e}"
+  }?
   debug = cfg.get_bool("server.debug").unwrap_or(false)
   timeout = cfg.get_float("server.timeout")?
   workers = cfg.get_int("server.workers").unwrap_or(4)

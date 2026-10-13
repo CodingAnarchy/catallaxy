@@ -50,7 +50,7 @@ class Account {
     Ok(self.balance)
   }
 
-  fn month_end(self) { }
+  fn month_end(self) {}
 
   fn summary(self) -> String { "#{self.kind()} #{self.owner}: #{self.balance}" }
 }
