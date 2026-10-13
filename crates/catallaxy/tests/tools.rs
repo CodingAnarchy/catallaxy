@@ -390,6 +390,52 @@ fn lsp_references_and_rename() {
     lsp.finish();
 }
 
+const IFACE: &str = "interface Shape {
+  fn area(self) -> Float
+  fn twice(self) -> Float { self.area() * 2.0 }
+}
+class Sq {
+  s: Float
+  fn area(self) -> Float { self.s * self.s }
+}
+xs: List[Shape] = [Sq.new(3.0)]
+puts(xs[0].area() + Sq.new(1.0).s)
+";
+
+/// From a field's declaration (where the generated constructor's parameter also sits), and
+/// calls dispatched through an interface (which name the interface member).
+#[test]
+fn lsp_field_declarations_and_interface_calls() {
+    let (mut lsp, _) = Lsp::init();
+    let uri = lsp.open("nav_iface.cx", IFACE);
+    let t = IFACE;
+    let at = |p: Value| json!({"textDocument": {"uri": uri}, "position": p});
+    let refs = |lsp: &mut Lsp, id: i64, p: Value| {
+        let mut params = at(p);
+        params["context"] = json!({"includeDeclaration": true});
+        ref_spots(&lsp.request(id, "textDocument/references", params))
+    };
+    let field = vec![spot(&uri, pos(t, 5, "s", 0)), spot(&uri, pos(t, 6, ".s", 0)), spot(&uri, pos(t, 6, ".s", 1))];
+    let mut field: Vec<_> = field.into_iter().map(|(u, l, c)| if l == 6 { (u, l, c + 1) } else { (u, l, c) }).collect();
+    let mut last = spot(&uri, pos(t, 9, ".s", 0));
+    last.2 += 1;
+    field.push(last);
+    assert_eq!(refs(&mut lsp, 2, pos(t, 5, "s", 0)), field);
+
+    let member =
+        vec![spot(&uri, pos(t, 1, "area", 0)), spot(&uri, pos(t, 2, "area", 0)), spot(&uri, pos(t, 9, "area", 0))];
+    assert_eq!(refs(&mut lsp, 3, pos(t, 9, "area", 0)), member);
+    assert_eq!(refs(&mut lsp, 4, pos(t, 1, "area", 0)), member);
+    // The class's own method is a separate symbol (interfaces are structural).
+    assert_eq!(refs(&mut lsp, 5, pos(t, 6, "area", 0)), vec![spot(&uri, pos(t, 6, "area", 0))]);
+
+    let h = lsp.request(6, "textDocument/hover", at(pos(t, 9, "area", 0)));
+    assert!(h["result"]["contents"]["value"].as_str().unwrap().contains("fn Shape.area(self) -> Float"), "{h}");
+    let d = lsp.request(7, "textDocument/definition", at(pos(t, 2, "area", 0)));
+    assert_eq!(d["result"]["range"]["start"], pos(t, 1, "area", 0), "{d}");
+    lsp.finish();
+}
+
 #[test]
 fn lsp_signature_help() {
     let (mut lsp, caps) = Lsp::init();

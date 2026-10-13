@@ -1,0 +1,100 @@
+# Shapes: structural interfaces with default methods, subclassing and sorting.
+
+interface Shape {
+  fn area(self) -> Float
+  fn perimeter(self) -> Float
+  fn name(self) -> String
+  fn describe(self) -> String {
+    "#{self.name()}: area #{self.area().format(2)}, perimeter #{self.perimeter().format(2)}"
+  }
+}
+
+class Circle {
+  r: Float
+  fn area(self) -> Float { Math.PI * self.r * self.r }
+  fn perimeter(self) -> Float { 2.0 * Math.PI * self.r }
+  fn name(self) -> String { "circle(r=#{self.r})" }
+}
+
+class Rect {
+  w: Float
+  h: Float
+  fn area(self) -> Float { self.w * self.h }
+  fn perimeter(self) -> Float { 2.0 * (self.w + self.h) }
+  fn name(self) -> String { "rect(#{self.w}x#{self.h})" }
+}
+
+class Square < Rect {
+  fn init(self, side: Float) {
+    self.w = side
+    self.h = side
+  }
+  fn name(self) -> String { "square(#{self.w})" }
+  fn describe(self) -> String { "a perfectly square " + super.name() }
+}
+
+class Triangle {
+  a: Float
+  b: Float
+  c: Float
+  fn perimeter(self) -> Float { self.a + self.b + self.c }
+  fn area(self) -> Float {
+    # Heron's formula
+    s = self.perimeter() / 2.0
+    (s * (s - self.a) * (s - self.b) * (s - self.c)).sqrt
+  }
+  fn name(self) -> String { "triangle(#{self.a}, #{self.b}, #{self.c})" }
+}
+
+# A wrapper that orders shapes by area, so generic Comparable code can rank them.
+class ByArea {
+  shape: Shape
+  fn <=>(self, other: ByArea) -> Int { self.shape.area() <=> other.shape.area() }
+}
+
+fn largest[T: Comparable](xs: List[T]) -> T? {
+  best: T? = nil
+  for x in xs {
+    if best == nil or x > best { best = x }
+  }
+  best
+}
+
+pub fn total_area(shapes: List[Shape]) -> Float {
+  shapes.reduce(0.0) { |acc, s| acc + s.area() }
+}
+
+shapes: List[Shape] = [
+  Circle.new(1.0),
+  Rect.new(3.0, 4.0),
+  Square.new(2.0),
+  Triangle.new(3.0, 4.0, 5.0),
+  Circle.new(2.0),
+]
+
+puts("== all shapes ==")
+for s in shapes { puts(s.describe()) }
+
+puts("== sorted by area ==")
+by_area = shapes.sort_with { |a, b| a.area() <=> b.area() }
+for s in by_area { puts("#{s.name()} #{s.area().format(3)}") }
+
+puts("== sorted by perimeter, descending ==")
+by_perimeter = shapes.sort_with { |a, b| b.perimeter() <=> a.perimeter() }
+for s in by_perimeter {
+  puts(s.name())
+}
+
+wrapped = shapes.map { |s| ByArea.new(s) }
+if let big = largest(wrapped) {
+  puts("largest: #{big.shape.name()}")
+}
+puts("smallest: #{wrapped.sorted()[0].shape.name()}")
+puts(wrapped[1] > wrapped[2])
+puts(wrapped[2].between(wrapped[0], wrapped[1]))
+
+puts("total area: #{total_area(shapes).format(4)}")
+squares = shapes.select { |s| s is Square }
+puts("squares: #{squares.length}")
+rects = shapes.select { |s| s is Rect }
+puts("rect-like: #{rects.length}")

@@ -1,0 +1,52 @@
+#!/usr/bin/env catx
+# Every construct the grammar knows, for the snapshot test.
+import std.json
+import lib.geometry.{Point, area}
+
+const MAX_ITER = 0xff + 0b1010 + 0o17 + 1_000_000
+var hits: Int = 0
+
+pub interface Named { fn name(self) -> String }
+
+frozen class Pair[A, B] {
+  first: A
+  second: B = nil
+  fn +(self, o: Self) -> Self { Pair.new(self.first, o.second) }
+  fn []=(self, i: Int, v: A) { }
+  fn match(self, pattern: String) -> Bool { pattern.length > 0 }
+}
+
+shared class Account < Base {
+  balance: Float = 0.0
+}
+
+enum Shape[T] {
+  Circle(r: Float)
+  Empty
+}
+
+extend String {
+  fn shout(self) -> String { self.upcase() + "!" }
+}
+
+native fn apply_twice(f: fn(Int) -> Int, x: Int) -> List[Int]
+
+fn max[T: Comparable](xs: List[T], greeting: String = "Hello", n) -> T? {
+  if let first = xs.first { first } else { nil }
+}
+
+s = Shape.Circle(2.5e-3)
+area = match s { .Circle(r) => 3.14 * r * r, .Empty => 0.0 }
+xs = (1..10).to_list().map { |x: Int, i| x * 2 }.select { it > 3 }
+ys = [1...5, "a": 1, host: "x"]
+t = spawn move { heavy(42) }
+r = t.join()?
+name = (d["name"] as? String) ?? "anon"
+x?.y!.z
+ok = x is Int and not y or z != nil
+puts("tab\t #{xs.map { |x| "#{x}" }.join(", ")} \u{1F600} \# done")
+puts("fmt #{x:>8.2f} and #{f(k: 1)} and #{[a: 1]}")
+puts('raw #{not interpolated} \' \\ ')
+with lock(acc) { acc.balance += 1.0 }
+for (i, x) in xs.each_with_index() { continue }
+loop { break }

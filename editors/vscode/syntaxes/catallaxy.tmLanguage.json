@@ -1,0 +1,280 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Catallaxy",
+  "scopeName": "source.catallaxy",
+  "fileTypes": ["cx"],
+  "patterns": [{ "include": "#shebang" }, { "include": "#code" }],
+  "repository": {
+    "shebang": {
+      "match": "\\A#!.*$",
+      "name": "comment.line.shebang.catallaxy"
+    },
+    "code": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string-double" },
+        { "include": "#string-single" },
+        { "include": "#import" },
+        { "include": "#type-declaration" },
+        { "include": "#extend-declaration" },
+        { "include": "#function-declaration" },
+        { "include": "#block-parameters" },
+        { "include": "#member-access" },
+        { "include": "#keywords" },
+        { "include": "#numbers" },
+        { "include": "#constants" },
+        { "include": "#types" },
+        { "include": "#function-call" },
+        { "include": "#operators" },
+        { "include": "#braces" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "comment": {
+      "match": "(#).*$",
+      "name": "comment.line.number-sign.catallaxy",
+      "captures": { "1": { "name": "punctuation.definition.comment.catallaxy" } }
+    },
+    "escape": {
+      "patterns": [
+        { "match": "\\\\u\\{[0-9A-Fa-f]{1,6}\\}", "name": "constant.character.escape.unicode.catallaxy" },
+        { "match": "\\\\[ntr0\\\\\"'#e]", "name": "constant.character.escape.catallaxy" },
+        { "match": "\\\\.", "name": "invalid.illegal.escape.catallaxy" }
+      ]
+    },
+    "string-double": {
+      "begin": "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.catallaxy" } },
+      "end": "\"",
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.catallaxy" } },
+      "name": "string.quoted.double.catallaxy",
+      "patterns": [{ "include": "#escape" }, { "include": "#interpolation" }]
+    },
+    "string-single": {
+      "comment": "Raw strings: only \\' and \\\\ are escapes, and they never interpolate.",
+      "begin": "'",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.catallaxy" } },
+      "end": "'",
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.catallaxy" } },
+      "name": "string.quoted.single.catallaxy",
+      "patterns": [{ "match": "\\\\['\\\\]", "name": "constant.character.escape.catallaxy" }]
+    },
+    "interpolation": {
+      "begin": "#\\{",
+      "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.catallaxy" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.catallaxy" } },
+      "name": "meta.interpolation.catallaxy",
+      "contentName": "source.catallaxy.embedded",
+      "patterns": [{ "include": "#format-spec" }, { "include": "#code" }]
+    },
+    "format-spec": {
+      "comment": "An optional format spec closing an interpolation: \"#{x:>8.2f}\". A `:` inside brackets or parentheses (a dict key, a named argument) is not one.",
+      "match": "(:)([^{}()\\[\\]\"':]*)(?=\\})",
+      "captures": {
+        "1": { "name": "punctuation.separator.format-spec.catallaxy" },
+        "2": { "name": "constant.other.format-spec.catallaxy" }
+      }
+    },
+    "import": {
+      "begin": "\\b(import)\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.import.catallaxy" } },
+      "end": "$|(?=#)|(?=;)",
+      "name": "meta.import.catallaxy",
+      "patterns": [
+        { "match": "\\.", "name": "punctuation.accessor.catallaxy" },
+        { "match": "[{},]", "name": "punctuation.separator.catallaxy" },
+        { "match": "\\b[A-Z][A-Za-z0-9_]*\\b", "name": "entity.name.type.catallaxy" },
+        { "match": "\\b[a-z_][A-Za-z0-9_]*\\b", "name": "entity.name.namespace.catallaxy" }
+      ]
+    },
+    "type-declaration": {
+      "match": "\\b(class|interface|enum)\\s+([A-Z][A-Za-z0-9_]*)(?:\\s*(\\[)([^\\]]*)(\\]))?(?:\\s*(<)\\s*([A-Z][A-Za-z0-9_]*))?",
+      "captures": {
+        "1": { "name": "storage.type.$1.catallaxy" },
+        "2": { "name": "entity.name.type.$1.catallaxy" },
+        "3": { "name": "punctuation.definition.generic.begin.catallaxy" },
+        "4": { "patterns": [{ "include": "#type-parameters" }] },
+        "5": { "name": "punctuation.definition.generic.end.catallaxy" },
+        "6": { "name": "punctuation.separator.inheritance.catallaxy" },
+        "7": { "name": "entity.other.inherited-class.catallaxy" }
+      }
+    },
+    "extend-declaration": {
+      "match": "\\b(extend)\\s+([A-Z][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.extend.catallaxy" },
+        "2": { "name": "entity.name.type.catallaxy" }
+      }
+    },
+    "type-parameters": {
+      "patterns": [
+        { "match": "\\b[A-Z][A-Za-z0-9_]*\\b", "name": "entity.name.type.parameter.catallaxy" },
+        { "match": "[:,&]", "name": "punctuation.separator.catallaxy" }
+      ]
+    },
+    "function-declaration": {
+      "comment": "`fn name[T](params) -> R`. Method names may be keywords or operators (`fn match(self)`, `fn +(self, o)`, `fn []=(self, i, v)`). Also anonymous functions and function types `fn(A) -> B`.",
+      "begin": "\\b(fn)\\b\\s*((?:[A-Za-z_][A-Za-z0-9_]*)|(?:\\[\\]=?)|(?:<=>|==|!=|<=|>=|<<|>>|\\*\\*|[-+*/%<>&|^~!]))?\\s*(?:(\\[)([^\\]]*)(\\]))?\\s*(\\()",
+      "beginCaptures": {
+        "1": { "name": "storage.type.function.catallaxy" },
+        "2": { "name": "entity.name.function.catallaxy" },
+        "3": { "name": "punctuation.definition.generic.begin.catallaxy" },
+        "4": { "patterns": [{ "include": "#type-parameters" }] },
+        "5": { "name": "punctuation.definition.generic.end.catallaxy" },
+        "6": { "name": "punctuation.definition.parameters.begin.catallaxy" }
+      },
+      "end": "\\)",
+      "endCaptures": { "0": { "name": "punctuation.definition.parameters.end.catallaxy" } },
+      "name": "meta.function.parameters.catallaxy",
+      "patterns": [
+        { "include": "#comment" },
+        { "match": "\\bself\\b", "name": "variable.language.self.catallaxy" },
+        {
+          "match": "(?:(?<=[(,])|^)\\s*([a-z_][A-Za-z0-9_]*)\\b(?!\\s*[.(\\[])",
+          "captures": { "1": { "name": "variable.parameter.catallaxy" } }
+        },
+        { "include": "#parens" },
+        { "include": "#code" }
+      ]
+    },
+    "parens": {
+      "begin": "\\(",
+      "beginCaptures": { "0": { "name": "punctuation.section.parens.begin.catallaxy" } },
+      "end": "\\)",
+      "endCaptures": { "0": { "name": "punctuation.section.parens.end.catallaxy" } },
+      "patterns": [{ "include": "#code" }]
+    },
+    "block-parameters": {
+      "comment": "`{ |a, b: Int| ... }`",
+      "begin": "(?<=\\{)\\s*(\\|)(?!\\|)",
+      "beginCaptures": { "1": { "name": "punctuation.definition.parameters.begin.catallaxy" } },
+      "end": "\\|",
+      "endCaptures": { "0": { "name": "punctuation.definition.parameters.end.catallaxy" } },
+      "name": "meta.block.parameters.catallaxy",
+      "patterns": [
+        {
+          "match": "(?:(?<=[|,(])|^)\\s*([a-z_][A-Za-z0-9_]*)\\b",
+          "captures": { "1": { "name": "variable.parameter.catallaxy" } }
+        },
+        { "include": "#types" },
+        { "match": "[,():]", "name": "punctuation.separator.catallaxy" },
+        { "match": "\\?", "name": "keyword.operator.optional.catallaxy" }
+      ]
+    },
+    "member-access": {
+      "comment": "After `.` or `?.` any word is a member, keywords included (`x.match(y)`). Excludes `..` ranges.",
+      "patterns": [
+        {
+          "match": "(?<!\\.)(\\?\\.|\\.)\\s*([a-z_][A-Za-z0-9_]*)(?=\\s*[({])",
+          "captures": {
+            "1": { "name": "punctuation.accessor.catallaxy" },
+            "2": { "name": "entity.name.function.member.catallaxy" }
+          }
+        },
+        {
+          "match": "(?<!\\.)(\\?\\.|\\.)\\s*([a-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "punctuation.accessor.catallaxy" },
+            "2": { "name": "variable.other.property.catallaxy" }
+          }
+        },
+        {
+          "match": "(?<!\\.)(\\?\\.|\\.)\\s*([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "punctuation.accessor.catallaxy" },
+            "2": { "name": "variable.other.enummember.catallaxy" }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "match": "\\b(if|else|while|loop|for|in|match|return|break|continue|with)\\b",
+          "name": "keyword.control.catallaxy"
+        },
+        { "match": "\\b(spawn)\\b", "name": "keyword.control.spawn.catallaxy" },
+        { "match": "\\b(and|or|not|is|as)\\b", "name": "keyword.operator.word.catallaxy" },
+        { "match": "\\b(let|var|const)\\b", "name": "storage.type.catallaxy" },
+        { "match": "\\b(fn)\\b", "name": "storage.type.function.catallaxy" },
+        { "match": "\\b(class|interface|enum|extend)\\b", "name": "storage.type.catallaxy" },
+        { "match": "\\b(pub|native|frozen|shared|mut|move)\\b", "name": "storage.modifier.catallaxy" },
+        { "match": "\\bself\\b", "name": "variable.language.self.catallaxy" },
+        { "match": "\\bSelf\\b", "name": "variable.language.self-type.catallaxy" },
+        { "match": "\\bsuper\\b", "name": "variable.language.super.catallaxy" },
+        { "match": "\\bit\\b", "name": "variable.language.it.catallaxy" }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        { "match": "\\b(true|false)\\b", "name": "constant.language.boolean.catallaxy" },
+        { "match": "\\bnil\\b", "name": "constant.language.nil.catallaxy" },
+        { "match": "\\b(Ok|Err)\\b(?=\\s*\\()", "name": "support.function.result.catallaxy" },
+        {
+          "comment": "SCREAMING_CASE names are constants by convention.",
+          "match": "\\b[A-Z][A-Z0-9]*_[A-Z0-9_]*\\b|\\b[A-Z]{2,}[0-9]*\\b",
+          "name": "variable.other.constant.catallaxy"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "match": "\\b(Int|Float|Bool|String|Nil|List|Dict|Set|Range|Dyn|Never|Result|Mutex|Atomic|Channel|Thread|Fiber|StringBuilder|NativeHandle)\\b",
+          "name": "support.type.builtin.catallaxy"
+        },
+        { "match": "\\b[A-Z][A-Za-z0-9_]*\\b", "name": "entity.name.type.catallaxy" }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "match": "\\b0[xX][0-9A-Fa-f_]+\\b", "name": "constant.numeric.integer.hexadecimal.catallaxy" },
+        { "match": "\\b0[bB][01_]+\\b", "name": "constant.numeric.integer.binary.catallaxy" },
+        { "match": "\\b0[oO][0-7_]+\\b", "name": "constant.numeric.integer.octal.catallaxy" },
+        {
+          "match": "\\b[0-9][0-9_]*(?:\\.[0-9][0-9_]*(?:[eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\\b",
+          "name": "constant.numeric.float.catallaxy"
+        },
+        { "match": "\\b[0-9][0-9_]*\\b", "name": "constant.numeric.integer.catallaxy" }
+      ]
+    },
+    "function-call": {
+      "match": "\\b([a-z_][A-Za-z0-9_]*)(?=\\s*\\()",
+      "captures": { "1": { "name": "entity.name.function.call.catallaxy" } }
+    },
+    "operators": {
+      "patterns": [
+        { "match": "->", "name": "keyword.operator.arrow.catallaxy" },
+        { "match": "=>", "name": "keyword.operator.arrow.match.catallaxy" },
+        { "match": "\\.\\.\\.?", "name": "keyword.operator.range.catallaxy" },
+        { "match": "\\?\\?=?", "name": "keyword.operator.nil-coalescing.catallaxy" },
+        { "match": "<=>|==|!=|<=|>=|<|>", "name": "keyword.operator.comparison.catallaxy" },
+        { "match": "\\*\\*=|<<=|>>=|\\|\\|=|&&=|[-+*/%|&^]=", "name": "keyword.operator.assignment.compound.catallaxy" },
+        { "match": "&&|\\|\\||!", "name": "keyword.operator.logical.catallaxy" },
+        { "match": "\\*\\*|<<|>>|[-+*/%~^&|]", "name": "keyword.operator.arithmetic.catallaxy" },
+        { "match": "=", "name": "keyword.operator.assignment.catallaxy" },
+        { "match": "\\?", "name": "keyword.operator.try.catallaxy" },
+        { "match": "::", "name": "punctuation.separator.namespace.catallaxy" },
+        { "match": "@", "name": "keyword.operator.at.catallaxy" }
+      ]
+    },
+    "braces": {
+      "comment": "Nested braces, so an interpolation's `}` is told apart from a block's.",
+      "begin": "\\{",
+      "beginCaptures": { "0": { "name": "punctuation.section.block.begin.catallaxy" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.block.end.catallaxy" } },
+      "patterns": [{ "include": "#code" }]
+    },
+    "punctuation": {
+      "patterns": [
+        { "match": ",", "name": "punctuation.separator.comma.catallaxy" },
+        { "match": ":", "name": "punctuation.separator.colon.catallaxy" },
+        { "match": ";", "name": "punctuation.terminator.statement.catallaxy" },
+        { "match": "\\.", "name": "punctuation.accessor.catallaxy" },
+        { "match": "[()\\[\\]]", "name": "punctuation.section.brackets.catallaxy" }
+      ]
+    }
+  }
+}
