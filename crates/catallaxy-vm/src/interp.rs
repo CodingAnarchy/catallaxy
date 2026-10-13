@@ -897,6 +897,29 @@ impl Vm {
                         pc += 1;
                     }
                 }
+                Op::JNLtIK | Op::JNLeIK | Op::JNGtIK | Op::JNGeIK | Op::JNEqIK | Op::JEqIK => {
+                    let x = r!(a);
+                    let k = b_of(w) as u8 as i8 as i64;
+                    let ord = if x.is_small_int() {
+                        x.as_small_int().cmp(&k)
+                    } else {
+                        save!();
+                        tri!(slow::cmp_int_imm(Op::from_u8(op_of(w)), x, k))
+                    };
+                    let jump = match Op::from_u8(op_of(w)) {
+                        Op::JNLtIK => !ord.is_lt(),
+                        Op::JNLeIK => !ord.is_le(),
+                        Op::JNGtIK => !ord.is_gt(),
+                        Op::JNGeIK => !ord.is_ge(),
+                        Op::JNEqIK => !ord.is_eq(),
+                        _ => ord.is_eq(),
+                    };
+                    if jump {
+                        fused_jump!(w);
+                    } else {
+                        pc += 1;
+                    }
+                }
                 Op::JNEqI | Op::JEqI => {
                     let (x, y) = (r!(a), r!(b_of(w)));
                     let eq = if Value::both_small_ints(x, y) {
@@ -1072,6 +1095,25 @@ impl Vm {
                         inst.get_acquire(i)
                     };
                     set!(a, v);
+                }
+                Op::GetField2 => {
+                    let d = data!();
+                    let (i, j) = ((d & 0xffff) as usize, (d >> 16) as usize);
+                    let (o1, o2) = (r!(b_of(w)), r!(c_of(w)));
+                    if o1.is_ptr()
+                        && o2.is_ptr()
+                        && unsafe { &*o1.as_ptr() }.is_local_or_frozen(tid)
+                        && unsafe { &*o2.as_ptr() }.is_local_or_frozen(tid)
+                    {
+                        set!(a, unsafe { as_instance(o1) }.get(i));
+                        set!(a + 1, unsafe { as_instance(o2) }.get(j));
+                    } else {
+                        save!();
+                        let v1 = tri!(slow::get_field(self, o1, i));
+                        set!(a, v1);
+                        let v2 = tri!(slow::get_field(self, o2, j));
+                        set!(a + 1, v2);
+                    }
                 }
                 Op::SetField => {
                     let o = r!(a);

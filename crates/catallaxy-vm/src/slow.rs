@@ -42,6 +42,45 @@ pub fn fused_jump(op: Op, x: Value, y: Value) -> RtResult<bool> {
     })
 }
 
+/// Compares a non-small-int operand with a small constant for the `J*IK` jumps: big integers
+/// compare by value; anything else is a type error, except equality, where it is simply unequal.
+#[cold]
+#[inline(never)]
+pub fn cmp_int_imm(op: Op, x: Value, k: i64) -> RtResult<std::cmp::Ordering> {
+    if ops::is_int(x) {
+        return Ok(ops::int_cmp(x, Value::small_int(k)));
+    }
+    if matches!(op, Op::JNEqIK | Op::JEqIK) {
+        // Not equal to any Int: report "greater" so equality is false.
+        return Ok(std::cmp::Ordering::Greater);
+    }
+    let sym = match op {
+        Op::JNLtIK => "<",
+        Op::JNLeIK => "<=",
+        Op::JNGtIK => ">",
+        _ => ">=",
+    };
+    expect_ints(x, Value::small_int(k), sym)?;
+    unreachable!()
+}
+
+/// `GetField` off its fast path: errors, shared objects and foreign owners.
+#[cold]
+#[inline(never)]
+pub fn get_field(vm: &mut Vm, o: Value, i: usize) -> RtResult<Value> {
+    if !o.is_ptr() {
+        return Err(field_on_non_object(o));
+    }
+    let h = unsafe { &*o.as_ptr() };
+    let inst = unsafe { as_instance(o) };
+    Ok(if h.is_local_or_frozen(vm.tid()) {
+        inst.get(i)
+    } else {
+        ownership::check_read(&vm.m, h)?;
+        inst.get_acquire(i)
+    })
+}
+
 pub fn expect_ints(x: Value, y: Value, op: &str) -> RtResult<()> {
     if ops::is_int(x) && ops::is_int(y) {
         Ok(())
