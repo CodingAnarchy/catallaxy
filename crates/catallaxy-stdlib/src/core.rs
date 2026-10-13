@@ -19,7 +19,16 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "assert_eq" => assert_eq,
         "inspect" => inspect,
         "compare_values" => compare_values,
-        "read_line" => read_line,
+        "read_line" | "Stdin.read_line" => read_line,
+        "Stdin.read_all" => |vm, _| {
+            let text = String::from_utf8_lossy(&read_stdin_to_end(vm)).into_owned();
+            Ok(new_str(vm, &text))
+        },
+        "Stdin.read_lines" => |vm, _| {
+            let text = String::from_utf8_lossy(&read_stdin_to_end(vm)).into_owned();
+            let items = text.lines().map(|l| vm.m.alloc_str(l)).collect();
+            Ok(new_list(vm, items))
+        },
         "args" => args_fn,
         "exit" => exit_fn,
         "sleep" => sleep_fn,
@@ -468,7 +477,20 @@ fn compare_values(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     Ok(Value::small_int(o as i64))
 }
 
+/// The rest of standard input (as far as it could be read). Shares the buffer `read_line` uses.
+pub(crate) fn read_stdin_to_end(vm: &mut Vm) -> Vec<u8> {
+    crate::flush();
+    crate::fiber::blocking_io(vm, || {
+        use std::io::Read as _;
+        let mut buf = Vec::new();
+        let _ = std::io::stdin().lock().read_to_end(&mut buf);
+        buf
+    })
+}
+
 fn read_line(vm: &mut Vm, _: &[Value]) -> RtResult<Value> {
+    // Show any prompt before waiting (the I/O pool path does not flush on its own).
+    crate::flush();
     let line = crate::fiber::blocking_io(vm, || {
         let mut s = String::new();
         match std::io::stdin().read_line(&mut s) {

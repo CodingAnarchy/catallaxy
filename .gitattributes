@@ -1,3 +1,4 @@
 # Program sources and expected outputs are compared byte for byte on every platform.
 *.cx text eol=lf
 *.out text eol=lf
+*.in text eol=lf

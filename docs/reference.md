@@ -75,6 +75,7 @@ Module-wide state uses:
 | `Mutex[T]`, `Atomic[T]`, `Channel[T]`, `Thread[T]` | concurrency types |
 | `Result[T, E]` | `Ok(T)` or `Err(E)` |
 | `StringBuilder` | mutable string buffer |
+| `Bytes` | immutable byte string (always frozen); build from `List[Int]`, text, hex, base64 or a file |
 | `NativeHandle` | opaque frozen native data (inside `Regex`, `Subprocess`; see §11) |
 | `Duration`, `Instant`, `DateTime` | time spans, monotonic clock readings, dates (frozen; §3.3) |
 
@@ -386,7 +387,7 @@ Every type has a capability:
 
 | Capability | Types | Crosses threads |
 | --- | --- | --- |
-| frozen | `Int Float Bool Nil String Range NativeHandle`, `frozen T`, `frozen class` (e.g. `Regex`, `DateTime`), enums/tuples of frozen | freely |
+| frozen | `Int Float Bool Nil String Range NativeHandle`, `frozen T`, `frozen class` (e.g. `Regex`, `Bytes`, `DateTime`), enums/tuples of frozen | freely |
 | shareable | `Mutex[T] Atomic[T] Channel[T] Thread[T]`, `shared class` | by reference |
 | owned | everything else (`List`, `Dict`, ordinary classes, closures) | only by `move` |
 
