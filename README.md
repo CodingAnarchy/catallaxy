@@ -108,7 +108,10 @@ Validation: a conformance suite of 110 programs (run + reject), 42 example progr
 output, Miri (Tree Borrows) and ThreadSanitizer on the collector and runtime, Loom models of the
 object-lock and mark protocols, continuous fuzzing of the compiler front end, and a GC stress mode
 (`CATX_GC_STRESS=1`) that the whole corpus passes. On an Apple M-series machine Catallaxy runs the
-`bench/` programs 1.5–7× faster than CPython 3.13 and type-checks 8,000 lines in about 20 ms.
+`bench/` programs 1.5–7× faster than CPython 3.13 and type-checks 8,000 lines in about 20 ms. The design budgets 10–20% of
+single-thread speed for thread safety. Against a build with ownership checks and list memory
+orderings stubbed out (keeping the GC polls any collector needs), the single-threaded `bench/`
+programs pay 0–11%, the most on field-heavy `nbody`.
 
 Post-v1 work, as the design lays it out, is tracked in the
 [`post-v1` issues](https://github.com/CodingAnarchy/catallaxy/issues?q=label%3Apost-v1): thread-local
