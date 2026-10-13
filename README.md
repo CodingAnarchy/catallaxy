@@ -98,7 +98,8 @@ through those crates' APIs; the compiler and the `catallaxy` crate use none.
 
 ## Status
 
-Catallaxy 0.1 implements the v1 design (`docs/design.md`, phases 1–4 without fibers):
+Catallaxy implements the v1 design (`docs/design.md`, phases 1–4) and the post-v1 work the design
+lays out:
 
 - the full static type system: inference, structural interfaces with default methods, implicit
   generics, nullables, unions, exhaustive `match`, `Result` and `?`, extensions, frozen types,
@@ -114,7 +115,7 @@ Catallaxy 0.1 implements the v1 design (`docs/design.md`, phases 1–4 without f
   work);
 - tooling: `check --json`, formatter, REPL, language server, Rust extension API.
 
-Validation: a conformance suite of 110 programs (run + reject), 42 example programs with checked
+Validation: a conformance suite of 116 programs (run + reject), 42 example programs with checked
 output, Miri (Tree Borrows) and ThreadSanitizer on the collector and runtime, Loom models of the
 object-lock and mark protocols, continuous fuzzing of the compiler front end, and a GC stress mode
 (`CATX_GC_STRESS=1`) that the whole corpus passes. On an Apple M-series machine Catallaxy runs the
@@ -123,10 +124,13 @@ single-thread speed for thread safety. Against a build with ownership checks and
 orderings stubbed out (keeping the GC polls any collector needs), the single-threaded `bench/`
 programs pay 0–11%, the most on field-heavy `nbody`.
 
-Post-v1 work, as the design lays it out, is tracked in the
-[`post-v1` issues](https://github.com/CodingAnarchy/catallaxy/issues?q=label%3Apost-v1): thread-local
-young collection, shorter GC pauses, fibers, a seqlock fast path for shared dict reads,
-superinstructions, threaded dispatch, a JIT experiment and a C extension ABI.
+Since 0.1 (all tracked as [`post-v1` issues](https://github.com/CodingAnarchy/catallaxy/issues?q=label%3Apost-v1)):
+thread-local young collection and dedicated marker threads (a 1.6 GB heap's longest pause fell from
+143 ms to 25 ms), fibers, lock-free reads of shared dicts, superinstructions and tighter codegen
+(up to 42% fewer cycles), and a C ABI (`catallaxy-capi`). Two experiments ended in a "not now":
+threaded dispatch was slower than the current `match` loop on both aarch64 and x86-64
+(`experiments/dispatch`), and a Cranelift JIT, though 4–10× faster on integer kernels, covered too
+little of real programs to justify its cost (`experiments/jit`).
 
 ## License
 
