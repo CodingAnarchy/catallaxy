@@ -263,6 +263,9 @@ fn max[T: Comparable](xs: List[T]) -> T? { ... }
 pub fn total(xs: Enumerable[Int]) -> Int { xs.reduce(0) { |a, b| a + b } }   # interface param = bound
 ```
 
+A member reached through a bound `T: I` (or `T: I & J`) is seen with `Self` replaced by `T`, so with
+`interface Clone { fn clone(self) -> Self }`, `fn dup[T: Clone](x: T) -> T { x.clone() }` checks.
+
 ### 6.3 Implicit generics
 
 A non-`pub` function may leave parameter types off. The checker infers a structural requirement for each
