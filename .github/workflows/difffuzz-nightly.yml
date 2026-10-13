@@ -12,6 +12,7 @@ jobs:
   difffuzz:
     name: Differential fuzz (30 minutes, all modes)
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable

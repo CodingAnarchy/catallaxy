@@ -11,7 +11,11 @@ fn lcs(a: String, b: String) -> String {
   t = grid(x.length + 1, y.length + 1, 0)
   for i in 1..x.length {
     for j in 1..y.length {
-      t[i][j] = if x[i - 1] == y[j - 1] { t[i - 1][j - 1] + 1 } else { t[i - 1][j].max(t[i][j - 1]) }
+      t[i][j] = if x[i - 1] == y[j - 1] {
+        t[i - 1][j - 1] + 1
+      } else {
+        t[i - 1][j].max(t[i][j - 1])
+      }
     }
   }
   out: List[String] = []
@@ -108,7 +112,7 @@ for (a, b) in [("kitten", "sitting"), ("flaw", "lawn"), ("", "abc"), ("same", "s
 }
 
 items = [Item.new("map", 1, 15), Item.new("compass", 2, 10), Item.new("water", 3, 40),
-         Item.new("tent", 5, 60), Item.new("stove", 4, 30)]
+  Item.new("tent", 5, 60), Item.new("stove", 4, 30)]
 let (value, chosen) = knapsack(items, 8)
 puts("knapsack(8): value #{value}, items #{chosen}")
 

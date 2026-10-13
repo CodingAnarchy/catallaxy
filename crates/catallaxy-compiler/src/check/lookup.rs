@@ -146,7 +146,7 @@ impl Checker {
             Ty::Inter(parts) => {
                 for p in parts {
                     if let Some(mut m) = self.lookup_method(p, name, allow_getters) {
-                        m.self_ty = r;
+                        self.rebind_self(&mut m, r);
                         return Some(m);
                     }
                 }
@@ -156,14 +156,13 @@ impl Checker {
                 let bounds = self.params[p as usize].bounds.clone();
                 for b in bounds {
                     if let Some(mut m) = self.lookup_method(b, name, allow_getters) {
-                        m.self_ty = r;
+                        self.rebind_self(&mut m, r);
                         let fallback = match &m.dispatch {
                             Dispatch::Dynamic(_, f) => *f,
                             Dispatch::Static(f) if self.fns[*f as usize].is_default || self.is_ext_fn(*f) => Some(*f),
                             _ => None,
                         };
                         m.dispatch = Dispatch::Dynamic(name.to_string(), fallback);
-                        // Re-substitute Self with the parameter type.
                         return Some(m);
                     }
                 }
@@ -199,6 +198,16 @@ impl Checker {
                 self.lookup_ext(r, name, false).or_else(|| self.lookup_default(r, name, false))
             }
             _ => None,
+        }
+    }
+
+    /// Re-targets a method found through a bound or an intersection member at the actual
+    /// receiver `r`: `Self` in the member's signature means `r` (e.g. `T` for `T: Clone`), not the
+    /// interface the method was found on.
+    fn rebind_self(&self, m: &mut MethodRef, r: TyId) {
+        m.self_ty = r;
+        if let Owner::Iface(iid) = self.fns[m.fid as usize].owner {
+            m.subst.insert(self.ifaces[iid as usize].self_param, r);
         }
     }
 
