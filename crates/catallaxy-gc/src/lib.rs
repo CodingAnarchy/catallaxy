@@ -13,7 +13,7 @@ mod heap;
 pub mod stats;
 
 pub use collector::{
-    add_global_roots, collect_now, enter_native, install, is_gc_requested, leave_native, register_thread, request_gc,
+    add_global_roots, collect_now, enter_native, install, is_gc_requested, leave_native, register_thread, request_gc, retire,
     safepoint, safepoint_slow, unregister_thread, NoGcGuard, RootSource, ThreadRecord, ThreadState,
     Tracer,
 };

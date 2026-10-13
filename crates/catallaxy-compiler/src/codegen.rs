@@ -1673,18 +1673,17 @@ impl<'a> Codegen<'a> {
                 }
             }
             CallRes::DynMember(name) => {
-                let base = self.alloc_n(st, 2);
-                if let Some(rv) = recv {
-                    self.expr_to(st, rv, base);
-                }
-                let k = self.konst(st, Const::Str(name));
-                self.emit(st, encode_bx(Op::LoadK, base + 1, k));
-                let n = self.internal_native("__dyn_member");
-                self.emit(st, encode(Op::CallNative, base, 2, 0));
-                self.emit(st, n);
-                if dst != base {
-                    self.emit(st, encode(Op::Move, dst, base, 0));
-                }
+                let r = match recv {
+                    Some(rv) => self.expr_reg(st, rv),
+                    None => {
+                        let r = self.alloc_n(st, 1);
+                        self.emit(st, encode(Op::LoadNil, r, 0, 0));
+                        r
+                    }
+                };
+                let ic = self.ic(st, &name, None);
+                self.emit(st, encode(Op::DynGet, dst, r, 0));
+                self.emit(st, ic);
             }
             CallRes::ListGet | CallRes::IndexGet | CallRes::None => {
                 self.emit(st, encode(Op::LoadNil, dst, 0, 0));

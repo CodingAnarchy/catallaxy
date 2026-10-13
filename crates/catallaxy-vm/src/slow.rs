@@ -66,11 +66,10 @@ pub fn list_get(vm: &mut Vm, l: Value, i: Value) -> RtResult<Value> {
     if kind_of(l) != ObjKind::List {
         return panic(format!("TypeError: expected List, got {}", type_name(l)));
     }
-    let r = ownership::with_read(&vm.m, l, || {
-        let items = unsafe { as_list(l).items() };
-        norm_index(i, items.len()).map(|ix| items[ix])
-    })?;
-    r
+    let list = ownership::read_list(&vm.m, l)?;
+    let ix = norm_index(i, list.len())?;
+    // A racing shrink can leave the index out of bounds after the check.
+    list.get(ix).ok_or_else(|| index_error(ops::int_as_i64(i).unwrap_or(0), list.len()))
 }
 
 pub fn list_set(vm: &mut Vm, l: Value, i: Value, v: Value) -> RtResult<()> {
@@ -81,9 +80,10 @@ pub fn list_set(vm: &mut Vm, l: Value, i: Value, v: Value) -> RtResult<()> {
     if ownership::check_write(&vm.m, h)? == Access::Shared {
         ownership::publish_into_shared(&vm.m, v)?;
     }
-    ownership::with_write(&vm.m, l, |_| {
-        let items = unsafe { as_list(l).items_mut() };
-        norm_index(i, items.len()).map(|ix| items[ix] = v)
+    ownership::write_list(&vm.m, l, |list, _| {
+        norm_index(i, list.len()).map(|ix| {
+            unsafe { list.set(ix, v) };
+        })
     })?
 }
 
@@ -92,13 +92,45 @@ pub fn list_push(vm: &mut Vm, l: Value, v: Value) -> RtResult<()> {
     if ownership::check_write(&vm.m, h)? == Access::Shared {
         ownership::publish_into_shared(&vm.m, v)?;
     }
-    ownership::with_write(&vm.m, l, |_| {
-        let items = unsafe { as_list(l).items_mut() };
-        if items.len() == items.capacity() {
-            catallaxy_runtime::note_external(items.capacity().max(4) * 8);
+    ownership::write_list(&vm.m, l, |list, access| unsafe { list.push(v, access) })
+}
+
+/// `recv.name` on a `Dyn` value: a record (dict) key, a field, or a zero-argument method.
+/// Record hits update the site's inline cache with `(shape id + 1, slot)`.
+pub fn dyn_get(vm: &mut Vm, recv: Value, ic: &program::Ic) -> RtResult<Value> {
+    let name = catallaxy_runtime::symbol::name(ic.name);
+    if kind_of(recv) == ObjKind::Dict {
+        let key = vm.m.alloc_str(name);
+        let Some(idx) = ops::dict_lookup(vm, recv, key)? else { return Ok(Value::NIL) };
+        let (v, shape) =
+            ownership::with_read(&vm.m, recv, || {
+                let t = unsafe { as_dict(recv).table() };
+                (t.entry(idx).value, t.shape().map(|s| s.id))
+            })?;
+        if let Some(id) = shape {
+            ic.cache.store(((id.wrapping_add(1) as u64) << 32) | idx as u64, std::sync::atomic::Ordering::Relaxed);
         }
-        items.push(v);
-    })
+        return Ok(v);
+    }
+    dyn_member(vm, recv, name)
+}
+
+/// `recv.name` on a `Dyn` value that is not a record.
+pub fn dyn_member(vm: &mut Vm, recv: Value, n: &str) -> RtResult<Value> {
+    let sym = intern(n);
+    let cls = class_of(recv);
+    if cls.kind == ObjKind::Instance {
+        if let Some(i) = cls.field_index(sym) {
+            return Ok(unsafe { as_instance(recv) }.get(i));
+        }
+    }
+    if let Some(fid) = cls.lookup(sym) {
+        return vm.call_func(fid, &[recv]);
+    }
+    if recv.is_nil() {
+        return panic(format!("NoMethodError: undefined method `{n}` for nil (a Dyn value was nil)"));
+    }
+    panic(format!("NoMethodError: undefined method `{n}` for {}", cls.name))
 }
 
 pub fn dict_get(vm: &mut Vm, d: Value, k: Value) -> RtResult<Option<Value>> {
@@ -202,7 +234,7 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
     if is_range(i) {
         match kind_of(x) {
             ObjKind::List => {
-                let items = ownership::with_read(&vm.m, x, || unsafe { as_list(x).items() }.clone())?;
+                let items = ownership::read_list(&vm.m, x)?.to_vec();
                 let (a, b) = range_bounds(i, items.len())?;
                 return Ok(vm.m.alloc_list(items[a..b].to_vec()));
             }
@@ -301,8 +333,8 @@ pub fn generic_arith(vm: &mut Vm, op: Op, x: Value, y: Value) -> RtResult<Value>
             return Ok(vm.m.alloc_str(&s));
         }
         if kind_of(x) == ObjKind::List && kind_of(y) == ObjKind::List {
-            let mut items = ownership::with_read(&vm.m, x, || unsafe { as_list(x).items() }.clone())?;
-            let more = ownership::with_read(&vm.m, y, || unsafe { as_list(y).items() }.clone())?;
+            let mut items = ownership::read_list(&vm.m, x)?.to_vec();
+            let more = ownership::read_list(&vm.m, y)?.to_vec();
             items.extend(more);
             return Ok(vm.m.alloc_list(items));
         }
@@ -404,7 +436,7 @@ fn conforms_ty(vm: &mut Vm, v: Value, t: &RtType) -> RtResult<bool> {
                 return Ok(true);
             }
             let items: Vec<Value> = if want == ObjKind::List {
-                ownership::with_read(&vm.m, v, || unsafe { as_list(v).items() }.clone())?
+                ownership::read_list(&vm.m, v)?.to_vec()
             } else {
                 ownership::with_read(&vm.m, v, || unsafe { as_dict(v).table() }.iter().map(|e| e.key).collect())?
             };

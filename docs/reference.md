@@ -315,7 +315,7 @@ shared instead and a warning is logged. Single operations on shared objects are 
 
 `Dyn` values come from `Json.parse` and other dynamic sources. Any operation on `Dyn` (`d["k"]`, `d[0]`,
 `d.method(...)`, arithmetic) is checked at runtime and yields `Dyn`. Convert with `as?`:
-`name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. `Json.stringify` writes object keys in sorted order.
+`name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. JSON objects parse to records that behave exactly like `Dict[String, Dyn]` (`as? Dict[String, Dyn]` succeeds); records parsed with the same keys share a hidden class, so `d.name` is served from a per-site cache. `Json.stringify` writes object keys in sorted order.
 
 ## 10. Tooling
 

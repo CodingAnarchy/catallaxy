@@ -104,15 +104,16 @@ Catallaxy 0.1 implements the v1 design (`docs/design.md`, phases 1–4 without f
   work-stealing pool;
 - tooling: `check --json`, formatter, REPL, language server, Rust extension API.
 
-Validation: a conformance suite of 109 programs (run + reject), 42 example programs with checked
+Validation: a conformance suite of 110 programs (run + reject), 42 example programs with checked
 output, Miri (Tree Borrows) and ThreadSanitizer on the collector and runtime, Loom models of the
 object-lock and mark protocols, continuous fuzzing of the compiler front end, and a GC stress mode
 (`CATX_GC_STRESS=1`) that the whole corpus passes. On an Apple M-series machine Catallaxy runs the
 `bench/` programs 1.5–7× faster than CPython 3.13 and type-checks 8,000 lines in about 20 ms.
 
-Differences from the design worth knowing: `Dyn` records (parsed JSON objects) are dictionaries
-rather than hidden-class objects, and reads of *shared* lists take the object's lock. Post-v1 work:
-thread-local young collection, fibers, a seqlock dict fast path, superinstructions.
+Post-v1 work, as the design lays it out, is tracked in the
+[`post-v1` issues](https://github.com/CodingAnarchy/catallaxy/issues?q=label%3Apost-v1): thread-local
+young collection, shorter GC pauses, fibers, a seqlock fast path for shared dict reads,
+superinstructions, threaded dispatch, a JIT experiment and a C extension ABI.
 
 ## License
 

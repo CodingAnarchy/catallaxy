@@ -1,18 +1,21 @@
 //! Heap object layouts and their GC hooks.
 //!
 //! Every object starts with a [`Header`]. Instances keep their fields inline as atomic words, so a
-//! racing reader can never see a torn value. Containers keep their elements in Rust-side buffers;
-//! the ownership rules (and per-object locks for shared objects) guarantee those buffers are never
-//! mutated while another thread reads them.
+//! racing reader can never see a torn value. Lists do the same with their elements and swap whole
+//! buffers on growth, so their reads never lock. Dicts and other containers keep Rust-side
+//! buffers; the ownership rules (and per-object locks for shared objects) guarantee those are
+//! never mutated while another thread reads them.
 
+use std::alloc::Layout;
 use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 
 use catallaxy_gc::{GcVTable, Header, Tracer, HEADER_SIZE};
 use num_bigint::BigInt;
 
 use crate::class::{heap_class, ObjKind};
 use crate::dict::DictTable;
+use crate::ownership::Access;
 use crate::value::Value;
 
 #[inline(always)]
@@ -108,26 +111,241 @@ pub struct BigIntObj {
     pub value: BigInt,
 }
 
+/// A list's backing array: a capacity word followed by `cap` slots. Slots at or past the list's
+/// length always hold `nil`, so a racing reader that sees a stale length never sees a stale
+/// pointer.
+#[repr(C)]
+pub struct ListBuf {
+    cap: usize,
+    slots: [AtomicU64; 0],
+}
+
+/// The buffer of every list with no capacity. Never written, never freed.
+static EMPTY_LIST_BUF: ListBuf = ListBuf { cap: 0, slots: [] };
+
+impl ListBuf {
+    fn layout(cap: usize) -> Layout {
+        Layout::from_size_align(8 * (cap + 1), 8).expect("list too large")
+    }
+
+    fn alloc(cap: usize) -> *mut ListBuf {
+        if cap == 0 {
+            return &EMPTY_LIST_BUF as *const ListBuf as *mut ListBuf;
+        }
+        unsafe {
+            let p = std::alloc::alloc(Self::layout(cap)) as *mut ListBuf;
+            if p.is_null() {
+                std::alloc::handle_alloc_error(Self::layout(cap));
+            }
+            std::ptr::addr_of_mut!((*p).cap).write(cap);
+            let slots = Self::slots_ptr(p);
+            for i in 0..cap {
+                slots.add(i).write(AtomicU64::new(Value::NIL.0));
+            }
+            p
+        }
+    }
+
+    /// # Safety
+    /// `p` must come from [`ListBuf::alloc`] and be unreachable by any reader.
+    unsafe fn free(p: *mut u8) {
+        let b = p as *mut ListBuf;
+        let cap = (*b).cap;
+        if cap > 0 {
+            std::alloc::dealloc(p, Self::layout(cap));
+        }
+    }
+
+    #[inline(always)]
+    fn slots_ptr(p: *const ListBuf) -> *mut AtomicU64 {
+        unsafe { (p as *mut u8).add(8) as *mut AtomicU64 }
+    }
+
+    /// # Safety
+    /// `p` must be a live buffer; the slice must not outlive the next safepoint.
+    #[inline(always)]
+    unsafe fn slots<'a>(p: *const ListBuf) -> &'a [AtomicU64] {
+        std::slice::from_raw_parts(Self::slots_ptr(p), (*p).cap)
+    }
+}
+
+/// A list: header, length and a pointer to a backing array.
+///
+/// Reads never lock, even on shared lists. The length and buffer pointer are atomic words, and a
+/// reader bounds-checks against the buffer it loaded, so it sees some consistent-enough state and
+/// never reads out of bounds. A writer (the owner, or a thread holding a shared list's lock) that
+/// outgrows the buffer copies it into a new one and swaps the pointer; the old buffer is retired
+/// to the collector, which frees it only once the world is stopped and no reader can hold it.
 #[repr(C)]
 pub struct ListObj {
     pub header: Header,
-    pub vec: UnsafeCell<Vec<Value>>,
+    len: AtomicUsize,
+    buf: AtomicPtr<ListBuf>,
 }
 
 impl ListObj {
     /// # Safety
-    /// The caller must have read access per the ownership rules (see `ownership::with_read`).
-    #[inline(always)]
-    pub unsafe fn items(&self) -> &Vec<Value> {
-        &*self.vec.get()
+    /// `p` must point to freshly allocated, unpublished list memory.
+    pub(crate) unsafe fn init(p: *mut ListObj, items: Vec<Value>) {
+        let buf = ListBuf::alloc(items.capacity());
+        let slots = ListBuf::slots_ptr(buf);
+        for (i, v) in items.iter().enumerate() {
+            (*slots.add(i)).store(v.0, Ordering::Relaxed);
+        }
+        std::ptr::addr_of_mut!((*p).len).write(AtomicUsize::new(items.len()));
+        std::ptr::addr_of_mut!((*p).buf).write(AtomicPtr::new(buf));
     }
-    /// # Safety
-    /// The caller must have write access per the ownership rules, and must not hold another
-    /// reference to the items.
+
     #[inline(always)]
-    #[allow(clippy::mut_from_ref)]
-    pub unsafe fn items_mut(&self) -> &mut Vec<Value> {
-        &mut *self.vec.get()
+    pub fn len(&self) -> usize {
+        self.len.load(Ordering::Acquire)
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    #[inline(always)]
+    fn slots(&self) -> &[AtomicU64] {
+        unsafe { ListBuf::slots(self.buf.load(Ordering::Acquire)) }
+    }
+
+    /// The item at `i`, if in bounds. Safe against concurrent writers; the caller must still have
+    /// passed the ownership read check.
+    #[inline(always)]
+    pub fn get(&self, i: usize) -> Option<Value> {
+        if i >= self.len() {
+            return None;
+        }
+        self.slots().get(i).map(|x| Value(x.load(Ordering::Acquire)))
+    }
+
+    /// As [`ListObj::get`] for a list owned by this thread or frozen, where nothing races.
+    #[inline(always)]
+    pub fn get_local(&self, i: usize) -> Option<Value> {
+        if i >= self.len.load(Ordering::Relaxed) {
+            return None;
+        }
+        let slots = unsafe { ListBuf::slots(self.buf.load(Ordering::Relaxed)) };
+        slots.get(i).map(|x| Value(x.load(Ordering::Relaxed)))
+    }
+
+    /// A snapshot of the items.
+    pub fn to_vec(&self) -> Vec<Value> {
+        let n = self.len();
+        let slots = self.slots();
+        slots[..n.min(slots.len())].iter().map(|x| Value(x.load(Ordering::Acquire))).collect()
+    }
+
+    pub fn capacity(&self) -> usize {
+        unsafe { (*self.buf.load(Ordering::Acquire)).cap }
+    }
+
+    // Writers. Each requires write access per the ownership rules: the owning thread, or the
+    // holder of a shared list's lock. `access` says which, so replaced buffers are freed at once
+    // when no other thread can be reading them.
+
+    /// # Safety
+    /// See above.
+    pub unsafe fn set(&self, i: usize, v: Value) -> bool {
+        if i >= self.len.load(Ordering::Relaxed) {
+            return false;
+        }
+        self.slots()[i].store(v.0, Ordering::Release);
+        true
+    }
+
+    /// # Safety
+    /// See above.
+    pub unsafe fn push(&self, v: Value, access: Access) {
+        let n = self.len.load(Ordering::Relaxed);
+        if n == self.capacity() {
+            self.grow(n + 1, access);
+        }
+        self.slots()[n].store(v.0, Ordering::Release);
+        self.len.store(n + 1, Ordering::Release);
+    }
+
+    /// # Safety
+    /// See above.
+    pub unsafe fn pop(&self) -> Option<Value> {
+        let n = self.len.load(Ordering::Relaxed);
+        if n == 0 {
+            return None;
+        }
+        let slot = &self.slots()[n - 1];
+        let v = Value(slot.load(Ordering::Relaxed));
+        self.len.store(n - 1, Ordering::Release);
+        slot.store(Value::NIL.0, Ordering::Release);
+        Some(v)
+    }
+
+    /// Replaces the contents with `items`, reusing the buffer when it is large enough.
+    ///
+    /// # Safety
+    /// See above.
+    pub unsafe fn replace(&self, items: &[Value], access: Access) {
+        let old_len = self.len.load(Ordering::Relaxed);
+        let n = items.len();
+        if n > self.capacity() {
+            let buf = ListBuf::alloc(n.max(4));
+            let slots = ListBuf::slots(buf);
+            for (s, v) in slots.iter().zip(items) {
+                s.store(v.0, Ordering::Relaxed);
+            }
+            self.swap_buf(buf, access);
+            self.len.store(n, Ordering::Release);
+            return;
+        }
+        let slots = self.slots();
+        if n < old_len {
+            self.len.store(n, Ordering::Release);
+        }
+        for (s, v) in slots.iter().zip(items) {
+            s.store(v.0, Ordering::Release);
+        }
+        for s in &slots[n..old_len.max(n)] {
+            s.store(Value::NIL.0, Ordering::Release);
+        }
+        if n >= old_len {
+            self.len.store(n, Ordering::Release);
+        }
+    }
+
+    /// Runs `f` on a copy of the items and writes the result back.
+    ///
+    /// # Safety
+    /// See above.
+    pub unsafe fn modify<R>(&self, access: Access, f: impl FnOnce(&mut Vec<Value>) -> R) -> R {
+        let mut items = self.to_vec();
+        let r = f(&mut items);
+        self.replace(&items, access);
+        r
+    }
+
+    unsafe fn grow(&self, need: usize, access: Access) {
+        let n = self.len.load(Ordering::Relaxed);
+        let cap = need.max(self.capacity() * 2).max(4);
+        let buf = ListBuf::alloc(cap);
+        let new = ListBuf::slots(buf);
+        for (d, s) in new.iter().zip(&self.slots()[..n]) {
+            d.store(s.load(Ordering::Relaxed), Ordering::Relaxed);
+        }
+        self.swap_buf(buf, access);
+    }
+
+    unsafe fn swap_buf(&self, buf: *mut ListBuf, access: Access) {
+        crate::note_external((*buf).cap * 8);
+        let old = self.buf.swap(buf, Ordering::AcqRel);
+        if (*old).cap == 0 {
+            return;
+        }
+        if access == Access::Local && !crate::ownership::PROMOTE_ON_ACCESS.load(Ordering::Relaxed) {
+            ListBuf::free(old as *mut u8);
+        } else {
+            catallaxy_gc::retire(old as *mut u8, ListBuf::free);
+        }
     }
 }
 
@@ -299,15 +517,16 @@ unsafe fn size_bigint(h: *const Header) -> usize {
 }
 
 unsafe fn trace_list(h: *const Header, t: &mut Tracer) {
-    for &v in (*(*(h as *const ListObj)).vec.get()).iter() {
-        mark_value(t, v);
+    // The world is stopped; slots past the length are nil.
+    for s in (*(h as *const ListObj)).slots() {
+        mark_value(t, Value(s.load(Ordering::Relaxed)));
     }
 }
 unsafe fn fin_list(h: *mut Header) {
-    std::ptr::drop_in_place((*(h as *mut ListObj)).vec.get());
+    ListBuf::free(*(*(h as *mut ListObj)).buf.get_mut() as *mut u8);
 }
 unsafe fn size_list(h: *const Header) -> usize {
-    std::mem::size_of::<ListObj>() + 8 * (*(*(h as *const ListObj)).vec.get()).capacity()
+    std::mem::size_of::<ListObj>() + 8 * (*(h as *const ListObj)).capacity()
 }
 
 unsafe fn trace_dict(h: *const Header, t: &mut Tracer) {

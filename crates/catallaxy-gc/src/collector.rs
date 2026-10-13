@@ -69,6 +69,9 @@ struct Coord {
     marking: bool,
 }
 
+/// A retired buffer's address and the function that frees it.
+type Retired = (usize, unsafe fn(*mut u8));
+
 struct Global {
     threads: Mutex<Vec<Arc<ThreadRecord>>>,
     free_tids: Mutex<Vec<u16>>,
@@ -76,6 +79,8 @@ struct Global {
     coord: Mutex<Coord>,
     cv: Condvar,
     global_roots: Mutex<Vec<Box<dyn RootSource + Send + Sync>>>,
+    /// Out-of-heap buffers awaiting the next stop-the-world (see [`retire`]).
+    retired: Mutex<Vec<Retired>>,
     mark: MarkShared,
 }
 
@@ -95,6 +100,7 @@ static GLOBAL: std::sync::LazyLock<Global> = std::sync::LazyLock::new(|| Global 
     coord: Mutex::new(Coord { collecting: false, epoch: 0, mark_epoch: 0, marking: false }),
     cv: Condvar::new(),
     global_roots: Mutex::new(Vec::new()),
+    retired: Mutex::new(Vec::new()),
     mark: MarkShared {
         injector: Injector::new(),
         stealers: Mutex::new(Vec::new()),
@@ -162,6 +168,13 @@ pub fn unregister_thread(rec: &Arc<ThreadRecord>) {
 /// Registers roots that live outside any thread (globals, constants, interned strings).
 pub fn add_global_roots(src: Box<dyn RootSource + Send + Sync>) {
     GLOBAL.global_roots.lock().push(src);
+}
+
+/// Frees `ptr` with `free` at the next collection, once the world is stopped. Containers whose
+/// readers do not lock use this for replaced buffers: a reader never holds a buffer across a
+/// safepoint, so no reader can still see one by then.
+pub fn retire(ptr: *mut u8, free: unsafe fn(*mut u8)) {
+    GLOBAL.retired.lock().push((ptr as usize, free));
 }
 
 /// Disables collection while the guard lives (used while loading programs).
@@ -316,7 +329,11 @@ fn collect(me: &ThreadRecord) {
         }
     }
 
-    // 2. Retire every thread's current pages, then consume last cycle's colors.
+    // 2. Free retired buffers (no mutator is mid-read), retire every thread's current pages,
+    //    then consume last cycle's colors.
+    for (p, free) in std::mem::take(&mut *GLOBAL.retired.lock()) {
+        unsafe { free(p as *mut u8) };
+    }
     for t in threads.iter() {
         let heap = unsafe { *t.heap.get() };
         if !heap.is_null() {

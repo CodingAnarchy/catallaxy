@@ -18,7 +18,7 @@ use crate::class::{heap_class, ids, Class, ObjKind};
 use crate::dict::Probe;
 use crate::mutator::{panic, Mutator, RtResult, Trap};
 use crate::object::*;
-use crate::ownership::with_read;
+use crate::ownership::{read_list, with_read};
 use crate::symbol::{intern, Sym};
 use crate::value::{fits_small, Value};
 
@@ -408,7 +408,7 @@ fn write_value(ix: &mut dyn Interop, v: Value, out: &mut String, quoted: bool, d
             out.push('[');
             let mut i = 0;
             loop {
-                let item = with_read(m, v, || unsafe { as_list(v).items().get(i).copied() })?;
+                let item = read_list(m, v)?.get(i);
                 let Some(item) = item else { break };
                 if i > 0 {
                     out.push_str(", ");
@@ -438,7 +438,7 @@ fn write_value(ix: &mut dyn Interop, v: Value, out: &mut String, quoted: bool, d
             let n = with_read(m, v, || unsafe { as_dict(v).table().raw_len() })?;
             let mut first = true;
             for i in 0..n {
-                let e = with_read(m, v, || unsafe { as_dict(v).table().raw_entry(i).copied() })?;
+                let e = with_read(m, v, || unsafe { as_dict(v).table().raw_entry(i) })?;
                 let Some(e) = e else { continue };
                 if !first {
                     out.push_str(", ");
@@ -550,14 +550,14 @@ pub fn values_eq(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<bool> {
             Ok(true)
         }
         ObjKind::List => {
-            let len = |v: Value| with_read(m, v, || unsafe { as_list(v).items().len() });
+            let len = |v: Value| read_list(m, v).map(|l| l.len());
             if len(a)? != len(b)? {
                 return Ok(false);
             }
             let mut i = 0;
             loop {
-                let x = with_read(m, a, || unsafe { as_list(a).items().get(i).copied() })?;
-                let y = with_read(m, b, || unsafe { as_list(b).items().get(i).copied() })?;
+                let x = read_list(m, a)?.get(i);
+                let y = read_list(m, b)?.get(i);
                 match (x, y) {
                     (Some(x), Some(y)) => {
                         if !values_eq(ix, x, y)? {
@@ -577,7 +577,7 @@ pub fn values_eq(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<bool> {
             }
             let n = with_read(m, a, || unsafe { as_dict(a).table().raw_len() })?;
             for i in 0..n {
-                let e = with_read(m, a, || unsafe { as_dict(a).table().raw_entry(i).copied() })?;
+                let e = with_read(m, a, || unsafe { as_dict(a).table().raw_entry(i) })?;
                 let Some(e) = e else { continue };
                 match dict_lookup(ix, b, e.key)? {
                     None => return Ok(false),
@@ -645,7 +645,7 @@ pub fn hash_value(ix: &mut dyn Interop, v: Value) -> RtResult<u64> {
             let mut acc = 0x6c69_7374_u64;
             let mut i = 0;
             loop {
-                let x = with_read(m, v, || unsafe { as_list(v).items().get(i).copied() })?;
+                let x = read_list(m, v)?.get(i);
                 let Some(x) = x else { break };
                 acc = mix(acc ^ hash_value(ix, x)?);
                 i += 1;
@@ -656,7 +656,7 @@ pub fn hash_value(ix: &mut dyn Interop, v: Value) -> RtResult<u64> {
             let mut acc = 0x6469_6374_u64;
             let n = with_read(m, v, || unsafe { as_dict(v).table().raw_len() })?;
             for i in 0..n {
-                let e = with_read(m, v, || unsafe { as_dict(v).table().raw_entry(i).copied() })?;
+                let e = with_read(m, v, || unsafe { as_dict(v).table().raw_entry(i) })?;
                 if let Some(e) = e {
                     let hv = if cls.kind == ObjKind::Dict { hash_value(ix, e.value)? } else { 0 };
                     acc ^= mix(e.hash ^ hv.rotate_left(17));
@@ -748,7 +748,7 @@ pub fn compare(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<Option<CmpO
                 if ca.kind == ObjKind::Tuple {
                     Ok(unsafe { as_tuple(v) }.elems().get(i).copied())
                 } else {
-                    with_read(m, v, || unsafe { as_list(v).items().get(i).copied() })
+                    read_list(m, v).map(|l| l.get(i))
                 }
             };
             let mut i = 0;

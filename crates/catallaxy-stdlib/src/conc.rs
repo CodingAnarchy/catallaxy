@@ -511,12 +511,12 @@ fn run_range(vm: &mut Vm, job: &Job, start: usize, end: usize, chunk: usize) -> 
 }
 
 fn par(vm: &mut Vm, list: Value, f: Value, kind: ParKind) -> RtResult<Value> {
-    let items = list_read(vm, list, |v| v.clone())?;
+    let items = list_read(vm, list)?.to_vec();
     run_job(vm, kind, f, items, Value::NIL)
 }
 
 fn par_reduce(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    let items = list_read(vm, a[0], |v| v.clone())?;
+    let items = list_read(vm, a[0])?.to_vec();
     run_job(vm, ParKind::Reduce, a[2], items, a[1])
 }
 

@@ -12,7 +12,7 @@ use std::io::Write;
 use std::sync::OnceLock;
 
 use catallaxy_runtime::class::class_of;
-use catallaxy_runtime::object::{as_list, kind_of, str_of};
+use catallaxy_runtime::object::{kind_of, str_of};
 use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership;
 use catallaxy_runtime::{panic, ObjKind, RtResult, Trap, Value};
@@ -114,7 +114,7 @@ pub(crate) fn list_items(vm: &Vm, l: Value) -> RtResult<Vec<Value>> {
     if kind_of(l) != ObjKind::List {
         return panic(format!("TypeError: expected List, got {}", class_of(l).name));
     }
-    ownership::with_read(&vm.m, l, || unsafe { as_list(l).items() }.clone())
+    Ok(ownership::read_list(&vm.m, l)?.to_vec())
 }
 
 pub(crate) fn to_s(vm: &mut Vm, v: Value) -> RtResult<String> {

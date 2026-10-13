@@ -180,12 +180,15 @@ pub enum Op {
     IsKind,
     /// R[A] = the missing-argument marker (callee applies its default)
     LoadEmpty,
+    /// R[A] = R[B].name on a `Dyn` value: record key, field or zero-argument method; d = inline
+    /// cache index (caches the record's shape and slot)
+    DynGet,
 }
 
 /// `IsKind` operand for tuples (`catallaxy_runtime::ObjKind::Tuple as u8`, checked at load).
 pub const KIND_TUPLE: u8 = 7;
 
-pub const NUM_OPS: usize = Op::LoadEmpty as usize + 1;
+pub const NUM_OPS: usize = Op::DynGet as usize + 1;
 
 impl Op {
     pub fn from_u8(b: u8) -> Op {
@@ -203,6 +206,7 @@ impl Op {
                 | Op::Call
                 | Op::CallNative
                 | Op::CallMethod
+                | Op::DynGet
                 | Op::CallVirtual
                 | Op::New
                 | Op::Closure
@@ -415,7 +419,7 @@ pub fn disassemble(p: &Program, f: &FuncProto) -> String {
                 Op::CallNative => {
                     let _ = write!(out, "  ; native {}", p.natives.get(d as usize).map(|s| s.as_str()).unwrap_or("?"));
                 }
-                Op::CallMethod => {
+                Op::CallMethod | Op::DynGet => {
                     let _ = write!(out, "  ; .{}", f.ics.get(d as usize).map(|i| i.name.as_str()).unwrap_or("?"));
                 }
                 _ => {

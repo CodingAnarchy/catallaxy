@@ -121,7 +121,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "Random.float" => |_, _| Ok(Value::from_f64((next_u64() >> 11) as f64 / (1u64 << 53) as f64)),
         "Random.shuffle" => |vm, a| {
-            let mut items = list_read(vm, a[0], |v| v.clone())?;
+            let mut items = list_read(vm, a[0])?.to_vec();
             for i in (1..items.len()).rev() {
                 let j = (next_u64() % (i as u64 + 1)) as usize;
                 items.swap(i, j);
@@ -129,7 +129,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             Ok(new_list(vm, items))
         },
         "Random.choice" => |vm, a| {
-            let items = list_read(vm, a[0], |v| v.clone())?;
+            let items = list_read(vm, a[0])?.to_vec();
             if items.is_empty() {
                 return Ok(Value::NIL);
             }
@@ -242,7 +242,7 @@ fn from_json(vm: &mut Vm, j: &serde_json::Value) -> RtResult<Value> {
             new_list(vm, out)
         }
         J::Object(map) => {
-            let d = vm.m.alloc_dict(DictTable::with_capacity(map.len()));
+            let d = vm.m.alloc_dict(DictTable::record(map.len()));
             for (k, x) in map {
                 let kv = new_str(vm, k);
                 let xv = from_json(vm, x)?;
@@ -278,7 +278,7 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<serde_json::Value> {
             let items: Vec<Value> = if kind_of(v) == ObjKind::Tuple {
                 unsafe { as_tuple(v) }.elems().to_vec()
             } else {
-                list_read(vm, v, |x| x.clone())?
+                list_read(vm, v)?.to_vec()
             };
             let mut out = Vec::with_capacity(items.len());
             for x in items {
@@ -320,19 +320,5 @@ fn dyn_member(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     if kind_of(recv) == ObjKind::Dict {
         return Ok(slow::dict_get(vm, recv, name)?.unwrap_or(Value::NIL));
     }
-    let n = s(name)?;
-    let sym = intern(n);
-    let cls = class_of(recv);
-    if cls.kind == ObjKind::Instance {
-        if let Some(i) = cls.field_index(sym) {
-            return Ok(unsafe { as_instance(recv) }.get(i));
-        }
-    }
-    if let Some(fid) = cls.lookup(sym) {
-        return vm.call_func(fid, &[recv]);
-    }
-    if recv.is_nil() {
-        return panic(format!("NoMethodError: undefined method `{n}` for nil (a Dyn value was nil)"));
-    }
-    panic(format!("NoMethodError: undefined method `{n}` for {}", cls.name))
+    slow::dyn_member(vm, recv, s(name)?)
 }

@@ -978,13 +978,13 @@ impl Vm {
                     let i = r!(c_of(w));
                     let h = unsafe { &*l.as_ptr() };
                     if h.is_local_or_frozen(tid) && i.is_small_int() {
-                        let items = unsafe { as_list(l).items() };
+                        let list = unsafe { as_list(l) };
                         let mut idx = i.as_small_int();
                         if idx < 0 {
-                            idx += items.len() as i64;
+                            idx += list.len() as i64;
                         }
-                        if idx >= 0 && (idx as usize) < items.len() {
-                            set!(a, items[idx as usize]);
+                        if let Some(v) = (idx >= 0).then(|| list.get_local(idx as usize)).flatten() {
+                            set!(a, v);
                             continue;
                         }
                     }
@@ -1001,10 +1001,10 @@ impl Vm {
                     let l = r!(b_of(w));
                     let h = unsafe { &*l.as_ptr() };
                     let n = if h.is_local_or_frozen(tid) {
-                        unsafe { as_list(l).items() }.len()
+                        unsafe { as_list(l) }.len()
                     } else {
                         save!();
-                        tri!(ownership::with_read(&self.m, l, || unsafe { as_list(l).items() }.len()))
+                        tri!(ownership::read_list(&self.m, l)).len()
                     };
                     set!(a, Value::small_int(n as i64));
                 }
@@ -1012,6 +1012,29 @@ impl Vm {
                     let (l, v) = (r!(a), r!(b_of(w)));
                     save!();
                     tri!(slow::list_push(self, l, v));
+                }
+                Op::DynGet => {
+                    let d = data!() as usize;
+                    let recv = r!(b_of(w));
+                    let ic = &fr.func.ics[d];
+                    if recv.is_ptr() {
+                        let h = unsafe { &*recv.as_ptr() };
+                        if h.is_local_or_frozen(tid) && unsafe { heap_class(h).kind } == ObjKind::Dict {
+                            let t = unsafe { as_dict(recv).table() };
+                            if let Some(shape) = t.shape() {
+                                let c = ic.cache.load(Ordering::Relaxed);
+                                if (c >> 32) as u32 == shape.id.wrapping_add(1) {
+                                    if let Some(v) = t.slot_value(c as u32 as usize) {
+                                        set!(a, v);
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    save!();
+                    let v = tri!(slow::dyn_get(self, recv, ic));
+                    set!(a, v);
                 }
                 Op::Index => {
                     let (x, i) = (r!(b_of(w)), r!(c_of(w)));

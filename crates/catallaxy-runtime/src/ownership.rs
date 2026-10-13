@@ -97,7 +97,7 @@ pub fn for_each_child(v: Value, mut f: impl FnMut(Value)) {
                 }
             }
             ObjKind::List => {
-                for &x in as_list(v).items().iter() {
+                for x in as_list(v).to_vec() {
                     f(x)
                 }
             }
@@ -224,6 +224,22 @@ pub fn lock_obj<'a>(m: &Mutator, h: &'a Header) -> catallaxy_gc::ObjLockGuard<'a
         catallaxy_gc::leave_native(&m.rec);
     }
     catallaxy_gc::ObjLockGuard::adopt(h)
+}
+
+/// Checks that the current thread may read the list `v`. List reads never lock (see
+/// [`ListObj`]), so this is the only synchronization a list read needs.
+#[inline]
+pub fn read_list<'a>(m: &Mutator, v: Value) -> RtResult<&'a ListObj> {
+    let h = unsafe { &*v.as_ptr() };
+    check_read(m, h)?;
+    Ok(unsafe { as_list(v) })
+}
+
+/// Runs `f` on a list with write access: directly when owned, under the lock when shared.
+/// For shared lists, values stored must first go through [`publish_into_shared`].
+#[inline]
+pub fn write_list<R>(m: &Mutator, v: Value, f: impl FnOnce(&ListObj, Access) -> R) -> RtResult<R> {
+    with_write(m, v, |access| f(unsafe { as_list(v) }, access))
 }
 
 /// Runs `f` on a container's contents with the right synchronization for a read.

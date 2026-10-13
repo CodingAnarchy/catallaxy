@@ -159,7 +159,7 @@ impl Mutator {
     pub fn alloc_list(&mut self, items: Vec<Value>) -> Value {
         crate::note_external(items.capacity() * 8);
         let h = self.alloc_raw(std::mem::size_of::<ListObj>(), BUILTINS.list);
-        unsafe { std::ptr::write((*(h as *mut ListObj)).vec.get(), items) };
+        unsafe { ListObj::init(h as *mut ListObj, items) };
         Value::from_ptr(h)
     }
 

@@ -1,0 +1,31 @@
+# JSON objects are Dyn records with hidden classes; they must behave exactly like dicts.
+text = "[{\"id\": 1, \"name\": \"a\"}, {\"id\": 2, \"name\": \"b\"}, {\"name\": \"c\", \"id\": 3}, {\"id\": 4}]"
+rows = Json.parse(text).unwrap()
+items = rows as? List[Dyn]
+total = 0
+for r in items ?? [] {
+  # One member-access site sees three shapes: {id, name}, {name, id} and {id}.
+  total = total + ((r.id as? Int) ?? 0)
+  puts(r.name ?? "none")
+}
+puts(total)
+
+rec = Json.parse("{\"x\": 1, \"y\": 2}").unwrap()
+d = rec as? Dict[String, Dyn]
+if let m = d {
+  m["z"] = 3                  # adds a key: shape transition
+  puts(m.keys())
+  m.delete("x")               # deletion leaves shape mode
+  puts(m.keys())
+  m["x"] = 10
+  puts(Json.stringify(m))
+  puts(m.length)
+}
+puts(rec.z)
+
+wide = Json.parse("{" + (0...40).to_list().map { |i| "\"k#{i}\": #{i}" }.join(", ") + "}").unwrap()
+puts(wide.k39)                # past the shape key limit: an ordinary table
+puts(wide["k0"])
+
+same = Json.parse("{\"id\": 9, \"name\": \"z\"}").unwrap()
+puts(same == Json.parse("{\"name\": \"z\", \"id\": 9}").unwrap())

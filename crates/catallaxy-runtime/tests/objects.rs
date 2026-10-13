@@ -78,7 +78,7 @@ fn containers_survive_collection() {
     let hl = h.m.root(list);
     for i in 0..n(500) {
         let s = h.m.alloc_str(&format!("item-{i}"));
-        unsafe { as_list(list).items_mut().push(s) };
+        unsafe { as_list(list).push(s, Access::Local) };
         // Garbage.
         let _ = h.m.alloc_str("garbage that should be reclaimed");
         let _ = h.m.alloc_tuple(&[Value::small_int(i as i64)]);
@@ -86,7 +86,7 @@ fn containers_survive_collection() {
     h.gc();
     h.gc();
     let list = h.m.get(hl);
-    let items = unsafe { as_list(list).items() }.clone();
+    let items = unsafe { as_list(list) }.to_vec();
     assert_eq!(items.len(), n(500));
     for (i, v) in items.iter().enumerate() {
         assert_eq!(str_of(*v), Some(format!("item-{i}").as_str()));
@@ -152,7 +152,7 @@ fn ownership_states() {
     h.m.root(shared);
     ownership::share_deep(h.m, shared, false).unwrap();
     assert_eq!(ownership::check_write(h.m, hdr(shared)).unwrap(), Access::Shared);
-    ownership::with_write(h.m, shared, |_| unsafe { as_list(shared).items_mut() }.push(Value::NIL)).unwrap();
+    ownership::write_list(h.m, shared, |l, access| unsafe { l.push(Value::NIL, access) }).unwrap();
 
     // Transfer to another (fake) owner: now foreign to us.
     let mine = h.m.alloc_list(Vec::new());
@@ -180,7 +180,7 @@ fn shared_list_is_safe_under_concurrent_pushes() {
                 let mut w = Host::new();
                 let l = Value(addr);
                 for i in 0..per {
-                    ownership::with_write(w.m, l, |_| unsafe { as_list(l).items_mut() }.push(Value::small_int(i as i64)))
+                    ownership::write_list(w.m, l, |l, access| unsafe { l.push(Value::small_int(i as i64), access) })
                         .unwrap();
                     if i % 50 == 0 {
                         catallaxy_gc::safepoint(&w.m.rec);
@@ -197,8 +197,86 @@ fn shared_list_is_safe_under_concurrent_pushes() {
             t.join().unwrap();
         }
     });
-    let len = ownership::with_read(h.m, list, || unsafe { as_list(list).items() }.len()).unwrap();
+    let len = ownership::read_list(h.m, list).unwrap().len();
     assert_eq!(len, 3 * per);
+    h.finish();
+}
+
+#[test]
+fn shared_list_reads_do_not_lock_and_stay_safe() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let items: Vec<Value> = (0..8).map(|i| h.m.alloc_str(&format!("s{i}"))).collect();
+    let list = h.m.alloc_list(items);
+    h.m.root(list);
+    ownership::share_deep(h.m, list, false).unwrap();
+    let addr = list.0;
+    // A reader finishes while another thread holds the list's lock.
+    {
+        let _g = ownership::lock_obj(h.m, unsafe { &*list.as_ptr() });
+        let reader = std::thread::spawn(move || {
+            let w = Host::new();
+            let n = ownership::read_list(w.m, Value(addr)).unwrap().to_vec().len();
+            w.finish();
+            n
+        });
+        assert_eq!(catallaxy_gc::blocking(&h.m.rec, || reader.join().unwrap()), 8);
+    }
+    let rounds = n(200);
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let readers: Vec<_> = (0..2)
+        .map(|_| {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                let w = Host::new();
+                let l = Value(addr);
+                let mut seen = 0usize;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let list = ownership::read_list(w.m, l).unwrap();
+                    for i in 0..list.len() + 2 {
+                        if let Some(v) = list.get(i) {
+                            assert!(v.is_nil() || str_of(v).is_some_and(|s| s.starts_with('s')));
+                            seen += 1;
+                        }
+                    }
+                    catallaxy_gc::safepoint(&w.m.rec);
+                }
+                assert!(seen > 0);
+                w.finish();
+            })
+        })
+        .collect();
+    for r in 0..rounds {
+        let s = h.m.alloc_str(&format!("s{r}"));
+        ownership::publish_into_shared(h.m, s).unwrap();
+        ownership::write_list(h.m, list, |l, access| unsafe {
+            for _ in 0..(r % 7) {
+                l.push(s, access);
+            }
+            if r % 3 == 0 {
+                l.pop();
+            }
+            if r % 11 == 0 {
+                let keep: Vec<Value> = l.to_vec().into_iter().take(3).collect();
+                l.replace(&keep, access);
+            }
+            if r % 13 == 0 {
+                let mut big = l.to_vec();
+                big.extend(std::iter::repeat_n(s, 40));
+                l.replace(&big, access);
+            }
+        })
+        .unwrap();
+        if r % 20 == 0 {
+            h.gc();
+        }
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    catallaxy_gc::blocking(&h.m.rec, || {
+        for t in readers {
+            t.join().unwrap();
+        }
+    });
     h.finish();
 }
 

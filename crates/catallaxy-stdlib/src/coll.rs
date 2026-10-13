@@ -26,12 +26,15 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             }
             Ok(new_list(vm, vec![a[1]; n as usize]))
         },
-        "List.length" => |vm, a| list_read(vm, a[0], |v| Value::small_int(v.len() as i64)),
+        "List.length" => |vm, a| Ok(Value::small_int(list_read(vm, a[0])?.len() as i64)),
         "List.push" => |vm, a| {
             slow::list_push(vm, a[0], a[1])?;
             Ok(Value::NIL)
         },
-        "List.pop" => |vm, a| list_write(vm, a[0], &[], |v| v.pop().unwrap_or(Value::NIL)),
+        "List.pop" => |vm, a| {
+            list_read(vm, a[0])?;
+            ownership::write_list(&vm.m, a[0], |l, _| unsafe { l.pop() }.unwrap_or(Value::NIL))
+        },
         "List.shift" => |vm, a| list_write(vm, a[0], &[], |v| if v.is_empty() { Value::NIL } else { v.remove(0) }),
         "List.unshift" => |vm, a| list_write(vm, a[0], &[a[1]], |v| {
             v.insert(0, a[1]);
@@ -85,15 +88,10 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "List.get" => |vm, a| {
             let i = int(a[1])?;
-            list_read(vm, a[0], |v| {
-                let n = v.len() as i64;
-                let idx = if i < 0 { i + n } else { i };
-                if idx < 0 || idx >= n {
-                    Value::NIL
-                } else {
-                    v[idx as usize]
-                }
-            })
+            let l = list_read(vm, a[0])?;
+            let n = l.len() as i64;
+            let idx = if i < 0 { i + n } else { i };
+            Ok(if idx < 0 { None } else { l.get(idx as usize) }.unwrap_or(Value::NIL))
         },
         "List.slice" => |vm, a| {
             let (start, len) = (int(a[1])?, int(a[2])?);
@@ -118,14 +116,19 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         }),
         "List.swap" => |vm, a| {
             let (i, j) = (int(a[1])?, int(a[2])?);
-            list_write(vm, a[0], &[], |v| {
-                let n = v.len() as i64;
+            list_read(vm, a[0])?;
+            ownership::write_list(&vm.m, a[0], |l, _| {
+                let n = l.len() as i64;
                 let fix = |x: i64| if x < 0 { x + n } else { x };
                 let (i2, j2) = (fix(i), fix(j));
                 if i2 < 0 || i2 >= n || j2 < 0 || j2 >= n {
                     return Err(Trap::Panic(format!("IndexError: swap({i}, {j}) out of range for length {n}")));
                 }
-                v.swap(i2 as usize, j2 as usize);
+                let (x, y) = (l.get_local(i2 as usize), l.get_local(j2 as usize));
+                unsafe {
+                    l.set(i2 as usize, y.unwrap_or(Value::NIL));
+                    l.set(j2 as usize, x.unwrap_or(Value::NIL));
+                }
                 Ok(Value::NIL)
             })?
         },
@@ -255,11 +258,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
     })
 }
 
-pub(crate) fn list_read<R>(vm: &Vm, l: Value, f: impl FnOnce(&Vec<Value>) -> R) -> RtResult<R> {
+/// Checks that `l` is a list this thread may read. List reads never lock.
+pub(crate) fn list_read<'a>(vm: &Vm, l: Value) -> RtResult<&'a ListObj> {
     if kind_of(l) != ObjKind::List {
         return panic("TypeError: expected List");
     }
-    ownership::with_read(&vm.m, l, || f(unsafe { as_list(l).items() }))
+    ownership::read_list(&vm.m, l)
 }
 
 /// Mutates a list; `incoming` values are published first when the list is shared.
@@ -273,15 +277,7 @@ pub(crate) fn list_write<R>(vm: &Vm, l: Value, incoming: &[Value], f: impl FnOnc
             ownership::publish_into_shared(&vm.m, x)?;
         }
     }
-    ownership::with_write(&vm.m, l, |_| {
-        let v = unsafe { as_list(l).items_mut() };
-        let cap = v.capacity();
-        let r = f(v);
-        if v.capacity() > cap {
-            catallaxy_runtime::note_external((v.capacity() - cap) * 8);
-        }
-        r
-    })
+    ownership::write_list(&vm.m, l, |list, access| unsafe { list.modify(access, f) })
 }
 
 fn dict_read<R>(vm: &Vm, d: Value, f: impl FnOnce(&DictTable) -> R) -> RtResult<R> {
