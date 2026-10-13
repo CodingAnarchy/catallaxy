@@ -163,6 +163,9 @@ pub struct SourceMap {
 
 impl SourceMap {
     pub fn add(&mut self, path: String, text: String) -> u32 {
+        // Display paths with `/` everywhere, so diagnostics and stack traces read the same on
+        // every platform (the file is opened by the caller's own path, not this one).
+        let path = if cfg!(windows) { path.replace('\\', "/") } else { path };
         self.files.push(SourceFile::new(path, text));
         self.files.len() as u32 - 1
     }
