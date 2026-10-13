@@ -38,6 +38,8 @@ pub(crate) use tr;
 struct Reactor {
     registry: Registry,
     waiters: Mutex<HashMap<usize, Vec<Wake>>>,
+    /// Sockets with a connect in flight, and whether the reactor has seen an event for them.
+    connecting: Mutex<HashMap<usize, bool>>,
     next: AtomicUsize,
 }
 
@@ -48,7 +50,12 @@ static REACTOR: LazyLock<Reactor> = LazyLock::new(|| {
         .name("catx-net".into())
         .spawn(move || reactor_main(poll))
         .expect("spawn the network reactor");
-    Reactor { registry, waiters: Mutex::new(HashMap::new()), next: AtomicUsize::new(1) }
+    Reactor {
+        registry,
+        waiters: Mutex::new(HashMap::new()),
+        connecting: Mutex::new(HashMap::new()),
+        next: AtomicUsize::new(1),
+    }
 });
 
 fn reactor_main(mut poll: Poll) {
@@ -58,6 +65,10 @@ fn reactor_main(mut poll: Poll) {
             continue;
         }
         for ev in events.iter() {
+            // Recorded before the waiters are taken: see `wait_connected`.
+            if let Some(fired) = REACTOR.connecting.lock().get_mut(&ev.token().0) {
+                *fired = true;
+            }
             let ws = REACTOR.waiters.lock().remove(&ev.token().0);
             tr!("event t{} r={} w={} closed={} waiters={}", ev.token().0, ev.is_readable(), ev.is_writable(), ev.is_read_closed(), ws.as_ref().map_or(0, |w| w.len()));
             for w in ws.into_iter().flatten() {
@@ -234,44 +245,42 @@ fn connect(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     Ok(err(vm, &last))
 }
 
-/// Waits for a non-blocking connect to finish. The waiter is in place before the socket is
-/// registered, so the first readiness event cannot be missed. A connect has finished when its
-/// socket reports readiness: `take_error` then tells failure from success. `peer_addr` filters
-/// spurious wakeups on Unix (it fails until connected); on Windows it can succeed while the
-/// connect is still in flight, which is why readiness, not `peer_addr`, decides.
+/// Waits for a non-blocking connect to finish. A connect has finished when its socket reports
+/// readiness (`take_error` then tells failure from success); `peer_addr` cannot decide, since on
+/// Windows it can succeed while the connect is still in flight. Edge-triggered readiness arrives
+/// once, so the reactor records it in `connecting` rather than leaving it to be inferred from
+/// which wakers remain: a waker armed after the only event would otherwise wait forever.
 fn wait_connected(vm: &mut Vm, stream: &mut TcpStream, token: Token, deadline: Option<Instant>) -> Result<(), String> {
-    let mut registered = false;
+    REACTOR.connecting.lock().insert(token.0, false);
+    let r = wait_connected_inner(vm, stream, token, deadline);
+    REACTOR.connecting.lock().remove(&token.0);
+    REACTOR.waiters.lock().remove(&token.0);
+    r
+}
+
+fn wait_connected_inner(
+    vm: &mut Vm,
+    stream: &mut TcpStream,
+    token: Token,
+    deadline: Option<Instant>,
+) -> Result<(), String> {
+    let fired = || REACTOR.connecting.lock().get(&token.0).copied().unwrap_or(false);
+    if let Err(e) = REACTOR.registry.register(stream, token, Interest::READABLE | Interest::WRITABLE) {
+        return Err(format!("cannot watch socket: {e}"));
+    }
     loop {
-        // Short slices: if a completion edge slips between a check and re-arming, the next
-        // slice still sees it.
-        let slice = Instant::now() + Duration::from_millis(50);
-        let until = Some(deadline.map_or(slice, |d| d.min(slice)));
-        let mut reg_err = None;
-        wait_wake(vm, until, |wake| {
+        // The waker goes in before `fired` is checked; the reactor sets `fired` before taking the
+        // wakers, so an event either shows in the check or finds the waker.
+        wait_wake(vm, deadline, |wake| {
             REACTOR.waiters.lock().entry(token.0).or_default().push(wake);
-            if !registered {
-                registered = true;
-                if let Err(e) = REACTOR.registry.register(stream, token, Interest::READABLE | Interest::WRITABLE) {
-                    reg_err = Some(e);
-                    return false;
-                }
-            }
-            true
+            !fired()
         });
-        if let Some(e) = reg_err {
-            return Err(format!("cannot watch socket: {e}"));
-        }
         match stream.take_error() {
             Ok(Some(e)) | Err(e) => return Err(e.to_string()),
             Ok(None) => {}
         }
-        let woke = REACTOR.waiters.lock().get(&token.0).is_none_or(|w| w.is_empty());
-        if woke {
-            match stream.peer_addr() {
-                Ok(_) => return Ok(()),
-                Err(e) if e.kind() == ErrorKind::NotConnected => {}
-                Err(e) => return Err(e.to_string()),
-            }
+        if fired() {
+            return Ok(());
         }
         if deadline.is_some_and(|d| Instant::now() >= d) {
             return Err("timed out".into());
