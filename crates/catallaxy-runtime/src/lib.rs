@@ -14,7 +14,9 @@ pub mod symbol;
 pub mod value;
 
 pub use class::{class_of, Class, ObjKind, BUILTINS};
-pub use mutator::{note_external, panic, Handle, HandleScope, Local, Mutator, RtResult, Trap};
+pub use mutator::{
+    check_alloc, note_external, panic, try_string, try_vec, Handle, HandleScope, Local, Mutator, RtResult, Trap,
+};
 pub use ops::Interop;
 pub use symbol::{intern, Sym};
 pub use value::Value;

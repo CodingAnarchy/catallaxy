@@ -6,25 +6,35 @@ use catallaxy_runtime::dict::DictTable;
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership::{self, Access};
-use catallaxy_runtime::{panic, ObjKind, RtResult, Trap, Value};
+use catallaxy_runtime::{panic, try_vec, ObjKind, RtResult, Trap, Value};
 use catallaxy_vm::slow;
 use catallaxy_vm::{NativeFn, Vm};
 
 use crate::*;
 
+/// The most items `List.with_capacity` reserves.
+const MAX_RESERVED: usize = 1 << 24;
+
 pub fn lookup(name: &str) -> Option<NativeFn> {
     Some(match name {
         "List.new" => |vm, _| Ok(new_list(vm, Vec::new())),
         "List.with_capacity" => |vm, a| {
-            let n = int(a[0])?.clamp(0, 1 << 24) as usize;
-            Ok(new_list(vm, Vec::with_capacity(n)))
+            let n = int(a[0])?;
+            if n < 0 {
+                return panic("ArgumentError: negative capacity");
+            }
+            // A hint: at most MAX_RESERVED items are reserved up front, so a large guess
+            // cannot claim memory the list never uses.
+            Ok(new_list(vm, try_vec((n as usize).min(MAX_RESERVED))?))
         },
         "List.filled" => |vm, a| {
             let n = int(a[0])?;
             if n < 0 {
                 return panic("ArgumentError: negative size");
             }
-            Ok(new_list(vm, vec![a[1]; n as usize]))
+            let mut items = try_vec(n as usize)?;
+            items.resize(n as usize, a[1]);
+            Ok(new_list(vm, items))
         },
         "List.length" => |vm, a| Ok(Value::small_int(list_read(vm, a[0])?.len() as i64)),
         "List.push" => |vm, a| {

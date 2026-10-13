@@ -110,6 +110,16 @@ impl RootSource for VmRoots {
     }
 }
 
+/// The panic raised when a collection finds more live data than `CATX_MAX_HEAP` allows.
+#[cold]
+fn heap_limit_error() -> Trap {
+    Trap::Panic(format!(
+        "MemoryError: {:.1} MB live after collection, over the CATX_MAX_HEAP limit of {:.1} MB",
+        catallaxy_gc::stats::live_bytes() as f64 / 1e6,
+        catallaxy_gc::limits::max_heap().unwrap_or(0) as f64 / 1e6
+    ))
+}
+
 #[inline(always)]
 fn ops_mark(t: &mut Tracer, v: Value) {
     if v.is_ptr() {
@@ -486,6 +496,16 @@ impl Vm {
                 regs = unsafe { self.stack.add(fr.base) };
             }};
         }
+        // A safepoint's slow path (the frame's pc is saved): takes part in a pending collection,
+        // then panics with a MemoryError if the heap is over `CATX_MAX_HEAP`.
+        macro_rules! poll_slow {
+            () => {{
+                catallaxy_gc::safepoint_slow(&self.m.rec);
+                if catallaxy_gc::limits::take_over_limit() {
+                    return Err(heap_limit_error());
+                }
+            }};
+        }
         // Pushes a bytecode frame for `f` whose arguments are already at absolute slot `base`.
         macro_rules! enter {
             ($f:expr, $base:expr, $ret:expr, $closure:expr, $nargs:expr) => {{
@@ -510,7 +530,7 @@ impl Vm {
                 pc = 0;
                 regs = unsafe { self.stack.add(base) };
                 if unsafe { (*poll).load(Ordering::Relaxed) } {
-                    catallaxy_gc::safepoint_slow(&self.m.rec);
+                    poll_slow!();
                 }
             }};
         }
@@ -866,7 +886,7 @@ impl Vm {
                     pc = (pc as isize + off) as usize;
                     if off < 0 && unsafe { (*poll).load(Ordering::Relaxed) } {
                         save!();
-                        catallaxy_gc::safepoint_slow(&self.m.rec);
+                        poll_slow!();
                     }
                 }
                 Op::JNLtI => {
@@ -1364,7 +1384,7 @@ impl Vm {
                 Op::Safepoint => {
                     if unsafe { (*poll).load(Ordering::Relaxed) } {
                         save!();
-                        catallaxy_gc::safepoint_slow(&self.m.rec);
+                        poll_slow!();
                     }
                 }
             }

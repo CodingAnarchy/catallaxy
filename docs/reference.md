@@ -284,6 +284,11 @@ Generics are erased: one compiled body serves every instantiation.
   and ownership violations panic. A panic unwinds only the current thread. In the main thread it prints the
   message and a stack trace to stderr and exits with status 101.
 - `Thread.join` returns `Result[T, String]`: `Err` carries the panic message.
+- Running out of memory panics with a message starting `MemoryError:` where the runtime can see it coming:
+  a single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,
+  `s * n` or `s.ljust(n)` with a huge `n`, and, when `CATX_MAX_HEAP` is set, a collection that finds more
+  live data than the limit (the next thread to reach a safepoint panics). The allocator failing anywhere
+  else still aborts the process.
 
 ## 8. Concurrency
 
