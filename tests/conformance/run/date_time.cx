@@ -1,0 +1,106 @@
+# Duration, Instant and DateTime. Everything here uses fixed instants and offsets, so the output
+# does not depend on the clock or the machine's time zone.
+
+# --- Duration
+d = Duration.from_secs(90) + Duration.from_millis(500)
+puts(d)
+puts([d.as_secs, d.as_millis, d.as_micros, d.as_nanos])
+puts(d.as_secs_f)
+puts([Duration.from_hours(1), Duration.from_mins(61), Duration.from_days(2), Duration.from_secs(59)])
+puts([Duration.from_millis(250), Duration.from_micros(1500), Duration.from_nanos(999)])
+puts([Duration.from_nanos(0), Duration.from_nanos(-1500), Duration.from_secs(-3661)])
+puts(Duration.from_secs_f(1.25))
+puts(Duration.from_secs(10) - Duration.from_secs(25))
+puts([(Duration.from_secs(-7) / 2).as_millis, Duration.from_secs(-7).as_secs, (Duration.from_millis(3) * 4).as_millis])
+puts([Duration.from_secs(-2).abs(), Duration.from_secs(2).neg(), Duration.from_secs(-2).is_negative])
+puts(Duration.from_secs(60) == Duration.from_mins(1))
+puts(Duration.from_millis(999) < Duration.from_secs(1))
+puts([Duration.from_secs(3), Duration.from_millis(10), Duration.from_mins(1)].sort())
+puts([Duration.from_secs(1), Duration.from_millis(1000)].uniq().length)
+puts(Duration.from_secs(9).clamp(Duration.from_secs(1), Duration.from_millis(1500)))
+
+# --- Instant (monotonic): only relations that always hold.
+start = Instant.now()
+later = start + Duration.from_secs(2)
+puts(later.since(start))
+puts(start.since(later))
+puts((later - Duration.from_secs(2)) == start)
+puts(start <= Instant.now())
+puts(not start.elapsed().is_negative)
+puts(Time.monotonic() >= 0.0)
+puts(Time.millis() > 1_700_000_000_000)
+
+# --- DateTime fields
+t = DateTime.of(2024, 2, 29, 13, 5, 7, nanosecond: 250_000_000, offset: 3600)
+puts(t)
+puts([t.year, t.month, t.day, t.hour, t.minute, t.second, t.nanosecond, t.offset])
+puts([t.weekday, t.yday, t.unix, t.unix_millis])
+puts(t.to_utc())
+puts(t.with_offset(-5 * 3600 - 1800))
+puts(t.to_utc() == t)
+epoch = DateTime.from_unix(0)
+puts([epoch, epoch.weekday, epoch.yday])
+puts(DateTime.from_unix(-1))
+puts(DateTime.from_unix(951782400, offset: 19800))
+puts(DateTime.from_unix_millis(-1))
+puts(DateTime.of(1900, 3, 1).weekday)
+puts(DateTime.of(2000, 12, 31).yday)
+puts(DateTime.of(2023, 12, 31).yday)
+puts(DateTime.of(1, 1, 1))
+puts(DateTime.of(2024, 1, 1, offset: 5 * 3600 + 45 * 60 + 30))
+
+# --- arithmetic and comparison
+puts(t + Duration.from_days(1))
+puts(t + Duration.from_millis(750))
+puts(t - Duration.from_hours(14))
+puts(DateTime.of(2025, 1, 1).since(DateTime.of(2024, 1, 1)))
+puts(DateTime.of(2024, 1, 1).since(DateTime.of(2024, 1, 1, 0, 0, 1)))
+a = DateTime.of(2024, 6, 1, 12, offset: 7200)
+b = DateTime.of(2024, 6, 1, 11, offset: 3600)
+puts([a == b, a < b, a <=> b, a.since(b)])
+puts([DateTime.of(2030, 1, 1), DateTime.of(1999, 1, 1), DateTime.of(2010, 1, 1)].sort())
+
+# Every day from 1896 to 2104 round-trips through its calendar fields, one day apart.
+day = DateTime.of(1896, 1, 1)
+prev = day
+bad = 0
+i = 0
+while i < 76000 {
+  day = day + Duration.from_days(1)
+  if DateTime.of(day.year, day.month, day.day) != day { bad += 1 }
+  if day.weekday != (prev.weekday + 1) % 7 { bad += 1 }
+  prev = day
+  i += 1
+}
+puts("#{day.format("%F")} #{bad}")
+
+# --- format
+puts(t.format("%Y-%m-%d %H:%M:%S.%L %z %:z %Z"))
+puts(t.format("%a %A %b %B %h %e %j %I:%M %p %P %l"))
+puts(t.format("%y %C %w %u %s %f %N %F %T %D %R"))
+puts(t.format("%c|%%|%n|%t|%Q|100%"))
+puts(t.to_utc().format("%Z %z"))
+puts(DateTime.of(2024, 3, 3, 0, 30).format("%I %l %p"))
+
+# --- parse
+good = ["2024-02-29T12:05:07.25Z", "2024-02-29 13:05:07.250+01:00", "2024-02-29T07:35:07,25-0430",
+  "2024-02-29t12:05:07.25z", "2024-02-29T08:05:07.250000000-04", "2024-02-29", "2024-02-29T12:05",
+  "1969-12-31T23:59:59.999999999999Z"]
+for s in good { puts(DateTime.parse(s).map { |x| "#{x} #{x == t}" }) }
+bad_inputs = ["", "2024-2-29", "2023-02-29", "2024-13-01", "2024-02-29T24:00", "2024-02-29T12:60",
+  "2024-02-29T12:05:07.", "2024-02-29T12:05Zjunk", "2024-02-29T12:05+25:00", " 2024-02-29"]
+for s in bad_inputs { puts(DateTime.parse(s)) }
+puts(DateTime.parse(t.to_s).unwrap() == t)
+puts(DateTime.parse(t.to_s).unwrap().offset)
+
+# --- frozen: DateTime and Duration cross threads.
+th = spawn { (t + d).to_s }
+puts(th.join().unwrap())
+dates = [DateTime.of(2024, 1, 1), DateTime.of(2024, 7, 4)]
+puts(dates.par_map { |x| x.format("%a") })
+
+# --- local time: the offset depends on the machine, so only check it is sane.
+now = DateTime.now()
+puts(now.offset.abs < 86400 and now == now.to_utc() and now.to_local().offset == now.offset)
+puts(DateTime.now_utc().offset)
+puts(DateTime.of(2024, 7, 1).to_local() == DateTime.of(2024, 7, 1))

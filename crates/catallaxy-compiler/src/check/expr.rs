@@ -45,7 +45,7 @@ impl Checker {
         let tr = self.types.shallow_resolve(t);
         if let Some(inner) = self.types.strip_nil(tr) {
             if self.trial(|c| c.assignable(inner, ty)) {
-                d = d.note("the value may be nil").fix("assert it is not nil", e.span.after(), "!").fix(
+                d = d.note("the value may be nil").fix("assert it is not nil", e.span.after(), "!").suggest(
                     "provide a default",
                     e.span.after(),
                     " ?? <default>",
@@ -105,10 +105,12 @@ impl Checker {
             }
             ExprKind::Str(parts) => {
                 for p in parts {
-                    if let StrPart::Expr(x) = p {
+                    if let StrPart::Expr(x) | StrPart::Fmt(x, ..) = p {
                         let t = self.check_expr(x, None);
                         if self.is_never(t) {
                             self.err("E0304", "this interpolation never produces a value", x.span);
+                        } else if let StrPart::Fmt(_, spec, span) = p {
+                            self.check_format_spec(t, spec, *span);
                         }
                     }
                 }
@@ -277,6 +279,28 @@ impl Checker {
         }
     }
 
+    /// Checks a `#{x:spec}` spec against `x`'s static type. `Dyn`, generic, union and not yet
+    /// inferred types are checked at run time instead.
+    fn check_format_spec(&mut self, t: TyId, spec: &crate::ast::FormatSpec, span: Span) {
+        use catallaxy_vm::fmtspec::ValueKind;
+        let mut r = self.types.shallow_resolve(t);
+        while let Ty::Frozen(inner) = self.types.get(r) {
+            r = self.types.shallow_resolve(*inner);
+        }
+        let kind = if r == self.types.int {
+            ValueKind::Int
+        } else if r == self.types.float {
+            ValueKind::Float
+        } else if matches!(self.types.get(r), Ty::Class(..) | Ty::Enum(..) | Ty::Tuple(_) | Ty::Fn(..)) {
+            ValueKind::Text
+        } else {
+            return;
+        };
+        if let Err(msg) = spec.check(kind, &self.show(t)) {
+            self.err("E0380", format!("format spec does not apply: {msg}"), span);
+        }
+    }
+
     pub fn type_scope(&self) -> TypeScope {
         let mut sc = TypeScope::default();
         // Type parameters of the enclosing function and its owner.
@@ -372,7 +396,7 @@ impl Checker {
                 }
                 let mut d = Diag::error("E0303", format!("cannot find `{name}` in this scope"), e.span);
                 if let Some(s) = crate::util::suggest(name, cands.iter().map(|s| s.as_str())) {
-                    d = d.fix(format!("did you mean `{s}`?"), e.span, s);
+                    d = d.suggest(format!("did you mean `{s}`?"), e.span, s);
                 }
                 self.emit(d);
                 self.types.error
@@ -1879,7 +1903,7 @@ impl Checker {
                         let mut d =
                             Diag::error("E0336", format!("`{fname}` has no parameter named `{}`", n.name), n.span);
                         if let Some(s) = crate::util::suggest(&n.name, params.iter().map(|p| p.name.as_str())) {
-                            d = d.fix(format!("did you mean `{s}`?"), n.span, s);
+                            d = d.suggest(format!("did you mean `{s}`?"), n.span, s);
                         }
                         self.emit(d);
                         ok = false;
@@ -1906,7 +1930,7 @@ impl Checker {
                     slots[j] = Some(ArgSlot::Missing);
                 } else {
                     let msg = format!("missing argument `{}` for `{fname}`", p.name);
-                    self.emit(Diag::error("E0338", msg, call.span).fix(
+                    self.emit(Diag::error("E0338", msg, call.span).suggest(
                         format!("add `{}`", p.name),
                         call.span.after(),
                         String::new(),
@@ -2760,7 +2784,7 @@ impl Checker {
                     let mut d = Diag::error("E0343", msg, name.span);
                     let names: Vec<String> = self.enums[en as usize].variants.iter().map(|v| v.name.clone()).collect();
                     if let Some(s) = crate::util::suggest(&name.name, names.iter().map(|s| s.as_str())) {
-                        d = d.fix(format!("did you mean `{s}`?"), name.span, s);
+                        d = d.suggest(format!("did you mean `{s}`?"), name.span, s);
                     }
                     self.emit(d);
                     return self.types.error;
@@ -3064,7 +3088,7 @@ impl Checker {
         let msg = format!("no method or field `{}` on `{}`", name.name, self.show(rt));
         let mut d = Diag::error("E0311", msg, name.span);
         if let Some(s) = crate::util::suggest(&name.name, names.iter().map(|s| s.as_str())) {
-            d = d.fix(format!("did you mean `{s}`?"), name.span, s);
+            d = d.suggest(format!("did you mean `{s}`?"), name.span, s);
         }
         self.emit(d);
     }
@@ -3145,7 +3169,7 @@ impl Checker {
         let mut d = Diag::error("E0348", msg, name.span);
         let names: Vec<String> = ci.methods.keys().cloned().chain(std::iter::once("new".to_string())).collect();
         if let Some(s) = crate::util::suggest(&name.name, names.iter().map(|s| s.as_str())) {
-            d = d.fix(format!("did you mean `{s}`?"), name.span, s);
+            d = d.suggest(format!("did you mean `{s}`?"), name.span, s);
         }
         self.emit(d);
         self.check_args_loose(args, block);
@@ -3410,7 +3434,7 @@ impl Checker {
                 for p in params {
                     if p.ty.is_none() {
                         let msg = format!("cannot infer the type of block parameter `{}`", p.name.name);
-                        self.emit(Diag::error("E0356", msg, p.name.span).fix(
+                        self.emit(Diag::error("E0356", msg, p.name.span).suggest(
                             "annotate it",
                             p.name.span.after(),
                             ": Int",

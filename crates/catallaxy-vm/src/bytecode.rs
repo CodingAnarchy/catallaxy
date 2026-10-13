@@ -214,12 +214,14 @@ pub enum Op {
     JEqIK,
     /// R[A] = R[B].field[d & 0xffff]; R[A+1] = R[C].field[d >> 16] (two `GetField`s, fused)
     GetField2,
+    /// R[A] = R[B] formatted per the spec packed in two data words (`fmtspec::FormatSpec::encode`)
+    Format,
 }
 
 /// `IsKind` operand for tuples (`catallaxy_runtime::ObjKind::Tuple as u8`, checked at load).
 pub const KIND_TUPLE: u8 = 7;
 
-pub const NUM_OPS: usize = Op::GetField2 as usize + 1;
+pub const NUM_OPS: usize = Op::Format as usize + 1;
 
 impl Op {
     pub fn from_u8(b: u8) -> Op {
@@ -228,7 +230,16 @@ impl Op {
         unsafe { std::mem::transmute::<u8, Op>(b) }
     }
 
-    /// Whether the instruction is followed by a data word.
+    /// How many data words follow the instruction.
+    pub fn data_len(self) -> usize {
+        if self == Op::Format {
+            2
+        } else {
+            self.has_data() as usize
+        }
+    }
+
+    /// Whether the instruction is followed by one data word.
     pub fn has_data(self) -> bool {
         matches!(
             self,
@@ -453,7 +464,11 @@ pub fn disassemble(p: &Program, f: &FuncProto) -> String {
                 let _ = write!(out, " {} {} {}", a_of(w), b_of(w), c_of(w));
             }
         }
-        if op.has_data() {
+        if op == Op::Format {
+            let spec = catallaxy_runtime::fmtspec::FormatSpec::decode([f.code[pc + 1], f.code[pc + 2]]);
+            let _ = write!(out, "  ; {spec:?}");
+            pc += 2;
+        } else if op.has_data() {
             pc += 1;
             let d = f.code[pc];
             match op {

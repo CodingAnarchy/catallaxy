@@ -1,0 +1,4 @@
+# expect: E0614
+d: Deque[Int] = Deque.new()
+f = freeze(d)
+f.push(1)

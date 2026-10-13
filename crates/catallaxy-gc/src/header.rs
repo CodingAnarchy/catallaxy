@@ -209,6 +209,12 @@ impl Header {
         self.meta.fetch_or(MINOR_MARK_BIT, Ordering::AcqRel) & MINOR_MARK_BIT == 0
     }
 
+    /// Clears the minor mark of a survivor that stays young.
+    #[inline]
+    pub(crate) fn clear_minor_mark(&self) {
+        self.meta.fetch_and(!MINOR_MARK_BIT, Ordering::AcqRel);
+    }
+
     pub fn set_owner(&self, tid: u16) {
         self.update(|m| (m & !OWNER_MASK) | ((tid as u64) << OWNER_SHIFT));
     }

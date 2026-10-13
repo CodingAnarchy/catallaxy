@@ -1,0 +1,7 @@
+# exit: 101
+# A Dyn value is checked against its spec when formatted.
+d: Dyn = 2.5
+puts("#{d:.1f}")
+d = "text"
+puts("#{d:.1f}")
+puts("never")

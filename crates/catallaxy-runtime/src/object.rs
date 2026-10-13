@@ -7,7 +7,7 @@
 //! never mutated while another thread reads them.
 
 use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use catallaxy_gc::{GcVTable, Header, Tracer, HEADER_SIZE};
 use num_bigint::BigInt;
@@ -61,36 +61,174 @@ impl InstanceObj {
     }
 }
 
+/// A string: immutable UTF-8 bytes with a cached hash and character count.
+///
+/// Strings of at least [`StrObj::INDEX_MIN`] bytes get their character count when they are
+/// allocated. When such a string is not ASCII, its allocation also reserves a sparse index after
+/// the bytes: one `u32` byte offset for every [`StrObj::STRIDE`]th character, filled in the first
+/// time a character position is looked up. That makes `s[i]` and slicing O(1) for ASCII strings
+/// (character count equals byte length) and O(`STRIDE`) for the rest.
 #[repr(C)]
 pub struct StrObj {
     pub header: Header,
     pub len: usize,
     /// Cached hash; 0 means not yet computed.
     pub hash: AtomicU64,
-    /// Cached char count plus one; 0 means not yet computed.
+    /// Cached char count plus one (0 means not yet computed), and [`StrObj::INDEX_READY`] once
+    /// the char index has been filled in.
     pub chars: AtomicU64,
     data: [u8; 0],
 }
 
 impl StrObj {
     pub const BASE: usize = std::mem::size_of::<StrObj>();
+    /// Strings at least this long have an eagerly computed char count, and an index if not ASCII.
+    pub const INDEX_MIN: usize = 256;
+    /// Characters per index entry.
+    pub const STRIDE: usize = 64;
+    const INDEX_READY: u64 = 1 << 63;
+
+    /// The allocation size of a string of `len` bytes and `chars` characters, and the initial
+    /// value of its `chars` word. `chars` must be known (`Some`) when `len >= INDEX_MIN`.
+    pub(crate) fn layout(len: usize, chars: Option<usize>) -> (usize, u64) {
+        let word = chars.map_or(0, |c| c as u64 + 1);
+        (Self::size_with(len, word), word)
+    }
+
+    /// Number of index entries for a string of `len` bytes whose `chars` word is `word`.
+    fn index_entries(len: usize, word: u64) -> usize {
+        let word = word & !Self::INDEX_READY;
+        if len < Self::INDEX_MIN || len > u32::MAX as usize || word == 0 || (word - 1) as usize == len {
+            return 0;
+        }
+        ((word - 1) as usize).div_ceil(Self::STRIDE)
+    }
+
+    fn size_with(len: usize, word: u64) -> usize {
+        match Self::index_entries(len, word) {
+            0 => Self::BASE + len,
+            n => Self::index_offset(len) + 4 * n,
+        }
+    }
+
+    /// Total bytes the object occupies (header, bytes and index padding included).
+    pub fn alloc_size(&self) -> usize {
+        Self::size_with(self.len, self.chars.load(Ordering::Relaxed))
+    }
+
     pub fn as_str(&self) -> &str {
         // SAFETY: strings are created from valid UTF-8 and never mutated.
         unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.data.as_ptr(), self.len)) }
     }
-    pub(crate) fn data_ptr(&mut self) -> *mut u8 {
-        self.data.as_mut_ptr()
-    }
     pub fn char_count(&self) -> usize {
-        let c = self.chars.load(Ordering::Relaxed);
+        let c = self.chars.load(Ordering::Relaxed) & !Self::INDEX_READY;
         if c != 0 {
             return (c - 1) as usize;
         }
         let s = self.as_str();
         let n = if s.is_ascii() { s.len() } else { s.chars().count() };
+        // Only strings shorter than INDEX_MIN get here, and they have no index bit to lose.
         self.chars.store(n as u64 + 1, Ordering::Relaxed);
         n
     }
+    /// Whether every character is a single byte. O(1) once the char count is known.
+    #[inline]
+    pub fn is_ascii(&self) -> bool {
+        self.char_count() == self.len
+    }
+
+    /// The index slots, if this string has an index.
+    fn index(&self) -> Option<&[AtomicU32]> {
+        let n = Self::index_entries(self.len, self.chars.load(Ordering::Relaxed));
+        if n == 0 {
+            return None;
+        }
+        // SAFETY: the allocation reserved `n` slots right after the (4-aligned) bytes; they
+        // start zeroed and are only ever accessed atomically.
+        unsafe {
+            let base = (self as *const StrObj as *const u8).add(Self::index_offset(self.len));
+            Some(std::slice::from_raw_parts(base as *const AtomicU32, n))
+        }
+    }
+
+    fn index_offset(len: usize) -> usize {
+        (Self::BASE + len).next_multiple_of(4)
+    }
+
+    /// The filled-in index. Racing builders store identical values.
+    fn ready_index(&self) -> Option<&[AtomicU32]> {
+        let ix = self.index()?;
+        if self.chars.load(Ordering::Acquire) & Self::INDEX_READY == 0 {
+            for (slot, (b, _)) in ix.iter().zip(self.as_str().char_indices().step_by(Self::STRIDE)) {
+                slot.store(b as u32, Ordering::Relaxed);
+            }
+            self.chars.fetch_or(Self::INDEX_READY, Ordering::Release);
+        }
+        Some(ix)
+    }
+
+    /// The byte offset of character `i` (`i` may equal the char count, giving the length).
+    ///
+    /// O(1) for ASCII strings, O([`StrObj::STRIDE`]) for indexed ones, O(n) for short ones.
+    pub fn byte_offset(&self, i: usize) -> usize {
+        let n = self.char_count();
+        if n == self.len || i == 0 {
+            return i.min(self.len);
+        }
+        if i >= n {
+            return self.len;
+        }
+        let bytes = self.as_str().as_bytes();
+        let (mut b, mut skip) = match self.ready_index() {
+            Some(ix) => (ix[i / Self::STRIDE].load(Ordering::Relaxed) as usize, i % Self::STRIDE),
+            None => (0, i),
+        };
+        while skip > 0 {
+            b += 1;
+            while bytes[b] & 0xC0 == 0x80 {
+                b += 1;
+            }
+            skip -= 1;
+        }
+        b
+    }
+
+    /// The character position of byte offset `b`, which must be a char boundary.
+    pub fn char_offset(&self, b: usize) -> usize {
+        if self.is_ascii() {
+            return b;
+        }
+        let s = self.as_str();
+        let (c0, b0) = match self.ready_index() {
+            Some(ix) => {
+                // The last entry at or before `b`.
+                let k = ix.partition_point(|x| x.load(Ordering::Relaxed) as usize <= b).max(1) - 1;
+                (k * Self::STRIDE, ix[k].load(Ordering::Relaxed) as usize)
+            }
+            None => (0, 0),
+        };
+        c0 + s[b0..b].chars().count()
+    }
+
+    /// The `i`th character (`i < char_count()`).
+    pub fn char_at(&self, i: usize) -> &str {
+        let b = self.byte_offset(i);
+        let s = self.as_str();
+        let w = if self.is_ascii() { 1 } else { s[b..].chars().next().map_or(0, char::len_utf8) };
+        &s[b..b + w]
+    }
+
+    /// The characters `[start, end)` (clamped to the string).
+    pub fn char_slice(&self, start: usize, end: usize) -> &str {
+        let n = self.char_count();
+        let (start, end) = (start.min(n), end.min(n));
+        if end <= start {
+            return "";
+        }
+        let a = self.byte_offset(start);
+        &self.as_str()[a..self.byte_offset(end)]
+    }
+
     pub fn hash_code(&self) -> u64 {
         let h = self.hash.load(Ordering::Relaxed);
         if h != 0 {
@@ -447,7 +585,7 @@ unsafe fn size_instance(h: *const Header) -> usize {
 }
 
 unsafe fn size_str(h: *const Header) -> usize {
-    StrObj::BASE + (*(h as *const StrObj)).len
+    (*(h as *const StrObj)).alloc_size()
 }
 
 unsafe fn fin_bigint(h: *mut Header) {

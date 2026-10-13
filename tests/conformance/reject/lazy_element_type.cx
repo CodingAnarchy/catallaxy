@@ -1,0 +1,4 @@
+# expect: E0315
+# Lazy adaptors carry the element type through the pipeline.
+nat = Lazy.iterate(0) { |n| n + 1 }
+xs = nat.map { |n| n.to_s }.select { |s| s > 3 }
