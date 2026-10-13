@@ -30,11 +30,18 @@ program's main body; top-level statements in an imported module run once, when i
 ```
 import geometry                 # binds module `geometry`; use geometry.area(...)
 import geometry.{Point, area}   # binds selected public items directly
-import std.json                 # standard library modules live under `std`
+import lib.shapes               # lib/shapes.cx, bound as `shapes`
 ```
 
 Module paths are resolved relative to the importing file's directory (`a.b` → `a/b.cx`), then the
-standard library. Only `pub` items are visible to importers. Cyclic imports are an error.
+entry file's directory. A module that cannot be found is error E0204. Only `pub` items are visible to
+importers. Cyclic imports are an error.
+
+The standard library (`docs/stdlib.md`) needs no import: `Json`, `File`, `Regex`, `Time` and the rest
+are in scope in every module, and there are no `std.*` modules to import. `Time.now()` (seconds,
+`Float`) and `Time.millis()` (milliseconds, `Int`) are wall-clock time since the Unix epoch.
+`Time.monotonic()` (seconds, `Float`) and `Instant` count from the start of the program and never go
+backwards: use them to measure durations, not to tell the date (§3.3).
 
 Locals assigned in a top-level statement are locals of the main body: functions cannot see them.
 Module-wide state uses:
@@ -111,8 +118,6 @@ The prelude's time types are frozen classes, so they cross threads freely:
   `+`/`-` a `Duration`, `b.since(a)`; `==` and `<=>` compare instants, whatever the offsets;
   `to_utc`, `to_local`, `with_offset`; `format("%Y-%m-%d %H:%M")` (`strftime` directives);
   `to_s` is RFC 3339.
-- `Time.now()` is wall-clock seconds since the Unix epoch (a `Float`), `Time.millis()` the same
-  in milliseconds (an `Int`), and `Time.monotonic()` monotonic seconds since the program started.
 
 ## 4. Expressions and statements
 
@@ -150,6 +155,8 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
 | 14 | postfix: call `()`, index `[]`, `.field`, `?.field`, `!` (force unwrap), `?` (try), `as?` | left |
 
 - Integer `/` and `%` floor (like Ruby): `-7 / 2 == -4`, `-7 % 2 == 1`. Division by zero panics.
+- Unary minus binds looser than postfix operators, including method calls: `-5.abs + 1` is
+  `-(5.abs) + 1`, which is `-4`. Write `(-5).abs + 1` for `6`.
 - `==` is structural for `Int Float Bool Nil String`, tuples, lists, dicts, sets and enums; identity for
   class instances unless the class defines `==`.
 - `<=>` returns `-1`, `0` or `1`.
@@ -172,7 +179,7 @@ if let Ok(v) = res { ... }                 # pattern form
 while c { ... }
 loop { ... break }                         # `break value` makes `loop` an expression
 for x in xs { ... }                        # any Enumerable, Range, Dict ((k, v) tuples), String (chars)
-for (i, x) in xs.each_with_index() { ... }
+for (x, i) in xs.with_index() { ... }      # element and its position
 break; continue; return expr
 match v { pattern => expr, ... }           # exhaustive
 with lock(shared_obj) { ... }              # lock one shared object for the block
@@ -213,8 +220,20 @@ xs.each { puts(it) }                          # `it` is the sole parameter of a 
 ```
 
 Calls always use parentheses, except that a zero-argument method may be called as `obj.name`
-(`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. `return` inside a
-block or anonymous function returns from that block. Closures capture variables by reference.
+(`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. Closures capture
+variables by reference.
+
+`return` inside a closure block (`{ |x| ... }`, `{ ... }` passed to a call) or an anonymous function
+returns from that block only, like `next` in Ruby, not from the enclosing function. Bodies of `if`,
+`while`, `for`, `loop` and `match` are not closures, so `return` there leaves the function:
+
+```
+fn first_big(xs: List[Int]) -> Int? {
+  xs.each { |x| if x > 10 { return } }    # ends this call of the block; the loop goes on
+  for x in xs { if x > 10 { return x } }  # returns from first_big
+  nil
+}
+```
 
 ### 4.6 Collection literals
 
@@ -224,6 +243,11 @@ block or anonymous function returns from that block. Closures capture variables 
   computed key: `[(host): 1]`.
 - `(1, "a")` is a tuple; `(x,)` a one-element tuple.
 - Dicts and sets iterate in insertion order.
+
+Indexing a `List` or `String` with a range slices it: `xs[1..2]` and `xs[1...3]` are new lists of the
+elements at those positions, `"hello"[1..3]` is `"ell"` (positions count characters). Negative positions
+count from the end (`xs[-2..-1]` is the last two elements), and a range reaching past either end is
+clipped, so a slice never panics: `[1, 2][5..6]` is `[]`.
 
 ## 5. Classes, interfaces, enums, extensions
 

@@ -32,11 +32,13 @@ for f in ["core.cx", "builtins.cx"]:
                     head = f"{name} (where {kind[7:-1]})"
                 out += ["", f"## {head}", ""]
                 section = head
-            elif line.startswith(("pub native fn", "pub fn")):  # private helpers are not visible
-                if section != "Global functions":
-                    out += ["", "## Global functions", ""]
-                    section = "Global functions"
-                out.append(f"- `{sig_of(line)}`")
+            elif line.startswith(("pub native fn", "pub fn", "native fn", "fn")):
+                # Functions starting with `_` are implementation details (e.g. `__fiber_spawn`).
+                if not re.match(r"(?:pub )?(?:native )?fn _", line):
+                    if section != "Global functions":
+                        out += ["", "## Global functions", ""]
+                        section = "Global functions"
+                    out.append(f"- `{sig_of(line)}`")
         elif depth == 1 and section:
             if line.startswith(("fn ", "native fn ", "pub fn ", "mut fn")):
                 out.append(f"- `{sig_of(line)}`")
