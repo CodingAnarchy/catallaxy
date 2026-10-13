@@ -1,0 +1,38 @@
+name: Differential fuzz (nightly)
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  difffuzz:
+    name: Differential fuzz (30 minutes, all modes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            tools/difffuzz
+      - name: Build catx (release and debug) and the fuzzer
+        run: |
+          cargo build --release --locked
+          cargo build --locked
+          cargo build --release --locked --manifest-path tools/difffuzz/Cargo.toml
+      - name: Differential fuzz
+        run: >
+          ./tools/difffuzz/target/release/catallaxy-difffuzz --time 1800 --seed ${{ github.run_id }}000
+          --modes release,debug,gc-stress,gc-nongen,gc-threads0,gc-stress-nongen,debug-gc-stress
+          --corpus tools/difffuzz/corpus --corpus tests/conformance/run --corpus examples
+          --out difffuzz-failures --timeout 120
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: difffuzz-failures
+          path: difffuzz-failures

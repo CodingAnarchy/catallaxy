@@ -1,0 +1,270 @@
+# difffuzz program, seed 900036
+enum E1 {
+  V0(Int, Int)
+  V1(String, Int)
+  V2(Int)
+  V3(Int)
+  
+  fn score(self) -> Int {
+    match self {
+      .V0(p2, p3) => ((p2 - 0) ^ (([2]).sum_by { |p4| (-8) }))
+      .V1(p5, p6) => (Set.from([0, 15]).to_list().reduce(0) { |p7, p8| ((p7 * 6 + p6) % 1000) })
+      .V2(p9) => ((p9 - p9) & 13)
+      .V3(p10) => ((([12, 30940, 4_611_686_018_427_387_904]).sort_by { |p11| p11 }).count { |p12| ((-24) < (-50)) })
+    }
+  }
+}
+enum Tree13 {
+  Leaf(Int)
+  Node(Tree13, Tree13)
+}
+fn build14(d: Int, s: Int) -> Tree13 {
+  if d <= 0 { Tree13.Leaf(s % 97) } else { Tree13.Node(build14(d - 1, s * 2 + 1), build14(d - 1, s + 2)) }
+}
+fn tsum15(t: Tree13) -> Int {
+  match t { .Leaf(v) => v, .Node(l, r) => tsum15(l) * 3 % 10007 + tsum15(r) }
+}
+fn rec16(n: Int, acc: Int) -> Int {
+  if n <= 0 { acc } else { rec16(n - 1, (acc * 7 + 28 + n) % 1000003) }
+}
+fn rec17(n: Int, acc: Int) -> Int {
+  if n <= 0 { acc % 1000 } else { (rec17(n - 1, acc + 73) + n * 8) % 1000003 }
+}
+fn checked18(a: Int, b: Int) -> Result[Int, String] {
+  if b == 0 { return Err("zero divisor for #{a}") }
+  if a < -26 { Err("too small") } else { Ok(a / b) }
+}
+fn chain19(a: Int, b: Int, c: Int) -> Result[Int, String] {
+  x = checked18(a, b)?
+  y = checked18(x + 7, c % 4)?
+  Ok(x + y)
+}
+fn firsts20(xs: List[Int], ys: List[Int]) -> Int? {
+  a = xs.first()?
+  b = ys.last()?
+  a * 2 + b
+}
+class K21 {
+  fld22: String
+  fn m23(self, a: Int) -> Int { ((if (a < (-36)) { rec16(10, a) } else { (0...5).to_list().sum() }) * (-5)) }
+  fn m24(self, a: Int) -> Int { (((([9, 18, 16]).select { |p25| true }).map { |p26| (p26 - p26) }).par_reduce(0) { |a, b| a.min(b) }) }
+  fn m27(self, a: Int) -> Int { (match ((["k2": (-4), "k4": (2 ** 64), "k0": 11]).select_entries { |p28, p29| (24471 < a) })["k#{17 % 5}"] { nil => 17, p30: Int => p30.abs() }) }
+}
+class K31 < K21 {
+  fld32: Int
+  fld33: List[Int]
+  fld34: Int
+  fn m23(self, a: Int) -> Int { (super.m23(a) + (self.fld33.par_map { |p35| (16 % 5) }).sum()) % 100000 }
+  fn m36(self) -> String { self.fld22.reverse() }
+  fn m37(self, a: Int) -> Int { (self.fld33.length - (Set.from([13, 7007]).to_list().reduce(0) { |p38, p39| ((p38 * 5 + Set.from([42119, 2, 8, 4, 59327]).length) % 1000) })) }
+  fn m40(self, a: Int) -> Int { (((0...4).to_list().map { |p41| 13 }).count { |p42| chain19(0, self.fld22.length, a).is_ok() }).abs() }
+}
+fn f43(a44: String, a45: Int, a46: List[Int]) -> Int {
+  v47 = (a44 + ("42").slice(5, 8)).ljust(10, "*")
+  w48 = 0
+  loop {
+    w48 += 1
+    if w48 > 1 { break }
+    for x49 in (0...0).to_list().take(2) {
+      v47 += "x,y,z"
+    }
+    w50 = 0
+    while w50 < 7 {
+      w50 += 1
+      if let p51 = firsts20((-1..8).to_list(), ([70157, 19, (-26)]).take(1)) {
+        v52: Bool = ((((0...10).to_list().count { |p53| (p51 < a45) }) ^ (12).min(a45)) == (a46.get(((0...2).to_list().max() ?? 0) % 8) ?? 3))
+      } else {
+        v54 = ((([11016, 10, 0xffff_ffff_ffff, 3]).sort().reverse().map { |p55| p55.abs() }).reduce(0) { |p56, p57| ((p56 * 7 + tsum15(build14(5, a46.length))) % 1000) })
+        v47 = (["k1": 8]).keys().join("/").slice(0, 16)
+      }
+    }
+  }
+  v47 = ("-7").slice(0, 16)
+  (((["k3": 72711]).values().sum_by { |p58| (([7, (-33), 9, 18, 11]).get(p58 % 8) ?? 14) }) & (Set.from([0, 18, (-11)]).to_list().count { |p59| chain19((-28), p59, (2 ** 62)).is_ok() }))
+}
+fn f60(a61: Int) -> Int? {
+  for x62 in ([11]).take(8) {
+    for i63 in (3...7) {
+      v64 = tsum15(build14(1, ((["k3": 32062, "k1": 15, "k0": (-5)]).select_entries { |p65, p66| (x62 < i63) }).fetch("k2", i63)))
+    }
+    v67 = (fn() -> String { p68 = StringBuilder.new(); for p69 in ([7]) { p68.push_value(p69) }; p68.to_s() })()
+    v70: Result[Int, String] = chain19(rec16(29, ((0...12).to_list().sort_by { |p71| a61 }).sum()), (x62 | K31.new("42", a61, (0...5).to_list(), a61).m37((19 - a61))), ((([9, 36031, 1, 10, 13]).tally_by { |x| "k#{x % 5}" }).length * 6))
+  }
+  firsts20([(["k4": (-34), "k0": 8]).fetch("k4", a61)], (0...5).to_list())
+}
+t72 = spawn {
+  order: List[Int] = []
+  fs = (0...1).map { |p73| Fiber.start {
+    order.push(p73)
+    Fiber.yield()
+    order.push(p73 + 100)
+    p73
+  } }
+  s = 0
+  for f in fs { s += f.join().unwrap() }
+  (s, order)
+}
+puts(t72.join().unwrap())
+gc()
+fch74: Channel[Int] = Channel.new(2)
+prod75 = Fiber.start {
+  for p77 in 0...21 { fch74.send((Set.from([13, (-7), 5, 0]) - Set.from([5, 18, 7, 3, 94167])).length) }
+  fch74.close()
+  "sent"
+}
+cons76 = Fiber.start {
+  got: List[Int] = []
+  fch74.each { |x| got.push(x) }
+  got
+}
+puts(prod75.join().unwrap())
+puts(cons76.join().unwrap())
+fz78 = freeze((Set.from([13, (-41), 20]) - Set.from([97628])).to_list().dup())
+t79 = spawn { fz78.map { |x| x * 2 + 1 }.sum() + fz78.length }
+puts(t79.join().unwrap())
+puts(fz78.par_map { |p80| ((0...3).to_list().length % 9) })
+w81 = 0
+loop {
+  w81 += 1
+  if w81 > 2 { break }
+  w82 = 0
+  while w82 < 5 {
+    w82 += 1
+    puts([20, 12])
+    v83 = K31.new(("foo" + "42").downcase(), (match E1.V1("Bar", 4) { .V0(p84, p85) => 6, .V1(p86, p87) => E1.V2(1).score(), .V2(p88) => p88, .V3(p89) => fz78.sum().max(fz78.sum()) }), (0...4).to_list(), ((("-7").index_of("42") ?? -1) * 6))
+  }
+  puts("s#{(fz78.sum() & fz78.sum()).abs()}-#{((if (fz78.sum() < 19) { "Bar" } else { fz78.sum().to_s() }) + ("ab").ljust(5, "*"))}")
+  for x90 in ((0...0).to_list().map { |p91| tsum15(build14(4, 0)) }).take(3) {
+    v92 = fz78
+  }
+  if fz78.sum().to_s().starts_with("Bar") { break }
+}
+v93: E1 = E1.V2((((0...12).to_list().max() ?? 0) / 7))
+ch94: Channel[Int] = Channel.new()
+ws95 = (1..1).map { |p97| spawn {
+  for j98 in 0...5 { ch94.send((Set.from([19]).to_list().par_reduce(0) { |a, b| a.max(b) })) }
+  nil
+} }
+acc96: List[Int] = []
+5.times { acc96.push(ch94.recv()!) }
+for t in ws95 { t.join() }
+acc96.sort_in_place()
+puts(acc96)
+if (["k0": 12, "k0": 20, "k0": 14]).keys().join("/").starts_with("k1") {
+  puts(K21.new((if (fz78.sum() >= (-8)) { "s#{2}-#{"a"}" } else { (["k2": 0, "k1": 4_611_686_018_427_387_904, "k4": 19]).keys().join("/") })))
+  w99 = 0
+  while w99 < 7 {
+    w99 += 1
+    if ("#{v93}" == "s#{fz78.sum()}-#{"Bar"}") {
+      acc96 = ((([15, 17, 16]).sort_by { |p100| fz78.sum() }).map { |p101| fz78.sum() }).take(2).take(8)
+    }
+    acc96.reverse_in_place()
+  }
+  puts(checked18((acc96.count { |p102| (acc96.drop_while { |p103| false }).contains((p102 + p102)) }), (acc96.length * (-5))))
+}
+fch104: Channel[Int] = Channel.new(0)
+prod105 = Fiber.start {
+  for p107 in 0...20 { fch104.send(p107) }
+  fch104.close()
+  "sent"
+}
+cons106 = Fiber.start {
+  got: List[Int] = []
+  fch104.each { |x| got.push(x) }
+  got
+}
+puts(prod105.join().unwrap())
+puts(cons106.join().unwrap())
+shared class Shared108 {
+  hits: Atomic[Int] = Atomic.new(0)
+  total: Int = 0
+}
+sh109 = Shared108.new()
+(1..3).map { |i| spawn {
+  for j in 0...8 {
+    sh109.hits.add(1)
+    with lock(sh109) { sh109.total = sh109.total + i * j }
+  }
+} }.each { |t| t.join() }
+puts(sh109.hits.get())
+puts(sh109.total)
+fch110: Channel[Int] = Channel.new(1)
+prod111 = Fiber.start {
+  for p113 in 0...19 { fch110.send((acc96.count { |p114| false }).min(f43(acc96.length.to_s(), fz78.sum(), acc96))) }
+  fch110.close()
+  "sent"
+}
+cons112 = Fiber.start {
+  got: List[Int] = []
+  fch110.each { |x| got.push(x) }
+  got
+}
+puts(prod111.join().unwrap())
+puts(cons112.join().unwrap())
+ch115: Channel[List[Int]] = Channel.new()
+t116 = spawn {
+  for p117 in 0...21 { msg = ([4_611_686_018_427_387_904, 0xffff_ffff_ffff]).to_set().to_list().dup(); ch115.send(move msg) }
+  ch115.close()
+}
+got118: List[List[Int]] = []
+for msg in ch115 { got118.push(msg) }
+t116.join()
+puts(got118)
+match E1.V0((match v93 { .V0(p119, p120) => p120, .V1(p121, p122) => p122, .V2(p123) => fz78.sum(), _ => (-22) }), 11) {
+  .V0(p124, p125) => {
+    if acc96.length > 4 { acc96[4] = Set.from([8, 12, 7, 29340, 0b1011]).union(Set.from([20, (-17), 4_611_686_018_427_387_904, 0b1011, 10])).length }
+    v126 = acc96
+    v126 = v126.take(8)
+    nil
+  }
+  .V1(p127, p128) => {
+    puts((fz78.dup().par_select { |p129| false }))
+    acc96 = (("#{v93}").bytes().map { |p130| (match p127.to_i() { nil => 5, p131: Int => p131 }) }).take(8)
+    nil
+  }
+  .V2(p132) => {
+    acc96.push((if chain19(acc96.length, p132, acc96.length).is_ok() { (p132 ^ fz78.sum()) } else { (["k2": 19, "k0": 4_611_686_018_427_387_904, "k1": 0xffff_ffff_ffff]).fetch("k3", p132) }))
+    if chain19((5 * 7), (acc96.length * (-4)), f43((11).to_s(), 14, (0...9).to_list())).is_ok() {
+      v133: K31 = K31.new(("s#{0}-#{(8).to_s()}").capitalize(), (acc96.par_reduce(0) { |a, b| a.max(b) }), [(if (3 < 51412) { fz78.sum() } else { 1 }), (-14), 7, (acc96.reduce(0) { |p134, p135| ((p134 * 5 + p135) % 1000) })], 14)
+      puts(checked18((((["k0": 7, "k4": 20, "k2": 8]).length + (acc96.length & fz78.sum())) - (p132 * 2)), v133.m23((acc96.drop(5).max() ?? 0))))
+    } else {
+      w136 = 0
+      loop {
+        w136 += 1
+        if w136 > 0 { break }
+        puts((("-7").strip().bytes().map { |p137| (((0...10).to_list().chunk(2).map { |c| c.sum() }).get(p137 % 8) ?? 1) }))
+      }
+      acc96.sort_in_place()
+    }
+    if ("").ends_with("x,y,z") {
+      match v93 {
+        .V0(p138, p139) => {
+          v140: Int? = (["k3": 13, "k0": 12, "k0": 0xffff_ffff_ffff, "k0": 18])["k3"]
+          nil
+        }
+        .V1(p141, p142) => {
+          v143 = (acc96.sort_by { |p144| (-29) }).to_set().to_list()
+          nil
+        }
+        .V2(p145) => {
+          if acc96.length > 0 { acc96[0] = (-31) }
+          nil
+        }
+        .V3(p146) => {
+          v147 = p132.to_s()
+          nil
+        }
+      }
+      acc96.pop()
+    }
+    nil
+  }
+  .V3(p148) => {
+    v149 = { |p150: Int| acc96.length }
+    acc96 = ((4..7).to_list().map { |p151| v93.score() }).take(8)
+    nil
+  }
+}
+puts(fz78)
+puts(v93)
+puts(acc96)

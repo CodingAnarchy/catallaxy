@@ -123,6 +123,8 @@ pub struct Checker {
     pub frozen_calls: Vec<(Span, FnId, String)>,
     /// Closures checked as parallel blocks (`spawn`, `par_*`): node → is_move.
     pub spawn_nodes: FxHashMap<NodeId, bool>,
+    /// Captures of `spawn move` blocks that are moved (not sendable): (block node, local).
+    pub moved_captures: FxHashSet<(NodeId, LocalId)>,
     pub resolved_classes: FxHashSet<ClassId>,
     pub pattern_subjects: FxHashMap<NodeId, TyId>,
     /// Type parameters instantiated by the last `instantiate_sig` (for bound checks).
@@ -202,6 +204,7 @@ impl Checker {
             self_calls: Vec::new(),
             frozen_calls: Vec::new(),
             spawn_nodes: FxHashMap::default(),
+            moved_captures: FxHashSet::default(),
             resolved_classes: FxHashSet::default(),
             pattern_subjects: FxHashMap::default(),
             last_inst: Vec::new(),
