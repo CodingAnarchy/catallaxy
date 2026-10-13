@@ -8,6 +8,10 @@ out = ["# Catallaxy Standard Library", "",
        "Generated from the prelude by `scripts/gen_stdlib_docs.py`; do not edit by hand.",
        "Everything here is available in every module without an import.", ""]
 
+def is_internal(line):
+    # Functions starting with `_` are implementation details (e.g. `__fiber_spawn`, `Deque._grow`).
+    return re.match(r"(?:pub )?(?:native )?fn _", line.strip()) is not None
+
 def sig_of(line):
     line = line.strip()
     line = re.sub(r"\s*\{.*$", "", line) if "{" in line and not line.startswith("{") else line
@@ -32,14 +36,15 @@ for f in ["core.cx", "builtins.cx"]:
                     head = f"{name} (where {kind[7:-1]})"
                 out += ["", f"## {head}", ""]
                 section = head
-            elif line.startswith(("pub native fn", "pub fn", "native fn", "fn")):
+            elif line.startswith(("pub native fn", "pub fn", "native fn", "fn")) and not is_internal(line):
                 if section != "Global functions":
                     out += ["", "## Global functions", ""]
                     section = "Global functions"
                 out.append(f"- `{sig_of(line)}`")
         elif depth == 1 and section:
             if line.startswith(("fn ", "native fn ", "pub fn ", "mut fn")):
-                out.append(f"- `{sig_of(line)}`")
+                if not is_internal(line):
+                    out.append(f"- `{sig_of(line)}`")
             elif re.match(r"^[a-z]\w*: ", line):
                 # Fields starting with `_` are implementation details (e.g. `Fiber._result`).
                 out.append(f"- field `{line}`")

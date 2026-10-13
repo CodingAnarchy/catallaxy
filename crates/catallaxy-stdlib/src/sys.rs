@@ -302,9 +302,16 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<serde_json::Value> {
             Ok(J::Object(map))
         }
         _ => {
-            // Objects: their fields as an object, or to_s.
+            // Objects: what their `to_json` returns, their fields as an object, or to_s.
             let cls = class_of(v);
-            if cls.kind == ObjKind::Instance && cls.lookup(intern("to_json")).is_none() && cls.variant_tag.is_none() {
+            if cls.kind == ObjKind::Instance && cls.lookup(intern("to_json")).is_some() {
+                let r = vm.call_method_named(v, intern("to_json"), &[])?;
+                vm.extra_roots().push(r);
+                let j = to_json(vm, r, depth + 1);
+                vm.extra_roots().pop();
+                return j;
+            }
+            if cls.kind == ObjKind::Instance && cls.variant_tag.is_none() {
                 let o = unsafe { as_instance(v) };
                 let mut map = serde_json::Map::new();
                 for i in 0..cls.nfields() {
