@@ -85,6 +85,12 @@ pub(crate) fn s<'a>(v: Value) -> RtResult<&'a str> {
     }
 }
 
+/// The string object behind `v`.
+pub(crate) fn str_obj<'a>(v: Value) -> RtResult<&'a catallaxy_runtime::object::StrObj> {
+    s(v)?;
+    Ok(unsafe { catallaxy_runtime::object::as_str_obj(v) })
+}
+
 pub(crate) fn int(v: Value) -> RtResult<i64> {
     if v.is_small_int() {
         return Ok(v.as_small_int());

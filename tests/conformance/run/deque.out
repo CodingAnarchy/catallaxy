@@ -1,0 +1,25 @@
+Deque[]
+true
+true
+true
+Deque[0, 1, 2, 3]
+4 0 3 0 3 2
+true
+0
+[0, 10, 2, 30]
+true
+[30, 10, 20]
+[3, 2]
+[1, 2, 3]
+6
+true
+6
+Deque[3, 1, 2] Deque[3, 1, 2, 4] true false
+true
+Deque[1, 2, 3]
+Deque[] 0
+Deque["item 19997", "item 19998", "item 19999"]
+3
+["a","b"]
+[Deque["x"]]
+2
