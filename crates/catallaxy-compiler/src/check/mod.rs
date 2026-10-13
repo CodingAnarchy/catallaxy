@@ -94,6 +94,11 @@ pub struct Checker {
     pub for_bodies: FxHashMap<NodeId, ClosureInfo>,
     /// Locals declared by assignments / lets / patterns, keyed by the declaring node.
     pub decl_locals: FxHashMap<NodeId, LocalId>,
+    /// Locals known to refer to the same owned object (`b = a`), by group: freezing or moving one
+    /// applies to all of them. Aliases through fields and container elements are not tracked;
+    /// the runtime ownership checks cover those.
+    pub alias_group: FxHashMap<LocalId, u32>,
+    pub next_alias_group: u32,
     /// Locals of each function (parameters first), by function id.
     pub fn_locals: FxHashMap<FnId, Vec<LocalId>>,
     pub frame_locals: FxHashMap<FnId, LocalId>,
@@ -185,6 +190,8 @@ impl Checker {
             closures: FxHashMap::default(),
             for_bodies: FxHashMap::default(),
             decl_locals: FxHashMap::default(),
+            alias_group: FxHashMap::default(),
+            next_alias_group: 0,
             fn_locals: FxHashMap::default(),
             frame_locals: FxHashMap::default(),
             rt_types: Vec::new(),
