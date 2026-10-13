@@ -263,6 +263,9 @@ fn max[T: Comparable](xs: List[T]) -> T? { ... }
 pub fn total(xs: Enumerable[Int]) -> Int { xs.reduce(0) { |a, b| a + b } }   # interface param = bound
 ```
 
+A member reached through a bound `T: I` (or `T: I & J`) is seen with `Self` replaced by `T`, so with
+`interface Clone { fn clone(self) -> Self }`, `fn dup[T: Clone](x: T) -> T { x.clone() }` checks.
+
 ### 6.3 Implicit generics
 
 A non-`pub` function may leave parameter types off. The checker infers a structural requirement for each
@@ -363,8 +366,9 @@ OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse`
 
 ## 10. Tooling
 
-`catx run file.cx [args]`, `catx check [--json] files...`, `catx fmt [--check] files...`, `catx repl`,
-`catx lsp`, `catx test dir`.
+`catx run file.cx [args]`, `catx check [--json] paths...`, `catx fmt [--check] paths...`, `catx repl`,
+`catx lsp`, `catx test dir`. `check` and `fmt` take files and directories; a directory stands for
+every `*.cx` file under it, skipping hidden directories and `target/`.
 
 `catx test dir` runs every `*.cx` file under `dir` (except those in `lib/` directories, which hold
 modules for tests to import) in its own process. A file whose first line is `# expect: CODE[, CODE...]`
@@ -377,7 +381,9 @@ failed.
 `catx fmt` rewrites files in place (`catx fmt -` filters stdin to stdout). It keeps comments and the
 program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
 `{ ... }` block across lines when its line would exceed 100 columns. `--check` lists the files that
-would change and exits with status 1 if there are any. Files with syntax errors are left untouched.
+would change and exits with status 1 if there are any. Files with syntax errors are left untouched and
+reported (exit status 2). When walking a directory, `fmt` skips `reject/` directories, whose
+conformance programs are meant to be wrong; a file named on the command line is always formatted.
 
 `catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
 unsaved edits. It provides:

@@ -57,7 +57,9 @@ class Machine {
     price = PRICES[item]
     if price == nil { return (State.Collecting(have), "no such item #{item}") }
     if self.stock.fetch(item, 0) == 0 { return (State.Collecting(have), "#{item} sold out") }
-    if have < price { return (State.Collecting(have), "#{item} costs #{price}, need #{price - have} more") }
+    if have < price {
+      return (State.Collecting(have), "#{item} costs #{price}, need #{price - have} more")
+    }
     self.stock[item] = self.stock[item]! - 1
     self.bank += price
     (State.Idle, "dispensed #{item}, change #{have - price}")
