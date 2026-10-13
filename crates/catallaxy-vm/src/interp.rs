@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use catallaxy_gc::{Header, ObjState, RootSource, ThreadRecord, Tracer};
 use catallaxy_runtime::class::{class_of, heap_class, ids, ObjKind, BUILTINS};
+use catallaxy_runtime::fmtspec::{self, FormatSpec};
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ops::{self, Interop};
 use catallaxy_runtime::ownership::{self, check_read, check_write, Access};
@@ -886,6 +887,14 @@ impl Vm {
                         let v = self.m.alloc_str(&s);
                         set!(a, v);
                     }
+                }
+                Op::Format => {
+                    let spec = FormatSpec::decode([data!(), data!()]);
+                    let x = r!(b_of(w));
+                    save!();
+                    let s = tri!(fmtspec::format_value(self, x, &spec));
+                    let v = self.m.alloc_str(&s);
+                    set!(a, v);
                 }
 
                 // ---- control ----

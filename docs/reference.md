@@ -16,7 +16,8 @@ Source files use the `.cx` extension and are UTF-8. The CLI is `catx`.
 - Integer literals: `42`, `1_000_000`, `0xff`, `0b1010`, `0o17`. Arbitrary precision.
 - Float literals: `3.14`, `1e10`, `2.5e-3`, `1_000.5`. A float literal always contains `.` or an exponent.
 - Strings: `"..."` with escapes `\n \t \r \0 \\ \" \# \u{1F600}` and interpolation `#{expr}`.
-  `'...'` strings are raw except for `\'` and `\\`, and never interpolate.
+  `'...'` strings are raw except for `\'` and `\\`, and never interpolate. `#{expr:spec}` formats
+  the value with a format spec (section 4.7).
 - Statement termination: a newline ends a statement unless (a) the line ends with a binary operator, `,`,
   `=` or `->`, (b) a `(` or `[` is unclosed, or (c) the next non-blank line starts with `.` or `?.`
   (method chains). `;` also separates statements. Newlines are significant inside `{ }`.
@@ -228,6 +229,46 @@ Indexing a `List` or `String` with a range slices it: `xs[1..2]` and `xs[1...3]`
 elements at those positions, `"hello"[1..3]` is `"ell"` (positions count characters). Negative positions
 count from the end (`xs[-2..-1]` is the last two elements), and a range reaching past either end is
 clipped, so a slice never panics: `[1, 2][5..6]` is `[]`.
+
+### 4.7 String formatting
+
+An interpolation may end with `:` and a format spec: `"#{price:>10,.2f}"`. The spec runs to the
+closing `}`; the expression ends at the first `:` outside brackets (no expression continues with a
+top-level `:`, so named arguments, dict literals and typed block parameters are unaffected).
+
+```
+spec      := [[fill] align] [sign] ["#"] ["0"] [width] [grouping] ["." precision] [type]
+align     := "<" left | ">" right | "^" center | "=" pad after the sign
+sign      := "+" always | "-" negatives only (default) | " " space for non-negatives
+grouping  := "," every 3 digits | "_" every 3 decimal or 4 hex/octal/binary digits
+type      := s d x X o b e E f F %
+```
+
+| Type | Applies to | Output |
+|---|---|---|
+| none | anything | `Int` as `d`; `Float` as its `to_s`, or as `f` when a precision is given; others via `to_s` |
+| `s` | anything | `to_s` |
+| `d` | `Int` | decimal |
+| `x` `X` `o` `b` | `Int` | hex (lower/upper), octal, binary; `#` adds `0x`/`0X`/`0o`/`0b` |
+| `f` `F` | `Int`, `Float` | fixed point, precision 6 by default |
+| `e` `E` | `Int`, `Float` | scientific, `1.234500e+03` |
+| `%` | `Int`, `Float` | times 100, fixed point, then `%` |
+
+Numbers align right and text left by default. `0` before the width pads with zeros after the sign
+(`"#{-42:06}"` is `-00042`). For text, the precision is a maximum length in characters. Fill may be
+any character except `{`, `}` and `"`. Examples: `"#{3.14159:.2f}"` is `3.14`, `"#{1234567:,}"` is
+`1,234,567`, `"#{255:#06x}"` is `0x00ff`, `"#{"ab":*^6}"` is `**ab**`, `"#{0.25:.0%}"` is `25%`.
+
+The spec is checked against the expression's static type at compile time: a malformed spec is error
+`E0110`, a spec that does not apply to the type (`.2f` on a `String`, `x` on a `Float`, a precision
+or `+` on an `Int` or `String` respectively) is `E0380`. For `Dyn`, generic and union values the same
+check runs when the string is built, and a mismatch panics with `FormatError`. The spec is parsed
+once by the compiler; at run time formatting is a single instruction.
+
+`template.format(args)` does the same at run time: `"{} is {:>6.1f}".format([name, x])`. `{}` takes
+the next argument's `to_s`, `{:spec}` formats it, `{{` and `}}` are literal braces; a bad spec or an
+argument count mismatch panics with `FormatError`. `Int.to_s(base)` writes an integer in base 2 to
+36.
 
 ## 5. Classes, interfaces, enums, extensions
 

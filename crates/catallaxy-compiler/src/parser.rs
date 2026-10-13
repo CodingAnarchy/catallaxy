@@ -1064,24 +1064,64 @@ impl<'a> Parser<'a> {
         for p in pieces {
             match p {
                 StrPiece::Lit(s) => parts.push(StrPart::Lit(s)),
-                StrPiece::Code(code, offset) => {
-                    let (toks, diags) = Lexer::new(&code, self.file, offset).tokenize();
-                    self.diags.extend(diags);
-                    let mut sub = Parser::new(toks, self.file, self.next_id);
-                    sub.skip_newlines();
-                    let r = sub.parse_expr();
-                    sub.skip_newlines();
-                    if r.is_ok() && !sub.at_eof() {
-                        let sp = sub.span();
-                        sub.diags.push(Diagnostic::error("E0107", "unexpected tokens in interpolation", sp));
-                    }
-                    let d = std::mem::take(&mut sub.diags);
-                    self.diags.extend(d);
-                    parts.push(StrPart::Expr(r?));
-                }
+                StrPiece::Code(code, offset) => parts.push(self.parse_interpolation(&code, offset)?),
             }
         }
         Ok(self.mk(ExprKind::Str(parts), span))
+    }
+
+    /// Parses `#{expr}` or `#{expr:spec}`. No expression continues with a top-level `:` (named
+    /// arguments, `Dict` entries and parameter types all sit inside brackets), so the first `:` the
+    /// expression parser stops at starts the spec, which runs to the closing brace.
+    fn parse_interpolation(&mut self, code: &str, offset: u32) -> PResult<StrPart> {
+        let (toks, diags) = Lexer::new(code, self.file, offset).tokenize();
+        let mut sub = Parser::new(toks, self.file, self.next_id);
+        sub.skip_newlines();
+        let r = sub.parse_expr();
+        let colon = match sub.tok() {
+            Tok::Sym(":" | "::") if r.is_ok() => Some((sub.span().start - offset) as usize),
+            _ => None,
+        };
+        let Some(colon) = colon else {
+            self.diags.extend(diags);
+            sub.skip_newlines();
+            if r.is_ok() && !sub.at_eof() {
+                let sp = sub.span();
+                sub.diags.push(Diagnostic::error("E0107", "unexpected tokens in interpolation", sp));
+            }
+            let d = std::mem::take(&mut sub.diags);
+            self.diags.extend(d);
+            return Ok(StrPart::Expr(r?));
+        };
+        // Re-lex the expression alone: the spec is not Catallaxy source (`08d` is not a number).
+        let (toks, diags) = Lexer::new(&code[..colon], self.file, offset).tokenize();
+        self.diags.extend(diags);
+        let mut sub = Parser::new(toks, self.file, self.next_id);
+        sub.skip_newlines();
+        let r = sub.parse_expr();
+        sub.skip_newlines();
+        if r.is_ok() && !sub.at_eof() {
+            let sp = sub.span();
+            sub.diags.push(Diagnostic::error("E0107", "unexpected tokens in interpolation", sp));
+        }
+        let d = std::mem::take(&mut sub.diags);
+        self.diags.extend(d);
+        let expr = r?;
+        let spec_text = &code[colon + 1..];
+        let spec_start = offset + colon as u32 + 1;
+        let spec_span = Span { file: self.file, start: spec_start, end: spec_start + spec_text.len() as u32 };
+        match catallaxy_vm::fmtspec::parse(spec_text) {
+            Ok(spec) => Ok(StrPart::Fmt(expr, spec, spec_span)),
+            Err(e) => {
+                let sp = if e.start == e.end {
+                    spec_span
+                } else {
+                    Span { file: self.file, start: spec_start + e.start as u32, end: spec_start + e.end as u32 }
+                };
+                self.diags.push(Diagnostic::error("E0110", format!("invalid format spec: {}", e.msg), sp));
+                Ok(StrPart::Expr(expr))
+            }
+        }
     }
 
     fn parse_primary(&mut self) -> PResult<Expr> {

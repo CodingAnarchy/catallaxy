@@ -34,7 +34,8 @@ pub enum Result[T, E] {
 }
 
 extend Int {
-  native fn to_s(self) -> String
+  # Digits in `base` (2 to 36, lowercase letters above 9), with a leading `-` if negative.
+  native fn to_s(self, base: Int = 10) -> String
   native fn hash(self) -> Int
   fn <=>(self, other: Int) -> Int { if self < other { -1 } else if self > other { 1 } else { 0 } }
   native fn to_f(self) -> Float
@@ -185,6 +186,10 @@ extend String {
   native fn center(self, width: Int, pad: String = " ") -> String
   native fn ljust(self, width: Int, pad: String = " ") -> String
   native fn rjust(self, width: Int, pad: String = " ") -> String
+  # Fills a runtime template: `{}` takes the next argument's `to_s`, `{:spec}` formats it with a
+  # spec as in `"#{x:spec}"`, `{{` and `}}` are literal braces. Panics with a `FormatError` on a bad
+  # spec or when the placeholders and arguments do not match in number.
+  native fn format(self, args: List[Dyn]) -> String
   native fn is_digit(self) -> Bool
   native fn is_alpha(self) -> Bool
   native fn is_alnum(self) -> Bool
