@@ -19,6 +19,11 @@
 //! A fiber never parks while it holds a lock keyed by its OS thread (`with lock`, `Mutex`
 //! closures): a sibling fiber could otherwise enter the same lock. It blocks the whole thread
 //! instead.
+//!
+//! ThreadSanitizer: corosensei switches native stacks behind TSan's back, which would mix the
+//! shadow call stacks of the fibers sharing a thread and report false races. Builds with
+//! `--cfg catx_tsan` (set alongside `-Zsanitizer=thread`, see the `tsan-suite` CI job) tell TSan
+//! about every switch through its fiber API; elsewhere the hooks compile to nothing.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BinaryHeap, HashMap, VecDeque};
@@ -37,6 +42,84 @@ use parking_lot::{Condvar, Mutex};
 const FIBER_NATIVE_STACK: usize = 256 * 1024;
 /// Register stack per fiber, in values (lazily committed).
 const FIBER_REGISTERS: usize = 64 * 1024;
+
+/// ThreadSanitizer fiber annotations. Every stack switch is bracketed: the main context calls
+/// [`tsan::enter`] just before resuming a fiber, and the fiber calls [`tsan::leave`] just before
+/// it suspends or finishes. Switches synchronize (flag 0): fibers of one thread are ordered.
+#[cfg(catx_tsan)]
+mod tsan {
+    use std::cell::Cell;
+    use std::ffi::c_void;
+
+    extern "C" {
+        fn __tsan_get_current_fiber() -> *mut c_void;
+        fn __tsan_create_fiber(flags: u32) -> *mut c_void;
+        fn __tsan_destroy_fiber(fiber: *mut c_void);
+        fn __tsan_switch_to_fiber(fiber: *mut c_void, flags: u32);
+    }
+
+    thread_local! {
+        /// TSan's handle for the thread's main context, which resumes every fiber.
+        static MAIN: Cell<*mut c_void> = const { Cell::new(std::ptr::null_mut()) };
+    }
+
+    /// TSan's state for one fiber (its shadow stack and clock).
+    pub struct Handle(*mut c_void);
+
+    impl Handle {
+        pub fn new() -> Self {
+            Handle(unsafe { __tsan_create_fiber(0) })
+        }
+    }
+
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            unsafe { __tsan_destroy_fiber(self.0) }
+        }
+    }
+
+    /// Main context, right before switching to the fiber of `h`.
+    pub fn enter(h: &Handle) {
+        unsafe {
+            MAIN.with(|m| m.set(__tsan_get_current_fiber()));
+            __tsan_switch_to_fiber(h.0, 0);
+        }
+    }
+
+    /// Running fiber, right before switching back to the main context.
+    pub fn leave() {
+        unsafe { __tsan_switch_to_fiber(MAIN.with(|m| m.get()), 0) }
+    }
+}
+
+#[cfg(not(catx_tsan))]
+mod tsan {
+    pub struct Handle;
+    impl Handle {
+        pub fn new() -> Self {
+            Handle
+        }
+    }
+    pub fn enter(_: &Handle) {}
+    pub fn leave() {}
+}
+
+/// Calls [`tsan::leave`] when a fiber body ends, by return or by unwinding.
+struct LeaveOnExit;
+impl Drop for LeaveOnExit {
+    fn drop(&mut self) {
+        tsan::leave();
+    }
+}
+
+/// Suspends the running fiber through its yielder.
+///
+/// # Safety
+/// `y` must be the running fiber's yielder.
+unsafe fn suspend(y: *const Yielder<(), ()>) {
+    tsan::leave();
+    (*y).suspend(());
+}
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -93,6 +176,18 @@ struct Fiber {
     vm: *mut Vm,
     flag: Arc<AtomicBool>,
     yielder: Cell<*const Yielder<(), ()>>,
+    /// Dropped after `coro`, whose drop may still switch to the fiber to unwind it.
+    tsan: tsan::Handle,
+}
+
+impl Drop for Fiber {
+    fn drop(&mut self) {
+        // Dropping a suspended coroutine resumes it to unwind its stack; the body's
+        // `LeaveOnExit` switches back.
+        if self.coro.started() && !self.coro.done() {
+            tsan::enter(&self.tsan);
+        }
+    }
 }
 
 struct Scheduler {
@@ -169,6 +264,7 @@ pub fn spawn(vm: &mut Vm, closure: Value) -> u64 {
     let vm_ptr = fvm as usize;
     let stack = DefaultStack::new(FIBER_NATIVE_STACK).expect("fiber stack");
     let coro = Coroutine::with_stack(stack, move |y: &Yielder<(), ()>, ()| {
+        let _leave = LeaveOnExit;
         YIELDER.with(|c| c.set(y as *const _));
         // SAFETY: the VM lives until the scheduler releases it after this body returns.
         let vm = unsafe { &mut *(vm_ptr as *mut Vm) };
@@ -200,7 +296,13 @@ pub fn spawn(vm: &mut Vm, closure: Value) -> u64 {
     with_sched(|s| {
         s.fibers.insert(
             id,
-            Fiber { coro, vm: fvm, flag: Arc::new(AtomicBool::new(false)), yielder: Cell::new(std::ptr::null()) },
+            Fiber {
+                coro,
+                vm: fvm,
+                flag: Arc::new(AtomicBool::new(false)),
+                yielder: Cell::new(std::ptr::null()),
+                tsan: tsan::Handle::new(),
+            },
         );
         s.ctl.insert(id, ctl);
         s.ready.push_back(id);
@@ -215,6 +317,7 @@ fn resume(id: u64) {
     CURRENT.with(|c| c.set(id));
     RUNNING_FLAG.with(|f| *f.borrow_mut() = Some(fiber.flag.clone()));
     let mut fiber = fiber;
+    tsan::enter(&fiber.tsan);
     let r = fiber.coro.resume(());
     fiber.yielder.set(YIELDER.with(|c| c.get()));
     RUNNING_FLAG.with(|f| *f.borrow_mut() = None);
@@ -309,7 +412,7 @@ fn park() {
     }
     let y = YIELDER.with(|c| c.get());
     // SAFETY: set by the running fiber's body; valid while it runs.
-    unsafe { (*y).suspend(()) };
+    unsafe { suspend(y) };
     flag.store(false, Ordering::Release);
 }
 
@@ -379,7 +482,7 @@ pub fn yield_now(vm: &mut Vm) {
         let flag = RUNNING_FLAG.with(|f| f.borrow().clone()).expect("running fiber flag");
         flag.store(true, Ordering::Release);
         let y = YIELDER.with(|c| c.get());
-        unsafe { (*y).suspend(()) };
+        unsafe { suspend(y) };
         flag.store(false, Ordering::Release);
     } else if has_fibers() {
         let n = with_sched(|s| s.ready.len());
