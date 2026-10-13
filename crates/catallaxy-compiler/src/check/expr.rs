@@ -2559,8 +2559,9 @@ impl Checker {
         let subst: FxHashMap<ParamId, TyId> = ci.params.iter().copied().zip(targs.iter().copied()).collect();
         if name.name == "new" && !ci.is_builtin {
             let ctor = ci.constructor.unwrap();
-            if ci.modifier == ast::ClassModifier::Plain && ci.methods.contains_key("new") {
-                // A user static `new` overrides the generated constructor.
+            if ci.modifier != ast::ClassModifier::Shared && ci.methods.contains_key("new") {
+                // A user static `new` overrides the generated constructor (the standard library's
+                // frozen `Regex` builds its instances natively this way).
             } else {
                 let m = MethodRef { fid: ctor, subst, self_ty, dispatch: Dispatch::Static(ctor), frozen: false };
                 let (slots, ret) = self.check_args(e, &m, args, block, expected, false);

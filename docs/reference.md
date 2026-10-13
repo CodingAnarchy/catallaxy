@@ -67,6 +67,7 @@ Module-wide state uses:
 | `Mutex[T]`, `Atomic[T]`, `Channel[T]`, `Thread[T]` | concurrency types |
 | `Result[T, E]` | `Ok(T)` or `Err(E)` |
 | `StringBuilder` | mutable string buffer |
+| `NativeHandle` | opaque frozen native data (inside `Regex`, `Subprocess`; see §11) |
 
 Generic type arguments use square brackets. Plain types never hold `nil`.
 
@@ -223,6 +224,8 @@ p = Point.new(x: 3.0, y: 4.0)            # generated constructor: fields in orde
 - `shared class C { ... }`: instances may be used from any thread; field types must be frozen or
   shareable; each field read/write is atomic. `with lock(c) { ... }` makes a compound update atomic.
 - Generic classes: `class Stack[T] { items: List[T] = [] }`.
+- A static `fn new` declared in a class (other than a `shared class`) replaces the generated
+  constructor. The standard library's `Regex.new` (which returns a `Result`) works this way.
 - `Self` names the enclosing class/interface type.
 
 ```
@@ -285,7 +288,7 @@ Every type has a capability:
 
 | Capability | Types | Crosses threads |
 | --- | --- | --- |
-| frozen | `Int Float Bool Nil String Range`, `frozen T`, `frozen class`, enums/tuples of frozen | freely |
+| frozen | `Int Float Bool Nil String Range NativeHandle`, `frozen T`, `frozen class` (e.g. `Regex`), enums/tuples of frozen | freely |
 | shareable | `Mutex[T] Atomic[T] Channel[T] Thread[T]`, `shared class` | by reference |
 | owned | everything else (`List`, `Dict`, ordinary classes, closures) | only by `move` |
 
@@ -324,15 +327,18 @@ pages = fs.map { |f| f.join().unwrap() }
   (`Err` holds the message of a panic, which ends only that fiber); `is_done()`;
   `Fiber.yield()` lets the thread's other fibers run.
 - A fiber runs on the OS thread that started it, for its whole life. Fibers on one thread
-  interleave only where one of them waits: channel `send`/`recv`, `join`, `sleep`, file and
-  console I/O, `Fiber.yield()`. Their blocks may therefore capture and mutate owned values (no
+  interleave only where one of them waits: channel `send`/`recv`, `join`, `sleep`, file,
+  directory, process and console I/O, `Fiber.yield()`. Their blocks may therefore capture and mutate owned values (no
   capability rules apply), and code between two waits runs without interruption.
-- Waiting parks the fiber instead of blocking the thread. Blocking system calls (files, stdin)
+- Waiting parks the fiber instead of blocking the thread. Blocking system calls (files,
+  directories, stdin, starting and waiting for processes and reading or writing their pipes)
   run on a shared pool of I/O threads (`CATX_IO_THREADS`, default 16) meanwhile.
 - A fiber does not park while it holds a lock keyed by its OS thread (inside `with lock` or a
   `Mutex` closure): it blocks the thread instead, so its sibling fibers cannot enter the lock.
 - A thread, and the program, finishes only after the fibers it started. A fiber is joined on
-  the thread that started it; its result is kept until then.
+  the thread that started it. Its result is stored in the `Fiber` handle, so a result nobody
+  joins is freed with the handle.
+- Keywords are valid method names after `.` and in method declarations (`obj.match(x)`).
 
 ## 9. Dyn
 
@@ -404,6 +410,12 @@ Rules for native code: values held across a call back into the VM (`native::call
 runs Catallaxy code) must be rooted in a `HandleScope`; handles borrow the scope, so they cannot
 escape it. Allocation alone never collects. Missing optional arguments arrive as the empty marker
 (`Value::is_empty_marker`). A process runs one program.
+
+`native::new_handle(vm, data)` wraps Rust data (`Send + Sync`) in a `NativeHandle`, and
+`native::handle::<T>(v)` gets it back. A handle is frozen, so Catallaxy code may keep it in a
+`frozen class` and pass it between threads: the data must be immutable or synchronize itself
+(the standard library's `Regex` holds its compiled regex this way). It is dropped when the
+collector frees the handle.
 
 ### C ABI
 

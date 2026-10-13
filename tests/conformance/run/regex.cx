@@ -1,0 +1,72 @@
+# Regex: compiling, matching, captures, replacement, splitting and sharing across threads.
+date = Regex.new("(?P<year>\\d{4})-(?P<month>\\d{2})(-(\\d{2}))?").unwrap()
+puts(date)
+puts(date.pattern)
+puts(date.matches("released 2024-05-17"))
+puts(date.matches("no dates here"))
+puts("due 1999-12".matches(date))
+
+# find: text, character positions, positional and named groups.
+if let m = date.find("café on 2024-05 and 2025-01-02") {
+  puts(m.text)
+  puts("#{m.start} #{m.end}")
+  puts(m.groups)
+  puts(m.captures())
+  puts(m[1])
+  puts(m[4])
+  puts(m[9])
+  puts(m.named("year"))
+  puts(m.named("day"))
+  puts(m.named_groups)
+}
+puts(date.find("nothing") == nil)
+puts(date.capture_names())
+
+# find_all and String#scan.
+all = date.find_all("2020-01, 2021-02-03 and 2022-04")
+puts(all.length)
+for m in all { puts("#{m.text} at #{m.start}..#{m.end} day=#{m[4] ?? "-"}") }
+word = Regex.new("\\w+").unwrap()
+puts("one two  three".scan(word))
+puts(word.find_all("").length)
+
+# replace / replace_all with group references, and the String conveniences.
+puts(date.replace("from 2020-01 to 2021-02", "$month/$year"))
+puts(date.replace_all("from 2020-01 to 2021-02", "${month}/${year}"))
+puts(date.replace_all("2020-01", "$$1"))
+swap = Regex.new("(\\w+)=(\\w+)").unwrap()
+puts(swap.replace_all("a=1, b=2", "$2=$1"))
+puts("a=1, b=2".sub(swap, "[$1]"))
+puts("a=1, b=2".gsub(swap, "[$1]"))
+
+# split.
+sep = Regex.new("\\s*[,;]\\s*").unwrap()
+puts(sep.split("a, b;c ,  d"))
+puts(sep.split(""))
+
+# escape and syntax errors.
+puts(Regex.escape("1+1=2?"))
+puts(Regex.new(Regex.escape("a.b")).unwrap().matches("axb"))
+bad = Regex.new("(unclosed")
+puts(bad.is_err())
+puts(bad.unwrap_err().contains("unclosed group"))
+
+# Unicode classes and flags.
+greek = Regex.new("(?i)\\p{Greek}+").unwrap()
+if let m = greek.find("abc ΑΒΓδε xyz") { puts("#{m.text} #{m.start} #{m.end}") }
+
+# A Regex is frozen: it can be captured by threads and parallel blocks.
+digits = Regex.new("\\d+").unwrap()
+t = spawn { digits.find_all("a1 b22 c333").map { |m| m.text.to_i ?? 0 }.sum }
+puts(t.join().unwrap())
+counts = ["x1y2", "123", "none", "4 5 6 7"].par_map { |s| digits.find_all(s).length }
+puts(counts)
+const KEY = Regex.new("^[a-z_]+$").unwrap()
+fn valid(k: String) -> Bool { KEY.matches(k) }
+puts(["snake_case", "CamelCase", "x"].map { |k| valid(k) })
+
+# Many matches under the collector.
+big = (0...2000).map { |i| "k#{i}=v#{i}" }.join(";")
+pairs = Regex.new("k(\\d+)=v(\\d+)").unwrap().find_all(big)
+ok = pairs.all { |m| m[1] == m[2] }
+puts("#{pairs.length} #{ok}")

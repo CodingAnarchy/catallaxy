@@ -72,6 +72,22 @@ pub mod native {
     pub fn new_list(vm: &mut Vm, items: Vec<Value>) -> Value {
         vm.m.alloc_list(items)
     }
+    /// Wraps Rust data in a `NativeHandle`: an opaque, frozen value that may be stored in frozen
+    /// classes and used from any thread, so `data` must be immutable or synchronize itself.
+    /// It is dropped when the collector frees the handle.
+    pub fn new_handle<T: Send + Sync + 'static>(vm: &mut Vm, data: T) -> Value {
+        vm.m.alloc_native_frozen(Box::new(data))
+    }
+    /// The data of a `NativeHandle` argument made by [`new_handle`] with the same `T`, or `None`.
+    pub fn handle<'a, T: 'static>(v: Value) -> Option<&'a T> {
+        use catallaxy_runtime::object::{as_native, kind_of};
+        if kind_of(v) != catallaxy_runtime::ObjKind::Native {
+            return None;
+        }
+        // SAFETY: `v` is a native object; an argument stays alive for the native call.
+        let obj = unsafe { as_native(v) };
+        (*obj.data).as_any().downcast_ref::<T>()
+    }
     /// Calls a Catallaxy closure. Values the native holds across this call must be rooted in a
     /// [`crate::HandleScope`], because the call may run the collector.
     pub fn call(vm: &mut Vm, closure: Value, args: &[Value]) -> RtResult<Value> {

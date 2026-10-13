@@ -67,6 +67,49 @@ pub enum Kw {
     With,
 }
 
+/// The spelling of a keyword (keywords may name methods after `.` and in method declarations).
+pub fn keyword_text(k: Kw) -> &'static str {
+    match k {
+        Kw::And => "and",
+        Kw::As => "as",
+        Kw::Break => "break",
+        Kw::Class => "class",
+        Kw::Const => "const",
+        Kw::Continue => "continue",
+        Kw::Else => "else",
+        Kw::Enum => "enum",
+        Kw::Extend => "extend",
+        Kw::False => "false",
+        Kw::Fn => "fn",
+        Kw::For => "for",
+        Kw::Frozen => "frozen",
+        Kw::If => "if",
+        Kw::Import => "import",
+        Kw::In => "in",
+        Kw::Interface => "interface",
+        Kw::Is => "is",
+        Kw::Let => "let",
+        Kw::Loop => "loop",
+        Kw::Match => "match",
+        Kw::Move => "move",
+        Kw::Mut => "mut",
+        Kw::Native => "native",
+        Kw::Nil => "nil",
+        Kw::Not => "not",
+        Kw::Or => "or",
+        Kw::Pub => "pub",
+        Kw::Return => "return",
+        Kw::SelfValue => "self",
+        Kw::SelfType => "Self",
+        Kw::Shared => "shared",
+        Kw::Spawn => "spawn",
+        Kw::True => "true",
+        Kw::Var => "var",
+        Kw::While => "while",
+        Kw::With => "with",
+    }
+}
+
 pub fn keyword(s: &str) -> Option<Kw> {
     Some(match s {
         "and" => Kw::And,

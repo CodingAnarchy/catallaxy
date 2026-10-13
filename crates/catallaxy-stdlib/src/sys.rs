@@ -76,7 +76,6 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
                 Err(e) => err(vm, &format!("{p}: {e}")),
             })
         },
-        "File.exists" => |_, a| Ok(Value::bool(std::path::Path::new(s(a[0])?).exists())),
         "File.delete" => |vm, a| {
             let p = s(a[0])?.to_string();
             let r = crate::fiber::blocking_io(vm, || std::fs::remove_file(&p));
