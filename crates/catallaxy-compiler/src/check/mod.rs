@@ -94,6 +94,11 @@ pub struct Checker {
     pub for_bodies: FxHashMap<NodeId, ClosureInfo>,
     /// Locals declared by assignments / lets / patterns, keyed by the declaring node.
     pub decl_locals: FxHashMap<NodeId, LocalId>,
+    /// Locals known to refer to the same owned object (`b = a`), by group: freezing or moving one
+    /// applies to all of them. Aliases through fields and container elements are not tracked;
+    /// the runtime ownership checks cover those.
+    pub alias_group: FxHashMap<LocalId, u32>,
+    pub next_alias_group: u32,
     /// Locals of each function (parameters first), by function id.
     pub fn_locals: FxHashMap<FnId, Vec<LocalId>>,
     pub frame_locals: FxHashMap<FnId, LocalId>,
@@ -123,6 +128,8 @@ pub struct Checker {
     pub frozen_calls: Vec<(Span, FnId, String)>,
     /// Closures checked as parallel blocks (`spawn`, `par_*`): node → is_move.
     pub spawn_nodes: FxHashMap<NodeId, bool>,
+    /// Captures of `spawn move` blocks that are moved (not sendable): (block node, local).
+    pub moved_captures: FxHashSet<(NodeId, LocalId)>,
     pub resolved_classes: FxHashSet<ClassId>,
     pub pattern_subjects: FxHashMap<NodeId, TyId>,
     /// Type parameters instantiated by the last `instantiate_sig` (for bound checks).
@@ -183,6 +190,8 @@ impl Checker {
             closures: FxHashMap::default(),
             for_bodies: FxHashMap::default(),
             decl_locals: FxHashMap::default(),
+            alias_group: FxHashMap::default(),
+            next_alias_group: 0,
             fn_locals: FxHashMap::default(),
             frame_locals: FxHashMap::default(),
             rt_types: Vec::new(),
@@ -202,6 +211,7 @@ impl Checker {
             self_calls: Vec::new(),
             frozen_calls: Vec::new(),
             spawn_nodes: FxHashMap::default(),
+            moved_captures: FxHashSet::default(),
             resolved_classes: FxHashSet::default(),
             pattern_subjects: FxHashMap::default(),
             last_inst: Vec::new(),

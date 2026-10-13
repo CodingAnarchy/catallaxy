@@ -1,0 +1,5 @@
+# expect: E0614
+# freeze(x) freezes the object in place: x itself is frozen afterwards.
+xs = [1, 2]
+f = freeze(xs)
+xs.push(3)

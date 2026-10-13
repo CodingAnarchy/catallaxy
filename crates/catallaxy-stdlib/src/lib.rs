@@ -7,6 +7,7 @@ mod coll;
 mod conc;
 mod core;
 pub mod fiber;
+mod net;
 mod script;
 mod sys;
 
@@ -57,6 +58,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         .or_else(|| conc::lookup(name))
         .or_else(|| sys::lookup(name))
         .or_else(|| script::lookup(name))
+        .or_else(|| net::lookup(name))
         .or_else(|| EXTENSIONS.read().get(name).copied())
 }
 

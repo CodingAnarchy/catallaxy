@@ -83,10 +83,25 @@ impl Checker {
         let params: Vec<PInfo> =
             f.params.iter().map(|p| PInfo { ty: self.types.subst(p.ty, &sub, Some(m.self_ty)), ..p.clone() }).collect();
         let mut ret = self.types.subst(f.ret, &sub, Some(m.self_ty));
-        if m.frozen {
+        let builtin = f.is_native || self.mods[f.module as usize].is_prelude;
+        if m.frozen && !(builtin && self.is_frozen_builtin_collection(m.self_ty)) {
             ret = self.freeze_ty(ret);
         }
         (params, ret)
+    }
+
+    /// `frozen List[T]`, `frozen Dict[K, V]` or `frozen Set[T]`. Their builtin methods (native or
+    /// in the prelude) never return the receiver or a part of it other than elements, whose types
+    /// are already frozen through the substitution, so results such as `dup()`, `map` or `take`
+    /// are fresh, owned values and need not be frozen.
+    fn is_frozen_builtin_collection(&self, t: TyId) -> bool {
+        match self.types.get(self.types.shallow_resolve(t)) {
+            Ty::Frozen(inner) => matches!(
+                self.types.get(self.types.shallow_resolve(*inner)),
+                Ty::Class(builtin::LIST | builtin::DICT | builtin::SET, _)
+            ),
+            _ => false,
+        }
     }
 
     /// The deeply frozen view of a type.

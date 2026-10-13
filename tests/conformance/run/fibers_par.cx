@@ -1,0 +1,19 @@
+# Parallel collections inside fibers, nested. A fiber's native stack is small, so the fiber waits
+# for the worker pool instead of running other jobs' tasks on it (which nested without bound and
+# overflowed the stack in debug builds). (Found by tools/difffuzz.)
+fs = (0...4).map { |k| Fiber.start {
+  total = 0
+  for i in 0...10 {
+    xs = (0...8).to_list()
+    total += (xs.par_map { |x| (0...6).to_list().par_reduce(0) { |a, b| a.max(b) } + x }).sum()
+    Fiber.yield()
+  }
+  total + k
+} }
+for f in fs { puts(f.join().unwrap()) }
+
+t = spawn {
+  inner = Fiber.start { ((1..100).to_list().par_map { |x| x * x }).par_reduce(0) { |a, b| a + b } }
+  inner.join().unwrap()
+}
+puts(t.join().unwrap())

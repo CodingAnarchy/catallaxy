@@ -163,7 +163,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
 
 /// Allocates an instance of the prelude class `class` with the given fields (others are nil).
 /// Allocation never collects, so the field values need no rooting.
-fn instance(vm: &mut Vm, class: &str, fields: &[(&str, Value)]) -> RtResult<Value> {
+pub(crate) fn instance(vm: &mut Vm, class: &str, fields: &[(&str, Value)]) -> RtResult<Value> {
     let Some(id) = program::class_named(class) else {
         return panic(format!("internal error: prelude class {class} is not loaded"));
     };
@@ -180,7 +180,7 @@ fn instance(vm: &mut Vm, class: &str, fields: &[(&str, Value)]) -> RtResult<Valu
 }
 
 /// The native data behind the `handle` field of a prelude instance.
-fn handle_data<T: 'static>(v: Value, what: &str) -> RtResult<&'static T> {
+pub(crate) fn handle_data<T: 'static>(v: Value, what: &str) -> RtResult<&'static T> {
     if kind_of(v) == ObjKind::Instance {
         let cls = class_of(v);
         if let Some(i) = cls.field_index(intern("handle")) {

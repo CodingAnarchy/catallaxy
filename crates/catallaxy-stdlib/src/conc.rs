@@ -219,6 +219,11 @@ fn chan_send(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
             if inner.capacity == 0 || q.items.len() < inner.capacity {
                 if owned {
                     ownership::transfer_deep(item, vm.tid(), TRANSIT_TID);
+                } else {
+                    // A frozen value (a string, a big integer, a frozen collection) may still be
+                    // young: the channel is reached only by major collections, so the value must
+                    // be old before it is queued, or this thread's next minor collection frees it.
+                    ownership::escape(item, vm.tid());
                 }
                 q.items.push_back(item);
                 drop(q);
@@ -603,6 +608,19 @@ fn run_job(vm: &mut Vm, kind: ParKind, f: Value, items: Vec<Value>, identity: Va
     {
         let _g = pool.signal.0.lock();
         pool.signal.1.notify_all();
+    }
+    // A fiber runs on a small native stack, and helping can nest without bound: a stolen task
+    // may belong to another job and start a parallel job of its own, which helps in turn. So a
+    // fiber leaves the work to the pool and only waits (unless there is no pool to wait for).
+    if crate::fiber::in_fiber() && pool.workers > 0 {
+        let job2 = job.clone();
+        blocking(vm, move || {
+            let (m, cv) = &job2.done;
+            let mut d = m.lock();
+            while !*d {
+                cv.wait(&mut d);
+            }
+        });
     }
     // Help until our job is finished (running any queued task keeps nested jobs progressing).
     loop {

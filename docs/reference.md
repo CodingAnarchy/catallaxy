@@ -304,6 +304,10 @@ squares = nums.par_map { |n| n * n }     # par_map / par_each / par_reduce: elem
 ```
 
 Captured variables inside `spawn` and `par_*` blocks are copied (they cannot be reassigned there).
+`freeze(x)` freezes the object in place, so `x` itself has the frozen type afterwards (until it is
+reassigned); moving a value (`move x`, `spawn move`) makes `x` unusable until reassigned. Both apply
+to every local the compiler knows refers to the same object (`b = a`). Aliases it cannot see, such as
+an object also stored in a field or list, are caught at run time by the ownership checks below.
 At runtime every object is owned (by one thread), frozen or shared. Touching another thread's owned
 object panics with `OwnershipError`; under `catx run --promote-on-access` the object is promoted to
 shared instead and a warning is logged. Single operations on shared objects are atomic; compound ones
@@ -340,6 +344,17 @@ pages = fs.map { |f| f.join().unwrap() }
   joins is freed with the handle.
 - Keywords are valid method names after `.` and in method declarations (`obj.match(x)`).
 
+### 8.3 Networking
+
+`Net.connect(host, port)` and `Net.listen(host, port)` (port 0 picks a free one; see
+`listener.port`) give `Socket`s and `Listener`s with `read`, `read_line`, `write`, `accept`,
+`set_timeout` and `close`; failures, including timeouts, are `Err` values. A socket operation
+that would block parks the calling fiber, so one OS thread serves thousands of connections:
+sockets are non-blocking and a single reactor thread wakes waiting fibers (or, outside fibers,
+waiting threads). `catx` raises its open-file limit at startup so servers are not capped at the
+OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse` (`status`,
+`headers` with lowercase names, `body`); they run on the I/O pool.
+
 ## 9. Dyn
 
 `Dyn` values come from `Json.parse` and other dynamic sources. Any operation on `Dyn` (`d["k"]`, `d[0]`,
@@ -355,6 +370,23 @@ pages = fs.map { |f| f.join().unwrap() }
 program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
 `{ ... }` block across lines when its line would exceed 100 columns. `--check` lists the files that
 would change and exits with status 1 if there are any. Files with syntax errors are left untouched.
+
+`catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
+unsaved edits. It provides:
+
+- diagnostics (published on open, change and save), hover (types, signatures), go to definition,
+  completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
+- find references and rename (with prepare-rename) for locals, parameters (including named
+  arguments), functions, methods (an override and the method it overrides rename together), fields,
+  classes, enums, variants, interfaces and constants. They cover the document and every module it
+  imports; names from the prelude cannot be renamed;
+- signature help for function, method and constructor calls, showing default values and marking
+  the trailing-block parameter, with the active parameter following commas and named arguments;
+- inlay hints with the inferred types of unannotated variables, `for`/`let`/`if let` bindings and
+  block parameters, and the inferred requirement of each untyped parameter of an implicit-generic
+  function (`fn shout(x)` shows `x: { fn upcase(self) -> _ }`);
+- document symbols (an outline of items, members and top-level variables) and workspace symbols
+  (over the open documents and the modules they import).
 
 `check --json` prints `{"diagnostics": [...]}` where each diagnostic has `code`, `severity`, `message`,
 `file`, `span` (`start`/`end` as `{line, col, offset}`, 1-based lines and columns), `notes`, and `fixes`

@@ -1,0 +1,35 @@
+# Builtin collection methods on frozen receivers return fresh, mutable values: `dup()` is the
+# way to get a mutable copy, and `map`, `sort`, `take`, set algebra and the like build new
+# collections. Elements keep their frozen view. (Found by tools/difffuzz.)
+fz = freeze([3, 1, 2])
+copy = fz.dup()
+copy.push(4)
+doubled = fz.map { |x| x * 10 }
+doubled.push(5)
+sorted = fz.sort()
+sorted.insert(0, 0)
+firsts = fz.take(2)
+firsts.push(9)
+puts(copy)
+puts(doubled)
+puts(sorted)
+puts(firsts)
+puts(fz)
+
+d = freeze(["a": 1]).dup()
+d["b"] = 2
+puts(d)
+s = freeze(Set.from([1])).union(Set.from([2]))
+s.add(3)
+puts(s)
+
+# A list of frozen lists: the outer copy is mutable, its elements are still frozen.
+nested = freeze([[1], [2]])
+outer = nested.dup()
+outer.push(freeze([3]))
+puts(outer)
+puts(outer.map { |xs| xs.sum() })
+
+# Closures built from a frozen list stay callable.
+adders = fz.map { |n| fn(x: Int) -> Int { x + n } }
+puts(adders.map { |f| f(100) })

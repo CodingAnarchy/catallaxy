@@ -4,5 +4,6 @@
 /fuzz/target
 /fuzz/corpus
 /fuzz/artifacts
+/tools/difffuzz/target
 /.claude/
 /bench/big.cx
