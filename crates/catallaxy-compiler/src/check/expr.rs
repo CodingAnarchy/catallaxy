@@ -402,7 +402,43 @@ impl Checker {
         self.types.func(pts, r)
     }
 
+    /// Records that local `l` now holds the value of `value`: if that is another local holding an
+    /// owned object, the two are aliases. Any earlier alias of `l` ends.
+    fn note_alias(&mut self, l: LocalId, value: &Expr) {
+        self.alias_group.remove(&l);
+        let ExprKind::Ident(name) = &value.kind else { return };
+        let Some(a) = self.lookup_local(name) else { return };
+        if a == l || self.cap_of(self.locals[a as usize].ty) != Cap::Owned {
+            return;
+        }
+        let g = match self.alias_group.get(&a) {
+            Some(&g) => g,
+            None => {
+                let g = self.next_alias_group;
+                self.next_alias_group += 1;
+                self.alias_group.insert(a, g);
+                g
+            }
+        };
+        self.alias_group.insert(l, g);
+    }
+
+    /// `l` and every local known to alias it.
+    pub fn aliases_of(&self, l: LocalId) -> Vec<LocalId> {
+        match self.alias_group.get(&l) {
+            Some(&g) => self.alias_group.iter().filter(|&(_, &h)| h == g).map(|(&m, _)| m).collect(),
+            None => vec![l],
+        }
+    }
+
     pub fn mark_moved(&mut self, l: LocalId, span: Span) {
+        // Moving a value moves it out of every variable that refers to it.
+        for m in self.aliases_of(l) {
+            self.mark_moved_one(m, span);
+        }
+    }
+
+    fn mark_moved_one(&mut self, l: LocalId, span: Span) {
         // The move is recorded in the variable's owning context.
         let owner = self.locals[l as usize].ctx as usize;
         if self.ctxs.len() > owner {
@@ -1283,6 +1319,11 @@ impl Checker {
                         c.moved.remove(&l);
                     }
                     self.clear_narrowing(l);
+                    if op.is_none() {
+                        self.note_alias(l, value);
+                    } else {
+                        self.alias_group.remove(&l);
+                    }
                     let declared_r = self.types.shallow_resolve(declared);
                     if self.types.is_nilable(declared_r)
                         && !self.types.is_nilable(vt)
@@ -1335,6 +1376,7 @@ impl Checker {
                 self.decl_locals.insert(e.id, l);
                 self.names.insert(target.id, NameRes::Local(l));
                 self.assigns.insert(e.id, AssignRes::Local(l));
+                self.note_alias(l, value);
             }
             ExprKind::Member { recv, name, .. } => {
                 let rt = self.check_expr(recv, None);
@@ -1575,6 +1617,18 @@ impl Checker {
                 }
                 let t = self.check_expr(&args[0].value, None);
                 self.calls.insert(e.id, CallRes::Freeze);
+                // The object is frozen in place: the variable (and its aliases) now hold a frozen
+                // value until reassigned, so mutating through them is a compile error.
+                if let ExprKind::Ident(name) = &args[0].value.kind {
+                    if let Some(l) = self.lookup_local(name) {
+                        if self.cap_of(self.locals[l as usize].ty) == Cap::Owned {
+                            for m in self.aliases_of(l) {
+                                let ft = self.freeze_ty(self.local_ty(m));
+                                self.narrow(m, ft);
+                            }
+                        }
+                    }
+                }
                 return self.freeze_ty(t);
             }
         }

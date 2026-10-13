@@ -1,0 +1,7 @@
+# expect: E0608
+# spawn move moves the object out of every variable that refers to it.
+a = [1, 2]
+b = a
+t = spawn move { b.push(3); b.length }
+puts(t.join())
+puts(a)
