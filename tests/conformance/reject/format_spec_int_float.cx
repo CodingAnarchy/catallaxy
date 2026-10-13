@@ -1,0 +1,5 @@
+# expect: E0380
+# Integer-only types do not apply to Float, and Int formats take no precision.
+puts("#{1.5:x}")
+puts("#{3:.2}")
+puts("#{"s":+}")

@@ -7,7 +7,7 @@
 //! allocation. Pages are swept lazily: after a collection every page is "unswept", and a thread sweeps
 //! a page right before allocating from it.
 
-use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
 use std::cell::UnsafeCell;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
@@ -394,7 +394,7 @@ impl LocalHeap {
     pub fn alloc(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
         debug_assert!(size >= HEADER_SIZE);
         if size > MAX_SMALL {
-            return self.alloc_large(size, vtable);
+            return self.alloc_large(size, vtable, true);
         }
         let class = size_class_of(size);
         let slot_size = SIZE_CLASSES[class];
@@ -420,6 +420,21 @@ impl LocalHeap {
         let h = slot as *mut Header;
         unsafe { Header::init(h, vtable, self.owner, POOL.live_color.load(Ordering::Relaxed), self.young_alloc) };
         h
+    }
+
+    /// As [`LocalHeap::alloc`], but a large object's bytes after the header are left
+    /// uninitialized (small ones are still zeroed), saving a pass over memory the caller is about
+    /// to overwrite anyway.
+    ///
+    /// # Safety
+    /// The caller must initialize every byte of the object after the header before the thread's
+    /// next safepoint, and must not read any byte before writing it.
+    #[inline]
+    pub unsafe fn alloc_uninit(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
+        if size > MAX_SMALL {
+            return self.alloc_large(size, vtable, false);
+        }
+        self.alloc(size, vtable)
     }
 
     #[cold]
@@ -484,9 +499,17 @@ impl LocalHeap {
     }
 
     #[cold]
-    fn alloc_large(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
+    fn alloc_large(&mut self, size: usize, vtable: *const crate::GcVTable, zeroed: bool) -> *mut Header {
         let layout = Layout::from_size_align((size + 15) & !15, 16).unwrap();
-        let p = unsafe { alloc_zeroed(layout) };
+        // Uninitialized memory spares the system allocator from clearing reused memory (on
+        // macOS, an madvise call per allocation).
+        let p = unsafe {
+            if zeroed {
+                alloc_zeroed(layout)
+            } else {
+                alloc(layout)
+            }
+        };
         if p.is_null() {
             std::alloc::handle_alloc_error(layout);
         }
@@ -501,13 +524,33 @@ impl LocalHeap {
         h
     }
 
+    /// Addresses of the young large objects that are minor-marked, sorted. Called after a minor
+    /// collection has marked from the roots alone: these are the ones the roots reach directly.
+    pub(crate) fn marked_young_large(&self) -> Vec<usize> {
+        let mut v: Vec<usize> = self
+            .young_large
+            .iter()
+            .filter(|o| unsafe { &*(o.ptr as *const Header) }.meta_relaxed() & MINOR_MARK_BIT != 0)
+            .map(|o| o.ptr as usize)
+            .collect();
+        v.sort_unstable();
+        v
+    }
+
     /// Minor collection, part 2: with every young object reachable from the thread's roots and
     /// remembered set minor-marked, frees the rest and tenures the survivors. Returns (bytes
     /// freed, bytes promoted).
     ///
+    /// Large survivors in `keep_young` (sorted addresses) stay young instead: the collector found
+    /// them referenced only by roots, never by a heap object. A heap object that comes to
+    /// reference one later is either young or goes through the write barrier, so the next minor
+    /// collection finds that reference too. This way a large temporary that was live only in a
+    /// register when the collection ran (the previous string in `s = s + x`) is freed by the next
+    /// minor collection instead of being promoted to wait for a major one.
+    ///
     /// # Safety
     /// Called by the owning thread at a safepoint, after marking.
-    pub(crate) unsafe fn sweep_young(&mut self) -> (usize, usize) {
+    pub(crate) unsafe fn sweep_young(&mut self, keep_young: &[usize]) -> (usize, usize) {
         let tid = self.owner;
         let (mut freed, mut promoted) = (0, 0);
         // Pages filled since the last minor collection.
@@ -542,13 +585,19 @@ impl LocalHeap {
             }
         }
         // Large objects.
-        let mut large = POOL.large.lock();
+        let mut kept = Vec::new();
+        let mut tenured = Vec::new();
         for obj in std::mem::take(&mut self.young_large) {
             let h = &*(obj.ptr as *const Header);
             if h.meta_relaxed() & MINOR_MARK_BIT != 0 {
-                h.tenure();
-                promoted += obj.layout.size();
-                large.push(obj);
+                if keep_young.binary_search(&(obj.ptr as usize)).is_ok() {
+                    h.clear_minor_mark();
+                    kept.push(obj);
+                } else {
+                    h.tenure();
+                    promoted += obj.layout.size();
+                    tenured.push(obj);
+                }
             } else {
                 if let Some(fin) = (*h.vtable()).finalize {
                     fin(obj.ptr as *mut Header);
@@ -557,7 +606,10 @@ impl LocalHeap {
                 freed += obj.layout.size();
             }
         }
-        drop(large);
+        self.young_large = kept;
+        if !tenured.is_empty() {
+            POOL.large.lock().append(&mut tenured);
+        }
         for &o in &self.remset {
             (*o).clear_remembered();
         }

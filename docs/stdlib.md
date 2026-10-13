@@ -147,7 +147,7 @@ Everything here is available in every module without an import.
 
 ## Int
 
-- `fn to_s(self) -> String`
+- `fn to_s(self, base: Int = 10) -> String`
 - `fn hash(self) -> Int`
 - `fn <=>(self, other: Int) -> Int`
 - `fn to_f(self) -> Float`
@@ -259,6 +259,7 @@ Everything here is available in every module without an import.
 - `fn center(self, width: Int, pad: String = " ") -> String`
 - `fn ljust(self, width: Int, pad: String = " ") -> String`
 - `fn rjust(self, width: Int, pad: String = " ") -> String`
+- `fn format(self, args: List[Dyn]) -> String`
 - `fn is_digit(self) -> Bool`
 - `fn is_alpha(self) -> Bool`
 - `fn is_alnum(self) -> Bool`
@@ -332,6 +333,32 @@ Everything here is available in every module without an import.
 ## List[List[U]]
 
 - `fn flatten(self) -> List[U]`
+
+## Deque[T]
+
+- `fn init(self)`
+- `fn from(items: Enumerable[T]) -> Deque[T]`
+- `fn length(self) -> Int`
+- `fn size(self) -> Int`
+- `fn is_empty(self) -> Bool`
+- `fn push(self, item: T)`
+- `fn pop(self) -> T?`
+- `fn unshift(self, item: T)`
+- `fn shift(self) -> T?`
+- `fn first(self) -> T?`
+- `fn last(self) -> T?`
+- `fn [](self, index: Int) -> T`
+- `fn []=(self, index: Int, value: T)`
+- `fn get(self, index: Int) -> T?`
+- `fn clear(self)`
+- `fn each(self, f: fn(T))`
+- `fn to_list(self) -> List[T]`
+- `fn dup(self) -> Deque[T]`
+- `fn ==(self, other: Deque[T]) -> Bool`
+- `fn hash(self) -> Int`
+- `fn to_s(self) -> String`
+- `fn inspect(self) -> String`
+- `fn to_json(self) -> Dyn`
 
 ## Dict[K, V]
 
@@ -560,6 +587,82 @@ Everything here is available in every module without an import.
 - `fn now() -> Float`
 - `fn monotonic() -> Float`
 - `fn millis() -> Int`
+
+## Duration (frozen)
+
+- field `nanos: Int`
+- `fn from_nanos(n: Int) -> Duration`
+- `fn from_micros(n: Int) -> Duration`
+- `fn from_millis(n: Int) -> Duration`
+- `fn from_secs(n: Int) -> Duration`
+- `fn from_mins(n: Int) -> Duration`
+- `fn from_hours(n: Int) -> Duration`
+- `fn from_days(n: Int) -> Duration`
+- `fn from_secs_f(secs: Float) -> Duration`
+- `fn as_nanos(self) -> Int`
+- `fn as_micros(self) -> Int`
+- `fn as_millis(self) -> Int`
+- `fn as_secs(self) -> Int`
+- `fn as_secs_f(self) -> Float`
+- `fn is_zero(self) -> Bool`
+- `fn is_negative(self) -> Bool`
+- `fn abs(self) -> Duration`
+- `fn neg(self) -> Duration`
+- `fn +(self, other: Duration) -> Duration`
+- `fn -(self, other: Duration) -> Duration`
+- `fn *(self, k: Int) -> Duration`
+- `fn /(self, k: Int) -> Duration`
+- `fn <=>(self, other: Duration) -> Int`
+- `fn ==(self, other: Duration) -> Bool`
+- `fn hash(self) -> Int`
+- `fn to_s(self) -> String`
+
+## Instant (frozen)
+
+- field `nanos: Int`
+- `fn now() -> Instant`
+- `fn elapsed(self) -> Duration`
+- `fn since(self, earlier: Instant) -> Duration`
+- `fn +(self, d: Duration) -> Instant`
+- `fn -(self, d: Duration) -> Instant`
+- `fn <=>(self, other: Instant) -> Int`
+- `fn ==(self, other: Instant) -> Bool`
+- `fn hash(self) -> Int`
+
+## DateTime (frozen)
+
+- field `unix: Int`
+- field `nanosecond: Int`
+- field `offset: Int`
+- `fn now() -> DateTime`
+- `fn now_utc() -> DateTime`
+- `fn from_unix(secs: Int, nanosecond: Int = 0, offset: Int = 0) -> DateTime`
+- `fn from_unix_millis(ms: Int, offset: Int = 0) -> DateTime`
+- `fn of(year: Int, month: Int, day: Int, hour: Int = 0, minute: Int = 0, second: Int = 0, nanosecond: Int = 0, offset: Int = 0) -> DateTime`
+- `fn parse(text: String) -> Result[DateTime, String]`
+- `fn year(self) -> Int`
+- `fn month(self) -> Int`
+- `fn day(self) -> Int`
+- `fn hour(self) -> Int`
+- `fn minute(self) -> Int`
+- `fn second(self) -> Int`
+- `fn weekday(self) -> Int`
+- `fn yday(self) -> Int`
+- `fn days(self) -> Int`
+- `fn second_of_day(self) -> Int`
+- `fn unix_millis(self) -> Int`
+- `fn to_f(self) -> Float`
+- `fn with_offset(self, offset: Int) -> DateTime`
+- `fn to_utc(self) -> DateTime`
+- `fn to_local(self) -> DateTime`
+- `fn +(self, d: Duration) -> DateTime`
+- `fn -(self, d: Duration) -> DateTime`
+- `fn since(self, earlier: DateTime) -> Duration`
+- `fn <=>(self, other: DateTime) -> Int`
+- `fn ==(self, other: DateTime) -> Bool`
+- `fn hash(self) -> Int`
+- `fn to_s(self) -> String`
+- `fn format(self, pattern: String) -> String`
 
 ## Random
 

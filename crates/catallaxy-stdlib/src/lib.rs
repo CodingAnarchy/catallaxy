@@ -53,6 +53,9 @@ pub fn register_native(name: &str, f: NativeFn) {
 
 /// Looks up a native implementation by name: the standard library, then extensions.
 pub fn lookup(name: &str) -> Option<NativeFn> {
+    // Natives are looked up while the program loads: start the monotonic clock there, so
+    // `Time.monotonic` and `Instant` count from the start of the program.
+    sys::init_clock();
     core::lookup(name)
         .or_else(|| coll::lookup(name))
         .or_else(|| conc::lookup(name))
@@ -81,6 +84,12 @@ pub(crate) fn s<'a>(v: Value) -> RtResult<&'a str> {
         Some(s) => Ok(s),
         None => panic(format!("TypeError: expected String, got {}", class_of(v).name)),
     }
+}
+
+/// The string object behind `v`.
+pub(crate) fn str_obj<'a>(v: Value) -> RtResult<&'a catallaxy_runtime::object::StrObj> {
+    s(v)?;
+    Ok(unsafe { catallaxy_runtime::object::as_str_obj(v) })
 }
 
 pub(crate) fn int(v: Value) -> RtResult<i64> {

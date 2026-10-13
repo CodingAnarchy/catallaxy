@@ -1,0 +1,8 @@
+# Big integers round-trip through JSON as numbers, not strings.
+d = Json.parse("{\"big\": 12345678901234567890}").unwrap()
+puts(Json.stringify(d))
+huge: Dyn = ["n": 2 ** 100, "neg": -(2 ** 70), "small": 7, "list": [2 ** 64, 1.5, nil, "s\"q"], "e": [], "o": [:]]
+puts(Json.stringify(huge))
+puts(Json.pretty(huge))
+again = Json.parse(Json.stringify(d)).unwrap()
+puts(again["big"] == 12345678901234567890)

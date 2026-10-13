@@ -7,6 +7,8 @@ pub mod program;
 pub mod slow;
 
 pub use bytecode::Program;
+/// Format specs, shared with the compiler (which parses and checks them).
+pub use catallaxy_runtime::fmtspec;
 pub use interp::Vm;
 pub use program::{load, NativeFn};
 #[cfg(feature = "op-profile")]

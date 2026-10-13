@@ -1,0 +1,4 @@
+# expect: E0611
+# DateTime is a frozen value type.
+t = DateTime.of(2024, 1, 1)
+t.unix = 5
