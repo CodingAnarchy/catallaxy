@@ -663,7 +663,21 @@ impl<'a> Codegen<'a> {
         let off = st.code.len() as isize - at as isize - 1;
         let w = st.code[at];
         let op = Op::from_u8(op_of(w));
-        if matches!(op, Op::JNLtI | Op::JNLeI | Op::JNLtF | Op::JNLeF | Op::JNEqI | Op::JEqI) {
+        if matches!(
+            op,
+            Op::JNLtI
+                | Op::JNLeI
+                | Op::JNLtF
+                | Op::JNLeF
+                | Op::JNEqI
+                | Op::JEqI
+                | Op::JNLtIK
+                | Op::JNLeIK
+                | Op::JNGtIK
+                | Op::JNGeIK
+                | Op::JNEqIK
+                | Op::JEqIK
+        ) {
             // The offset counts from after the data word: in C when it fits, else in the data word.
             let off = off - 1;
             let (a, b) = (a_of(w) as u8, b_of(w) as u8);
@@ -1603,6 +1617,39 @@ impl<'a> Codegen<'a> {
                 } =>
             {
                 let int = matches!(self.ck.bins.get(&cond.id), Some(BinRes::Compare(ArithKind::Int)));
+                if int {
+                    // A small Int literal on either side becomes an immediate operand.
+                    let lit = |e: &Expr| match &e.kind {
+                        ExprKind::Int(s) => s.parse::<i64>().ok().filter(|i| (-128..=127).contains(i)),
+                        _ => None,
+                    };
+                    let flipped = |op: BinOp| match op {
+                        BinOp::Lt => BinOp::Gt,
+                        BinOp::Le => BinOp::Ge,
+                        BinOp::Gt => BinOp::Lt,
+                        BinOp::Ge => BinOp::Le,
+                        o => o,
+                    };
+                    let imm = match (lit(r), lit(l)) {
+                        (Some(k), _) => Some((l, *op, k)),
+                        (None, Some(k)) => Some((r, flipped(*op), k)),
+                        _ => None,
+                    };
+                    if let Some((x, op, k)) = imm {
+                        let a = self.expr_reg(st, x);
+                        let fop = match op {
+                            BinOp::Lt => Op::JNLtIK,
+                            BinOp::Le => Op::JNLeIK,
+                            BinOp::Gt => Op::JNGtIK,
+                            BinOp::Ge => Op::JNGeIK,
+                            BinOp::Eq => Op::JNEqIK,
+                            _ => Op::JEqIK,
+                        };
+                        let out = vec![self.emit_fused(st, fop, a, k as i8 as u8)];
+                        self.release_to(st, mark);
+                        return out;
+                    }
+                }
                 let a = self.expr_reg(st, l);
                 let b = self.expr_reg(st, r);
                 let (lt, le) = if int { (Op::JNLtI, Op::JNLeI) } else { (Op::JNLtF, Op::JNLeF) };
@@ -2223,6 +2270,57 @@ fn peephole(code: &mut [u32]) {
             if Op::from_u8(op_of(next)) == Op::Return && a_of(next) == a_of(w) {
                 code[pc] = encode(Op::Return, b_of(w) as u8, 0, 0);
             }
+        }
+    }
+    // Last: after this, `starts` also lists data words of fused pairs.
+    // Fuse `GetField a b i; GetField a+1 c j` (field indices < 2^16, c != a, nothing jumping to
+    // the second) into `GetField2 a b c` + data word: two words for two words.
+    let mut targets = std::collections::HashSet::new();
+    for &pc in &starts {
+        let w = code[pc];
+        let t = match Op::from_u8(op_of(w)) {
+            Op::Jmp => Some(pc as isize + 1 + sax_of(w)),
+            Op::JmpIf | Op::JmpIfNot | Op::JmpIfNil | Op::JmpIfNotNil | Op::JmpIfNotEmpty => {
+                Some(pc as isize + 1 + sbx_of(w))
+            }
+            Op::JNLtI
+            | Op::JNLeI
+            | Op::JNLtF
+            | Op::JNLeF
+            | Op::JNEqI
+            | Op::JEqI
+            | Op::JNLtIK
+            | Op::JNLeIK
+            | Op::JNGtIK
+            | Op::JNGeIK
+            | Op::JNEqIK
+            | Op::JEqIK => {
+                let c = c_of(w);
+                let off = if c < 0x80 { c as isize } else { code[pc + 1] as i32 as isize };
+                Some(pc as isize + 2 + off)
+            }
+            _ => None,
+        };
+        if let Some(t) = t {
+            targets.insert(t as usize);
+        }
+    }
+    let mut k = 0;
+    while k + 1 < starts.len() {
+        let (p, q) = (starts[k], starts[k + 1]);
+        k += 1;
+        let (w1, w2) = (code[p], code[q]);
+        if Op::from_u8(op_of(w1)) == Op::GetField
+            && Op::from_u8(op_of(w2)) == Op::GetField
+            && q == p + 1
+            && !targets.contains(&q)
+            && a_of(w2) == a_of(w1) + 1
+            && b_of(w2) != a_of(w1)
+            && c_of(w1) < 0x1_0000
+        {
+            code[p] = encode(Op::GetField2, a_of(w1) as u8, b_of(w1) as u8, b_of(w2) as u8);
+            code[q] = (c_of(w1) as u32) | ((c_of(w2) as u32) << 16);
+            k += 1; // `q` is a data word now
         }
     }
 }
