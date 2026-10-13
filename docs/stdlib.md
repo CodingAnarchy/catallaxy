@@ -311,6 +311,32 @@ Everything here is available in every module without an import.
 
 - `fn flatten(self) -> List[U]`
 
+## Deque[T]
+
+- `fn init(self)`
+- `fn from(items: Enumerable[T]) -> Deque[T]`
+- `fn length(self) -> Int`
+- `fn size(self) -> Int`
+- `fn is_empty(self) -> Bool`
+- `fn push(self, item: T)`
+- `fn pop(self) -> T?`
+- `fn unshift(self, item: T)`
+- `fn shift(self) -> T?`
+- `fn first(self) -> T?`
+- `fn last(self) -> T?`
+- `fn [](self, index: Int) -> T`
+- `fn []=(self, index: Int, value: T)`
+- `fn get(self, index: Int) -> T?`
+- `fn clear(self)`
+- `fn each(self, f: fn(T))`
+- `fn to_list(self) -> List[T]`
+- `fn dup(self) -> Deque[T]`
+- `fn ==(self, other: Deque[T]) -> Bool`
+- `fn hash(self) -> Int`
+- `fn to_s(self) -> String`
+- `fn inspect(self) -> String`
+- `fn to_json(self) -> Dyn`
+
 ## Dict[K, V]
 
 - `fn new() -> Dict[K, V]`

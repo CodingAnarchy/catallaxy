@@ -156,11 +156,26 @@ impl Mutator {
     }
 
     pub fn alloc_str(&mut self, s: &str) -> Value {
-        let h = self.alloc_raw(StrObj::BASE + s.len(), BUILTINS.string);
+        let chars = (s.len() >= StrObj::INDEX_MIN).then(|| if s.is_ascii() { s.len() } else { s.chars().count() });
+        self.alloc_str_parts(&[s], chars)
+    }
+
+    /// Allocates the concatenation of `parts`, which together hold `chars` characters (`None`
+    /// if unknown; it must be known for results of at least [`StrObj::INDEX_MIN`] bytes).
+    pub fn alloc_str_parts(&mut self, parts: &[&str], chars: Option<usize>) -> Value {
+        let len: usize = parts.iter().map(|p| p.len()).sum();
+        debug_assert!(len < StrObj::INDEX_MIN || chars.is_some());
+        let (size, word) = StrObj::layout(len, chars);
+        let h = self.alloc_raw(size, BUILTINS.string);
         unsafe {
             let o = &mut *(h as *mut StrObj);
-            o.len = s.len();
-            std::ptr::copy_nonoverlapping(s.as_ptr(), o.data_ptr(), s.len());
+            o.len = len;
+            *o.chars.get_mut() = word;
+            let mut dst = o.data_ptr();
+            for p in parts {
+                std::ptr::copy_nonoverlapping(p.as_ptr(), dst, p.len());
+                dst = dst.add(p.len());
+            }
             (*h).set_state(ObjState::Frozen);
         }
         Value::from_ptr(h)
