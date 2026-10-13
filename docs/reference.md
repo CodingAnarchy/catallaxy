@@ -304,6 +304,10 @@ squares = nums.par_map { |n| n * n }     # par_map / par_each / par_reduce: elem
 ```
 
 Captured variables inside `spawn` and `par_*` blocks are copied (they cannot be reassigned there).
+`freeze(x)` freezes the object in place, so `x` itself has the frozen type afterwards (until it is
+reassigned); moving a value (`move x`, `spawn move`) makes `x` unusable until reassigned. Both apply
+to every local the compiler knows refers to the same object (`b = a`). Aliases it cannot see, such as
+an object also stored in a field or list, are caught at run time by the ownership checks below.
 At runtime every object is owned (by one thread), frozen or shared. Touching another thread's owned
 object panics with `OwnershipError`; under `catx run --promote-on-access` the object is promoted to
 shared instead and a warning is logged. Single operations on shared objects are atomic; compound ones

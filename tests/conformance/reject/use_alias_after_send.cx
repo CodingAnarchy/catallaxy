@@ -1,0 +1,7 @@
+# expect: E0608
+# Sending moves the object out of its aliases too.
+a = [1, 2]
+b = a
+ch: Channel[List[Int]] = Channel.new()
+ch.send(move b)
+puts(a.length)
