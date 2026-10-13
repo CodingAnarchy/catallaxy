@@ -84,7 +84,21 @@ fn file_uri(name: &str) -> (String, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("catx-lsp-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
-    (format!("file://{}", path.display()), path)
+    // A real file URI on every platform: `file:///C:/Users/...` on Windows, percent-encoded the way
+    // the server encodes the locations it returns.
+    let p = path.to_string_lossy().replace('\\', "/");
+    let mut uri = String::from("file://");
+    if !p.starts_with('/') {
+        uri.push('/');
+    }
+    for b in p.bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~:".contains(&b) {
+            uri.push(b as char);
+        } else {
+            uri.push_str(&format!("%{b:02X}"));
+        }
+    }
+    (uri, path)
 }
 
 #[test]
