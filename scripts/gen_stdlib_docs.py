@@ -40,7 +40,8 @@ for f in ["core.cx", "builtins.cx"]:
         elif depth == 1 and section:
             if line.startswith(("fn ", "native fn ", "pub fn ", "mut fn")):
                 out.append(f"- `{sig_of(line)}`")
-            elif re.match(r"^[a-z_]\w*: ", line):
+            elif re.match(r"^[a-z]\w*: ", line):
+                # Fields starting with `_` are implementation details (e.g. `Fiber._result`).
                 out.append(f"- field `{line}`")
             elif line.startswith("const "):
                 out.append(f"- `{line}`")
