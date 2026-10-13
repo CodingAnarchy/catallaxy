@@ -1,6 +1,7 @@
 //! `catx`: the Catallaxy command-line tool.
 
 mod files;
+mod fix_cmd;
 mod fmt_cmd;
 mod lsp;
 mod repl;
@@ -16,6 +17,7 @@ USAGE:
     catx run [--promote-on-access] <file.cx> [args...]
     catx check [--json] <file.cx|dir>...
     catx fmt [--check] <file.cx|dir>...   (`catx fmt -` formats stdin to stdout)
+    catx fix [--dry-run] <file.cx|dir>...
     catx test [dir]
     catx repl
     catx lsp
@@ -60,6 +62,7 @@ fn main() -> ExitCode {
         "run" => run::cmd_run(rest),
         "check" => run::cmd_check(rest),
         "fmt" => fmt_cmd::cmd_fmt(rest),
+        "fix" => fix_cmd::cmd_fix(rest),
         "disasm" => run::cmd_disasm(rest),
         "test" => run::cmd_test(rest),
         "repl" => repl::cmd_repl(rest),
