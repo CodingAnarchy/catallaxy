@@ -48,12 +48,18 @@ pub fn check_read(m: &Mutator, h: &Header) -> RtResult<Access> {
     }
 }
 
-/// Checks that the current thread may write the object at `h`.
+/// Checks that the current thread may write the object at `h`. Writing into an old object this
+/// thread owns adds it to the remembered set (it may come to point at young objects).
 #[inline(always)]
 pub fn check_write(m: &Mutator, h: &Header) -> RtResult<Access> {
     let meta = h.meta();
     match Header::state_of(meta) {
-        ObjState::Owned if Header::owner_of(meta) == m.tid => Ok(Access::Local),
+        ObjState::Owned if Header::owner_of(meta) == m.tid => {
+            if Header::needs_remember(meta) {
+                remember(m, h);
+            }
+            Ok(Access::Local)
+        }
         ObjState::Shared => Ok(Access::Shared),
         ObjState::Frozen => Err(frozen_error(h)),
         ObjState::Owned => foreign(m, h),
@@ -83,6 +89,44 @@ fn foreign(m: &Mutator, h: &Header) -> RtResult<Access> {
         h.owner(),
         m.tid
     )))
+}
+
+/// Write barrier slow path: records `h`, an old object owned by this thread, in the remembered set.
+#[cold]
+pub fn remember(m: &Mutator, h: &Header) {
+    // SAFETY: the heap belongs to this (running) thread.
+    unsafe { (*m.heap_ptr()).remember(h) };
+}
+
+/// Makes everything reachable from `v` old that a minor collection of thread `tid` could
+/// otherwise free: young objects, found directly or through old objects `tid` owns and wrote
+/// since its last minor collection. Every path that lets another thread or a global reach `v`
+/// calls this first (sharing, freezing, moving, publishing).
+pub fn escape(v: Value, tid: u16) {
+    let Some(h) = v.header() else { return };
+    let meta = h.meta();
+    let owned_old = Header::state_of(meta) == ObjState::Owned && Header::owner_of(meta) == tid && h.is_remembered();
+    if !h.is_young() && !owned_old {
+        return; // the common case: nothing young below an old, unwritten object
+    }
+    let mut work = vec![v];
+    let mut seen_old = rustc_hash::FxHashSet::default();
+    while let Some(x) = work.pop() {
+        let Some(h) = x.header() else { continue };
+        if h.is_young() {
+            h.tenure();
+            for_each_child(x, |c| work.push(c));
+            continue;
+        }
+        let meta = h.meta();
+        if Header::state_of(meta) == ObjState::Owned
+            && Header::owner_of(meta) == tid
+            && h.is_remembered()
+            && seen_old.insert(x.0)
+        {
+            for_each_child(x, |c| work.push(c));
+        }
+    }
 }
 
 /// Calls `f` for every value directly referenced by the object `v`.
@@ -130,6 +174,8 @@ pub fn for_each_child(v: Value, mut f: impl FnMut(Value)) {
 /// Deeply freezes `v`: every reachable object owned by this thread becomes frozen.
 /// Frozen and shared objects are left as they are (they never point to owned ones).
 pub fn freeze_deep(m: &Mutator, v: Value) -> RtResult<()> {
+    // Frozen objects may be shared freely, so they must be old.
+    escape(v, m.tid);
     let mut work = vec![v];
     while let Some(x) = work.pop() {
         let Some(h) = x.header() else { continue };
@@ -161,6 +207,7 @@ pub fn freeze_deep(m: &Mutator, v: Value) -> RtResult<()> {
 /// Deeply promotes `v` to shared. With `steal`, objects owned by other threads are promoted too
 /// (`--promote-on-access`); otherwise they are an error.
 pub fn share_deep(m: &Mutator, v: Value, steal: bool) -> RtResult<()> {
+    escape(v, m.tid);
     let mut work = vec![v];
     while let Some(x) = work.pop() {
         let Some(h) = x.header() else { continue };
@@ -190,6 +237,9 @@ pub fn transfer_deep(v: Value, from: u16, to: u16) {
     if from == to {
         return;
     }
+    // The receiver must not see objects the sender's next minor collection could free. Values
+    // in transit (`from` is the transit id) are already old.
+    escape(v, from);
     let mut work = vec![v];
     while let Some(x) = work.pop() {
         let Some(h) = x.header() else { continue };
@@ -208,6 +258,7 @@ pub const TRANSIT_TID: u16 = 0;
 /// promoted to shared so other threads may reach them.
 #[inline]
 pub fn publish_into_shared(m: &Mutator, v: Value) -> RtResult<()> {
+    escape(v, m.tid);
     if let Some(h) = v.header() {
         if h.state() == ObjState::Owned {
             share_deep(m, v, false)?;

@@ -90,7 +90,10 @@ catx lsp                        language server (stdio)
 | `catallaxy` | the `catx` command-line tool, REPL and language server |
 | `catallaxy-capi` | C ABI for embedding and native extensions (`include/catallaxy.h`) |
 
-All `unsafe` code lives in `catallaxy-gc` and `catallaxy-runtime`.
+The memory-management and object-model `unsafe` code lives in `catallaxy-gc` and `catallaxy-runtime`,
+which run under Miri and ThreadSanitizer. `catallaxy-vm` (the interpreter's register file and object
+views), `catallaxy-stdlib` (native object access) and `catallaxy-capi` (the FFI boundary) use `unsafe`
+through those crates' APIs; the compiler and the `catallaxy` crate use none.
 
 ## Status
 

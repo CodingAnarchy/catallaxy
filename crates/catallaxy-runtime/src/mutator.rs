@@ -56,6 +56,11 @@ impl Mutator {
         Mutator { tid: rec.tid, rec, heap, handles }
     }
 
+    /// Whether new objects start young (see `catallaxy_gc::LocalHeap::set_young_alloc`).
+    pub fn set_young_alloc(&mut self, on: bool) {
+        unsafe { (*self.heap).set_young_alloc(on) }
+    }
+
     /// Raw pointer to the allocator, for registration with the collector.
     pub fn heap_ptr(&self) -> *mut LocalHeap {
         self.heap

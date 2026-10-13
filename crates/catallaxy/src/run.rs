@@ -43,6 +43,8 @@ pub fn cmd_run(args: &[String]) -> i32 {
     let Some(program) = comp.program else { return 2 };
     if promote {
         catallaxy_runtime::ownership::PROMOTE_ON_ACCESS.store(true, std::sync::atomic::Ordering::Relaxed);
+        // Stealing another thread's owned objects would race with its minor collections.
+        catallaxy_gc::set_generational(false);
     }
     let _ = catallaxy_stdlib::ARGS.set(prog_args);
     let code = execute(program);

@@ -521,6 +521,13 @@ fn par_reduce(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn run_job(vm: &mut Vm, kind: ParKind, f: Value, items: Vec<Value>, identity: Value) -> RtResult<Value> {
+    // Workers read the block, the items and the identity: they must be old.
+    let tid = vm.tid();
+    ownership::escape(f, tid);
+    ownership::escape(identity, tid);
+    for &x in &items {
+        ownership::escape(x, tid);
+    }
     let n = items.len();
     let pool = &*POOL;
     let threads = pool.workers + 1;

@@ -10,11 +10,11 @@
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cell::UnsafeCell;
 use std::ptr;
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
 use parking_lot::Mutex;
 
-use crate::header::{Header, HEADER_SIZE};
+use crate::header::{Header, HEADER_SIZE, MINOR_MARK_BIT, YOUNG_BIT};
 use crate::stats;
 
 pub const SEGMENT_SIZE: usize = 256 * 1024;
@@ -99,6 +99,47 @@ impl Page {
         }
         stats::note_freed(freed_bytes);
         (head, free)
+    }
+
+    /// Minor sweep: frees `tid`'s young objects that are not minor-marked and tenures the
+    /// marked ones; old objects are left alone. Returns the head of a list of every free slot
+    /// (only newly freed ones if `only_new`), the number of free slots, and the bytes freed and
+    /// promoted.
+    ///
+    /// # Safety
+    /// The page must be private to the calling thread `tid`.
+    unsafe fn sweep_young(&self, tid: u16, only_new: bool) -> (*mut u8, usize, usize, usize) {
+        let size = self.slot_size();
+        let mut head: *mut u8 = ptr::null_mut();
+        let (mut free, mut freed, mut promoted) = (0, 0, 0);
+        for i in (0..self.n_slots()).rev() {
+            let slot = self.base.add(i * size);
+            let h = &*(slot as *const Header);
+            if h.is_free() {
+                if only_new {
+                    continue;
+                }
+            } else {
+                let m = h.meta_relaxed();
+                if m & YOUNG_BIT == 0 || Header::owner_of(m) != tid {
+                    continue;
+                }
+                if m & MINOR_MARK_BIT != 0 {
+                    promoted += ((*h.vtable()).size)(h);
+                    h.tenure();
+                    continue;
+                }
+                if let Some(fin) = (*h.vtable()).finalize {
+                    fin(slot as *mut Header);
+                }
+                h.clear_vtable();
+                freed += size;
+            }
+            *(slot.add(8) as *mut *mut u8) = head;
+            head = slot;
+            free += 1;
+        }
+        (head, free, freed, promoted)
     }
 }
 
@@ -232,13 +273,44 @@ impl PagePool {
     }
 }
 
-/// A thread's allocation state: one current page per size class.
+/// Whether new objects start young (thread-local minor collection). On by default; off with
+/// `CATX_GC_GENERATIONAL=0`, or when `--promote-on-access` lets threads steal owned objects.
+static GENERATIONAL: std::sync::LazyLock<AtomicBool> = std::sync::LazyLock::new(|| {
+    AtomicBool::new(!matches!(std::env::var("CATX_GC_GENERATIONAL").as_deref(), Ok("0")))
+});
+
+/// Turns generational collection on or off for threads registered from now on.
+pub fn set_generational(on: bool) {
+    GENERATIONAL.store(on, Ordering::Relaxed);
+}
+
+/// Young bytes a thread allocates before it asks for a minor collection.
+fn nursery_bytes() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| if stats::stress() { 64 * 1024 } else { 4 * 1024 * 1024 })
+}
+
+/// A thread's allocation state: one current page per size class, plus its young generation:
+/// the pages and large objects it filled since its last minor collection (private to it until
+/// then), pages with space reclaimed by that collection, and its remembered set.
 pub struct LocalHeap {
     current: [*const Page; NUM_CLASSES],
     free: [*mut u8; NUM_CLASSES],
     bump: [*mut u8; NUM_CLASSES],
     end: [*mut u8; NUM_CLASSES],
     owner: u16,
+    /// Allocate young objects (generational mode, not loading a program).
+    young_alloc: bool,
+    generational: bool,
+    young_pages: Vec<&'static Page>,
+    partial: Vec<Vec<(&'static Page, *mut u8)>>,
+    young_large: Vec<LargeObj>,
+    remset: Vec<*const Header>,
+    young_bytes: usize,
+    /// Set when the nursery is full; the thread collects at its next safepoint.
+    pub(crate) minor_wanted: bool,
+    /// The owning thread's poll flag, raised to reach that safepoint.
+    poll: *const AtomicBool,
 }
 
 unsafe impl Send for LocalHeap {}
@@ -251,6 +323,53 @@ impl LocalHeap {
             bump: [ptr::null_mut(); NUM_CLASSES],
             end: [ptr::null_mut(); NUM_CLASSES],
             owner,
+            young_alloc: GENERATIONAL.load(Ordering::Relaxed),
+            generational: GENERATIONAL.load(Ordering::Relaxed),
+            young_pages: Vec::new(),
+            partial: (0..NUM_CLASSES).map(|_| Vec::new()).collect(),
+            young_large: Vec::new(),
+            remset: Vec::new(),
+            young_bytes: 0,
+            minor_wanted: false,
+            poll: ptr::null(),
+        }
+    }
+
+    pub(crate) fn set_poll(&mut self, poll: *const AtomicBool) {
+        self.poll = poll;
+    }
+
+    /// Whether new objects start young. Program loading turns this off, because loaded constants
+    /// are reachable from global roots, which a minor collection does not scan.
+    pub fn set_young_alloc(&mut self, on: bool) {
+        self.young_alloc = on && self.generational;
+    }
+
+    pub fn is_generational(&self) -> bool {
+        self.generational
+    }
+
+    /// Write barrier: records an old object that may now point to young ones. Call when a
+    /// thread writes into an object it owns whose metadata satisfies
+    /// [`Header::needs_remember`].
+    #[inline]
+    pub fn remember(&mut self, h: *const Header) {
+        if self.generational && unsafe { (*h).set_remembered() } {
+            self.remset.push(h);
+        }
+    }
+
+    fn note_young(&mut self, bytes: usize) {
+        if !self.young_alloc {
+            stats::note_allocated(bytes);
+            return;
+        }
+        self.young_bytes += bytes;
+        if self.young_bytes >= nursery_bytes() && !self.minor_wanted {
+            self.minor_wanted = true;
+            if !self.poll.is_null() {
+                unsafe { (*self.poll).store(true, Ordering::Release) };
+            }
         }
     }
 
@@ -294,7 +413,7 @@ impl LocalHeap {
             }
         };
         let h = slot as *mut Header;
-        unsafe { Header::init(h, vtable, self.owner, POOL.live_color.load(Ordering::Relaxed)) };
+        unsafe { Header::init(h, vtable, self.owner, POOL.live_color.load(Ordering::Relaxed), self.young_alloc) };
         h
     }
 
@@ -304,12 +423,29 @@ impl LocalHeap {
         if !self.current[class].is_null() {
             let p = unsafe { &*self.current[class] };
             p.state.store(PageState::Full as u8, Ordering::Relaxed);
-            POOL.full[class].lock().push(p);
+            if self.generational {
+                // May hold young objects: private until the next minor collection.
+                self.young_pages.push(p);
+            } else {
+                POOL.full[class].lock().push(p);
+            }
             self.current[class] = ptr::null();
             self.bump[class] = ptr::null_mut();
             self.end[class] = ptr::null_mut();
         }
-        // Prefer reusing swept space.
+        // Space a minor collection reclaimed in this thread's pages comes first.
+        if let Some((p, head)) = self.partial[class].pop() {
+            let free = unsafe { count_list(head) };
+            self.note_young(free * slot_size);
+            p.state.store(PageState::Current as u8, Ordering::Relaxed);
+            self.current[class] = p;
+            unsafe {
+                self.free[class] = *(head.add(8) as *const *mut u8);
+                ptr::write_bytes(head, 0, slot_size);
+            }
+            return head;
+        }
+        // Then swept space from the global pool.
         loop {
             let next = POOL.unswept[class].lock().pop();
             let Some(p) = next else { break };
@@ -320,7 +456,7 @@ impl LocalHeap {
                 POOL.full[class].lock().push(p);
                 continue;
             }
-            stats::note_allocated(free * slot_size);
+            self.note_young(free * slot_size);
             p.state.store(PageState::Current as u8, Ordering::Relaxed);
             self.current[class] = p;
             unsafe {
@@ -330,7 +466,7 @@ impl LocalHeap {
             return head;
         }
         let p = POOL.take_empty(class);
-        stats::note_allocated(PAGE_SIZE);
+        self.note_young(PAGE_SIZE);
         self.current[class] = p;
         unsafe {
             // Empty pages may hold stale headers from a previous life; a stale header would be
@@ -349,15 +485,111 @@ impl LocalHeap {
         if p.is_null() {
             std::alloc::handle_alloc_error(layout);
         }
-        stats::note_allocated(layout.size());
         let h = p as *mut Header;
-        unsafe { Header::init(h, vtable, self.owner, POOL.live_color.load(Ordering::Relaxed)) };
-        POOL.large.lock().push(LargeObj { ptr: p, layout });
+        unsafe { Header::init(h, vtable, self.owner, POOL.live_color.load(Ordering::Relaxed), self.young_alloc) };
+        if self.young_alloc {
+            self.young_large.push(LargeObj { ptr: p, layout });
+        } else {
+            POOL.large.lock().push(LargeObj { ptr: p, layout });
+        }
+        self.note_young(layout.size());
         h
+    }
+
+    /// Minor collection, part 2: with every young object reachable from the thread's roots and
+    /// remembered set minor-marked, frees the rest and tenures the survivors. Returns (bytes
+    /// freed, bytes promoted).
+    ///
+    /// # Safety
+    /// Called by the owning thread at a safepoint, after marking.
+    pub(crate) unsafe fn sweep_young(&mut self) -> (usize, usize) {
+        let tid = self.owner;
+        let (mut freed, mut promoted) = (0, 0);
+        // Pages filled since the last minor collection.
+        for p in std::mem::take(&mut self.young_pages) {
+            let (head, free, f, pr) = p.sweep_young(tid, false);
+            freed += f;
+            promoted += pr;
+            let class = *p.class.get();
+            if free == p.n_slots() {
+                p.state.store(PageState::Empty as u8, Ordering::Relaxed);
+                POOL.empty.lock().push(p);
+            } else if !head.is_null() {
+                self.partial[class].push((p, head));
+            } else {
+                POOL.full[class].lock().push(p);
+            }
+        }
+        // Pages still being allocated from: newly freed slots join the free list.
+        for class in 0..NUM_CLASSES {
+            if self.current[class].is_null() {
+                continue;
+            }
+            let p = &*self.current[class];
+            let (mut head, _, f, pr) = p.sweep_young(tid, true);
+            freed += f;
+            promoted += pr;
+            while !head.is_null() {
+                let next = *(head.add(8) as *const *mut u8);
+                *(head.add(8) as *mut *mut u8) = self.free[class];
+                self.free[class] = head;
+                head = next;
+            }
+        }
+        // Large objects.
+        let mut large = POOL.large.lock();
+        for obj in std::mem::take(&mut self.young_large) {
+            let h = &*(obj.ptr as *const Header);
+            if h.meta_relaxed() & MINOR_MARK_BIT != 0 {
+                h.tenure();
+                promoted += obj.layout.size();
+                large.push(obj);
+            } else {
+                if let Some(fin) = (*h.vtable()).finalize {
+                    fin(obj.ptr as *mut Header);
+                }
+                dealloc(obj.ptr, obj.layout);
+                freed += obj.layout.size();
+            }
+        }
+        drop(large);
+        for &o in &self.remset {
+            (*o).clear_remembered();
+        }
+        self.remset.clear();
+        self.young_bytes = 0;
+        self.minor_wanted = false;
+        // Survivors are old now: they count toward the next major collection.
+        stats::note_allocated(promoted);
+        (freed, promoted)
+    }
+
+    /// The remembered set, for marking.
+    pub(crate) fn remembered(&self) -> &[*const Header] {
+        &self.remset
     }
 
     /// Returns all current pages to the global lists (before a collection or on thread exit).
     pub fn release_pages(&mut self) {
+        // The young generation becomes part of the old one: a major collection marks
+        // (and tenures) everything live, and lazily sweeps everything else.
+        for p in self.young_pages.drain(..) {
+            let class = unsafe { *p.class.get() };
+            POOL.full[class].lock().push(p);
+        }
+        for class in 0..NUM_CLASSES {
+            for (p, _) in self.partial[class].drain(..) {
+                p.state.store(PageState::Full as u8, Ordering::Relaxed);
+                POOL.full[class].lock().push(p);
+            }
+        }
+        POOL.large.lock().append(&mut self.young_large);
+        for &o in &self.remset {
+            unsafe { (*o).clear_remembered() };
+        }
+        self.remset.clear();
+        self.young_bytes = 0;
+        self.minor_wanted = false;
         for class in 0..NUM_CLASSES {
             if self.current[class].is_null() {
                 continue;
@@ -379,6 +611,16 @@ impl Drop for LocalHeap {
     fn drop(&mut self) {
         self.release_pages();
     }
+}
+
+/// Length of a free list threaded through word 1 of free slots.
+unsafe fn count_list(mut p: *mut u8) -> usize {
+    let mut n = 0;
+    while !p.is_null() {
+        n += 1;
+        p = *(p.add(8) as *const *mut u8);
+    }
+    n
 }
 
 pub fn total_heap_bytes() -> usize {

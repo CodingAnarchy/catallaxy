@@ -8,6 +8,11 @@
 //!
 //! A thread in native code must not touch the heap. Leaving native code waits for any running
 //! collection to finish, which is what makes treating `InNative` threads as stopped sound.
+//!
+//! Between major collections each thread collects its own young objects (a *minor*
+//! collection) at its own safepoints, without stopping anyone: see [`minor_collect`]. Each thread
+//! polls its own flag ([`ThreadRecord::poll_flag`]); a major request raises every thread's flag,
+//! a full nursery raises only its owner's.
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
@@ -38,6 +43,9 @@ pub enum ThreadState {
 
 pub struct ThreadRecord {
     pub tid: u16,
+    /// Raised when this thread should enter [`safepoint_slow`]: a major collection was
+    /// requested, or its nursery is full.
+    poll: AtomicBool,
     state: AtomicU8,
     roots: UnsafeCell<Option<*const dyn RootSource>>,
     heap: UnsafeCell<*mut LocalHeap>,
@@ -48,6 +56,12 @@ unsafe impl Send for ThreadRecord {}
 unsafe impl Sync for ThreadRecord {}
 
 impl ThreadRecord {
+    /// The flag safepoint polls load. Interpreters may cache a reference to it.
+    #[inline(always)]
+    pub fn poll_flag(&self) -> &AtomicBool {
+        &self.poll
+    }
+
     pub fn state(&self) -> ThreadState {
         match self.state.load(Ordering::SeqCst) {
             0 => ThreadState::Running,
@@ -74,6 +88,9 @@ type Retired = (usize, unsafe fn(*mut u8));
 
 struct Global {
     threads: Mutex<Vec<Arc<ThreadRecord>>>,
+    /// Every registered thread, for raising poll flags. Never held while blocking, unlike
+    /// `threads`, which a collector holds for a whole collection.
+    pollers: Mutex<Vec<Arc<ThreadRecord>>>,
     free_tids: Mutex<Vec<u16>>,
     next_tid: AtomicUsize,
     coord: Mutex<Coord>,
@@ -95,6 +112,7 @@ struct MarkShared {
 
 static GLOBAL: std::sync::LazyLock<Global> = std::sync::LazyLock::new(|| Global {
     threads: Mutex::new(Vec::new()),
+    pollers: Mutex::new(Vec::new()),
     free_tids: Mutex::new(Vec::new()),
     next_tid: AtomicUsize::new(1),
     coord: Mutex::new(Coord { collecting: false, epoch: 0, mark_epoch: 0, marking: false }),
@@ -113,7 +131,12 @@ static GLOBAL: std::sync::LazyLock<Global> = std::sync::LazyLock::new(|| Global 
 
 /// Asks for a collection at the next safepoint of any running thread.
 pub fn request_gc() {
-    GC_REQUESTED.store(true, Ordering::Release);
+    if GC_REQUESTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    for t in GLOBAL.pollers.lock().iter() {
+        t.poll.store(true, Ordering::SeqCst);
+    }
 }
 
 /// Registers the calling thread as a mutator. The thread starts in the `InNative` state; call
@@ -127,11 +150,18 @@ pub fn register_thread() -> Arc<ThreadRecord> {
     });
     let rec = Arc::new(ThreadRecord {
         tid,
+        poll: AtomicBool::new(false),
         state: AtomicU8::new(ThreadState::InNative as u8),
         roots: UnsafeCell::new(None),
         heap: UnsafeCell::new(std::ptr::null_mut()),
     });
     GLOBAL.threads.lock().push(rec.clone());
+    {
+        let mut pollers = GLOBAL.pollers.lock();
+        pollers.push(rec.clone());
+        // A request raised before we were listed still reaches us.
+        rec.poll.store(GC_REQUESTED.load(Ordering::SeqCst), Ordering::SeqCst);
+    }
     rec
 }
 
@@ -146,6 +176,9 @@ pub unsafe fn install(rec: &ThreadRecord, roots: *const dyn RootSource, heap: *m
     let _g = GLOBAL.threads.lock();
     *rec.roots.get() = Some(roots);
     *rec.heap.get() = heap;
+    if !heap.is_null() {
+        (*heap).set_poll(&rec.poll);
+    }
 }
 
 /// Removes the thread from the registry. The thread must be in native state, and its heap pages
@@ -156,6 +189,7 @@ pub fn unregister_thread(rec: &Arc<ThreadRecord>) {
         // A collector holds `threads` for the whole collection, so this waits it out.
         let mut threads = GLOBAL.threads.lock();
         threads.retain(|t| !Arc::ptr_eq(t, rec));
+        GLOBAL.pollers.lock().retain(|t| !Arc::ptr_eq(t, rec));
         unsafe {
             *rec.roots.get() = None;
             *rec.heap.get() = std::ptr::null_mut();
@@ -205,7 +239,7 @@ pub fn is_gc_requested() -> bool {
 /// The safepoint poll: one load and a predictable branch.
 #[inline(always)]
 pub fn safepoint(rec: &ThreadRecord) {
-    if GC_REQUESTED.load(Ordering::Acquire) {
+    if rec.poll.load(Ordering::Acquire) {
         safepoint_slow(rec);
     }
 }
@@ -216,6 +250,46 @@ pub fn safepoint_slow(rec: &ThreadRecord) {
     if GC_DISABLED.load(Ordering::SeqCst) > 0 {
         return;
     }
+    // Lower the flag before looking at the reasons, so a request racing with us re-raises it.
+    rec.poll.store(false, Ordering::SeqCst);
+    if GC_REQUESTED.load(Ordering::SeqCst) {
+        major_safepoint(rec);
+    }
+    let heap = unsafe { *rec.heap.get() };
+    if !heap.is_null() && unsafe { (*heap).minor_wanted } {
+        minor_collect(rec);
+    }
+}
+
+/// Collects the calling thread's young generation. Other threads keep running: the ownership
+/// rules guarantee none of them can reach these objects.
+fn minor_collect(rec: &ThreadRecord) {
+    let start = std::time::Instant::now();
+    let heap = unsafe { &mut **rec.heap.get() };
+    let Some(roots) = (unsafe { *rec.roots.get() }) else { return };
+    let mut tracer = Tracer::minor(rec.tid);
+    unsafe { (*roots).trace_roots(&mut tracer) };
+    for &o in heap.remembered() {
+        unsafe { ((*(*o).vtable()).trace)(o, &mut tracer) };
+    }
+    while let Some(o) = tracer.minor.as_mut().and_then(|m| m.stack.pop()) {
+        let h = o as *const Header;
+        unsafe { ((*(*h).vtable()).trace)(h, &mut tracer) };
+    }
+    let (freed, promoted) = unsafe { heap.sweep_young() };
+    stats::note_minor(start.elapsed().as_nanos() as usize, freed, promoted);
+}
+
+/// Runs a minor collection of the calling thread now (tests and embedders). The thread must be
+/// running and its roots installed.
+pub fn collect_minor(rec: &ThreadRecord) {
+    if GC_DISABLED.load(Ordering::SeqCst) > 0 {
+        return;
+    }
+    minor_collect(rec);
+}
+
+fn major_safepoint(rec: &ThreadRecord) {
     let mut coord = GLOBAL.coord.lock();
     if !GC_REQUESTED.load(Ordering::Acquire) {
         return;
@@ -302,6 +376,7 @@ pub fn collect_now(rec: &ThreadRecord) {
 }
 
 fn collect(me: &ThreadRecord) {
+    let start = std::time::Instant::now();
     let threads = GLOBAL.threads.lock();
     // 1. Stop the world.
     {
@@ -390,6 +465,7 @@ fn collect(me: &ThreadRecord) {
             Ordering::SeqCst,
         );
     }
+    stats::note_pause(start.elapsed().as_nanos() as usize);
     let mut coord = GLOBAL.coord.lock();
     GC_REQUESTED.store(false, Ordering::SeqCst);
     coord.collecting = false;
@@ -402,11 +478,22 @@ fn collect(me: &ThreadRecord) {
 pub struct Tracer {
     color: u8,
     local: Option<Worker<usize>>,
+    minor: Option<MinorMark>,
+}
+
+/// Minor-collection marking: only `tid`'s young objects.
+struct MinorMark {
+    tid: u16,
+    stack: Vec<usize>,
 }
 
 impl Tracer {
     fn for_roots(color: u8) -> Self {
-        Tracer { color, local: None }
+        Tracer { color, local: None, minor: None }
+    }
+
+    fn minor(tid: u16) -> Self {
+        Tracer { color: 0, local: None, minor: Some(MinorMark { tid, stack: Vec::new() }) }
     }
 
     /// Marks `obj` reachable. Null pointers are ignored. Tracers are only handed to root sources
@@ -419,6 +506,15 @@ impl Tracer {
         }
         // SAFETY: the runtime only hands us pointers to live heap objects.
         let h = unsafe { &*obj };
+        if let Some(m) = &mut self.minor {
+            // Old objects are not traced: their young referents are found through the
+            // remembered set.
+            let meta = h.meta_relaxed();
+            if meta & crate::header::YOUNG_BIT != 0 && Header::owner_of(meta) == m.tid && h.try_minor_mark() {
+                m.stack.push(obj as usize);
+            }
+            return;
+        }
         if h.try_mark(self.color) {
             match &self.local {
                 Some(w) => w.push(obj as usize),
@@ -432,7 +528,7 @@ fn mark_worker() {
     let m = &GLOBAL.mark;
     let worker = Worker::new_lifo();
     m.stealers.lock().push(worker.stealer());
-    let mut tracer = Tracer { color: m.color.load(Ordering::SeqCst), local: Some(worker) };
+    let mut tracer = Tracer { color: m.color.load(Ordering::SeqCst), local: Some(worker), minor: None };
     m.active.fetch_add(1, Ordering::SeqCst);
     let mut bytes = 0usize;
     loop {

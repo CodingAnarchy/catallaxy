@@ -6,6 +6,11 @@ static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 static LIVE_AFTER_GC: AtomicUsize = AtomicUsize::new(0);
 static THRESHOLD: AtomicUsize = AtomicUsize::new(MIN_THRESHOLD);
 
+/// Whether `CATX_GC_STRESS` is on.
+pub(crate) fn stress() -> bool {
+    min_threshold() < MIN_THRESHOLD
+}
+
 /// `CATX_GC_STRESS=1` makes collections very frequent (for finding rooting bugs).
 fn min_threshold() -> usize {
     static STRESS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
@@ -19,6 +24,13 @@ fn min_threshold() -> usize {
     })
 }
 static COLLECTIONS: AtomicUsize = AtomicUsize::new(0);
+static PAUSE_TOTAL_NS: AtomicUsize = AtomicUsize::new(0);
+static MINORS: AtomicUsize = AtomicUsize::new(0);
+static MINOR_NS: AtomicUsize = AtomicUsize::new(0);
+static MINOR_MAX_NS: AtomicUsize = AtomicUsize::new(0);
+static PROMOTED: AtomicUsize = AtomicUsize::new(0);
+static MINOR_FREED: AtomicUsize = AtomicUsize::new(0);
+static PAUSE_MAX_NS: AtomicUsize = AtomicUsize::new(0);
 
 pub const MIN_THRESHOLD: usize = 8 * 1024 * 1024;
 
@@ -45,6 +57,36 @@ pub(crate) fn after_collection(live_bytes: usize, mutators: usize) {
     let t = if floor < MIN_THRESHOLD { floor } else { live_bytes.max(per_thread) };
     THRESHOLD.store(t, Ordering::Relaxed);
     COLLECTIONS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Records one stop-the-world pause.
+pub(crate) fn note_pause(ns: usize) {
+    PAUSE_TOTAL_NS.fetch_add(ns, Ordering::Relaxed);
+    PAUSE_MAX_NS.fetch_max(ns, Ordering::Relaxed);
+}
+
+/// Total and longest stop-the-world pause so far, in nanoseconds.
+pub fn pauses() -> (usize, usize) {
+    (PAUSE_TOTAL_NS.load(Ordering::Relaxed), PAUSE_MAX_NS.load(Ordering::Relaxed))
+}
+
+pub(crate) fn note_minor(ns: usize, freed: usize, promoted: usize) {
+    MINORS.fetch_add(1, Ordering::Relaxed);
+    MINOR_NS.fetch_add(ns, Ordering::Relaxed);
+    MINOR_MAX_NS.fetch_max(ns, Ordering::Relaxed);
+    MINOR_FREED.fetch_add(freed, Ordering::Relaxed);
+    PROMOTED.fetch_add(promoted, Ordering::Relaxed);
+}
+
+/// Thread-local minor collections: (count, total ns, longest ns, bytes freed, bytes promoted).
+pub fn minors() -> (usize, usize, usize, usize, usize) {
+    (
+        MINORS.load(Ordering::Relaxed),
+        MINOR_NS.load(Ordering::Relaxed),
+        MINOR_MAX_NS.load(Ordering::Relaxed),
+        MINOR_FREED.load(Ordering::Relaxed),
+        PROMOTED.load(Ordering::Relaxed),
+    )
 }
 
 /// Number of completed collections.

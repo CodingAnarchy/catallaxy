@@ -14,7 +14,14 @@
 //! | 5      | lock has parked waiters |
 //! | 6..16  | lock recursion depth |
 //! | 16..32 | owner thread id when owned; lock holder when shared and locked |
-//! | 32..64 | identity hash, lazily assigned (0 = unassigned) |
+//! | 32..61 | identity hash, lazily assigned (0 = unassigned) |
+//! | 61     | remembered: an old object in its owner's remembered set |
+//! | 62     | young: allocated since its owner's last minor collection |
+//! | 63     | minor mark |
+//!
+//! A young object is always owned by the thread that allocated it (or frozen and reachable only
+//! from that thread's objects), so that thread can collect it without stopping anyone. Every
+//! path that lets another thread or a global reach an object tenures it first (clears `young`).
 
 #[cfg(loom)]
 use loom::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -60,14 +67,22 @@ const DEPTH_MASK: u64 = 0x3ff << DEPTH_SHIFT;
 const OWNER_SHIFT: u32 = 16;
 const OWNER_MASK: u64 = 0xffff << OWNER_SHIFT;
 const HASH_SHIFT: u32 = 32;
+const HASH_MASK: u64 = (1 << 29) - 1;
+pub(crate) const REMEMBERED_BIT: u64 = 1 << 61;
+pub(crate) const YOUNG_BIT: u64 = 1 << 62;
+pub(crate) const MINOR_MARK_BIT: u64 = 1 << 63;
+const GEN_BITS: u64 = REMEMBERED_BIT | YOUNG_BIT | MINOR_MARK_BIT;
 
 impl Header {
     /// Initializes a header in freshly allocated memory.
     ///
     /// # Safety
     /// `this` must point to writable memory of at least `HEADER_SIZE` bytes.
-    pub unsafe fn init(this: *mut Header, vtable: *const GcVTable, owner: u16, color: u8) {
-        let meta = (ObjState::Owned as u64) | ((color as u64) << COLOR_SHIFT) | ((owner as u64) << OWNER_SHIFT);
+    pub unsafe fn init(this: *mut Header, vtable: *const GcVTable, owner: u16, color: u8, young: bool) {
+        let meta = (ObjState::Owned as u64)
+            | ((color as u64) << COLOR_SHIFT)
+            | ((owner as u64) << OWNER_SHIFT)
+            | if young { YOUNG_BIT } else { 0 };
         std::ptr::write(
             this,
             Header { vtable: AtomicUsize::new(vtable as usize), meta: AtomicU64::new(meta) },
@@ -138,8 +153,64 @@ impl Header {
         }
     }
 
+    /// Changes the ownership state. A shared object is visible to every thread, so it is
+    /// tenured in the same step.
     pub fn set_state(&self, state: ObjState) {
-        self.update(|m| (m & !STATE_MASK) | state as u64);
+        let clear = if state == ObjState::Shared { STATE_MASK | YOUNG_BIT | MINOR_MARK_BIT } else { STATE_MASK };
+        self.update(|m| (m & !clear) | state as u64);
+    }
+
+    // ---- generations ----
+
+    #[inline(always)]
+    pub fn is_remembered(&self) -> bool {
+        self.meta.load(Ordering::Relaxed) & REMEMBERED_BIT != 0
+    }
+
+    #[inline(always)]
+    pub fn is_young(&self) -> bool {
+        self.meta.load(Ordering::Relaxed) & YOUNG_BIT != 0
+    }
+
+    /// True if a write into an object with this metadata must add it to the remembered set:
+    /// it is old and not remembered yet.
+    #[inline(always)]
+    pub fn needs_remember(meta: u64) -> bool {
+        meta & (YOUNG_BIT | REMEMBERED_BIT) == 0
+    }
+
+    /// Makes the object old. Idempotent.
+    #[inline]
+    pub fn tenure(&self) {
+        if self.meta.load(Ordering::Relaxed) & (YOUNG_BIT | MINOR_MARK_BIT) != 0 {
+            self.meta.fetch_and(!(YOUNG_BIT | MINOR_MARK_BIT), Ordering::AcqRel);
+        }
+    }
+
+    /// Sets the remembered bit; true if this call set it.
+    #[inline]
+    pub(crate) fn set_remembered(&self) -> bool {
+        self.meta.fetch_or(REMEMBERED_BIT, Ordering::AcqRel) & REMEMBERED_BIT == 0
+    }
+
+    #[inline]
+    pub(crate) fn clear_remembered(&self) {
+        self.meta.fetch_and(!REMEMBERED_BIT, Ordering::AcqRel);
+    }
+
+    #[inline]
+    pub(crate) fn meta_relaxed(&self) -> u64 {
+        self.meta.load(Ordering::Relaxed)
+    }
+
+    /// Sets the minor mark; true if this call set it.
+    #[inline]
+    pub(crate) fn try_minor_mark(&self) -> bool {
+        let m = self.meta.load(Ordering::Relaxed);
+        if m & MINOR_MARK_BIT != 0 {
+            return false;
+        }
+        self.meta.fetch_or(MINOR_MARK_BIT, Ordering::AcqRel) & MINOR_MARK_BIT == 0
     }
 
     pub fn set_owner(&self, tid: u16) {
@@ -166,7 +237,8 @@ impl Header {
             if cur & COLOR_MASK == want {
                 return false;
             }
-            let new = (cur & !COLOR_MASK) | want;
+            // A major collection makes every survivor old and empties remembered sets.
+            let new = (cur & !(COLOR_MASK | GEN_BITS)) | want;
             match self.meta.compare_exchange_weak(cur, new, Ordering::AcqRel, Ordering::Relaxed) {
                 Ok(_) => return true,
                 Err(actual) => cur = actual,
@@ -177,23 +249,25 @@ impl Header {
     /// Returns the identity hash, assigning one on first use.
     pub fn identity_hash(&self) -> u32 {
         let m = self.meta.load(Ordering::Relaxed);
-        let h = (m >> HASH_SHIFT) as u32;
+        let h = ((m >> HASH_SHIFT) & HASH_MASK) as u32;
         if h != 0 {
             return h;
         }
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x9e37_79b9);
-        let mut fresh = (NEXT.fetch_add(0x6c07_8965, std::sync::atomic::Ordering::Relaxed) as u32) ^ ((self as *const _ as u64 >> 4) as u32);
+        let mut fresh = ((NEXT.fetch_add(0x6c07_8965, std::sync::atomic::Ordering::Relaxed) as u32)
+            ^ ((self as *const _ as u64 >> 4) as u32))
+            & HASH_MASK as u32;
         if fresh == 0 {
             fresh = 1;
         }
         let new = self.update(|m| {
-            if (m >> HASH_SHIFT) as u32 != 0 {
+            if (m >> HASH_SHIFT) & HASH_MASK != 0 {
                 m
             } else {
-                (m & 0xffff_ffff) | ((fresh as u64) << HASH_SHIFT)
+                (m & !(HASH_MASK << HASH_SHIFT)) | ((fresh as u64) << HASH_SHIFT)
             }
         });
-        (new >> HASH_SHIFT) as u32
+        ((new >> HASH_SHIFT) & HASH_MASK) as u32
     }
 
     // ---- per-object lock (spin, then park) ----

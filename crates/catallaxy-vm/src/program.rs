@@ -195,6 +195,15 @@ pub fn load(p: &Program, m: &mut Mutator, natives: &NativeLookup) -> Result<(), 
     ROOTS_INSTALLED.call_once(|| catallaxy_gc::add_global_roots(Box::new(GlobalRoots)));
     assert_eq!(ObjKind::Tuple as u8, KIND_TUPLE, "IsKind tuple operand out of date");
     let _nogc = catallaxy_gc::NoGcGuard::new();
+    // Loaded constants and globals are reached through global roots, which minor collections do
+    // not scan: allocate them old.
+    m.set_young_alloc(false);
+    let r = load_inner(p, m, natives);
+    m.set_young_alloc(true);
+    r
+}
+
+fn load_inner(p: &Program, m: &mut Mutator, natives: &NativeLookup) -> Result<(), LoadError> {
     let mut meta = META.write();
     let _ = &*class::BUILTINS;
 

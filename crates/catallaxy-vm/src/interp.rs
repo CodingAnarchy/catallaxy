@@ -342,6 +342,8 @@ impl Vm {
     #[inline(never)]
     fn run(&mut self, stop: usize) -> RtResult<Value> {
         let tid = self.m.tid;
+        // This thread's safepoint flag (raised for a major collection or a full nursery).
+        let poll: *const std::sync::atomic::AtomicBool = self.m.rec.poll_flag();
         // The root state's address never changes; keep it in a register.
         let rs: *mut RootState = self.rs;
         macro_rules! frames {
@@ -423,7 +425,7 @@ impl Vm {
                 save!();
                 let top = (base + f.nregs).max(fr.top);
                 frames!().push(Frame { func: f, pc: 0, base, ret: $ret, closure: $closure, serial: 0, top });
-                if catallaxy_gc::is_gc_requested() {
+                if unsafe { (*poll).load(Ordering::Relaxed) } {
                     catallaxy_gc::safepoint_slow(&self.m.rec);
                 }
                 load_frame!();
@@ -763,7 +765,7 @@ impl Vm {
                 Op::Jmp => {
                     let off = sax_of(w);
                     pc = (pc as isize + off) as usize;
-                    if off < 0 && catallaxy_gc::is_gc_requested() {
+                    if off < 0 && unsafe { (*poll).load(Ordering::Relaxed) } {
                         save!();
                         catallaxy_gc::safepoint_slow(&self.m.rec);
                     }
@@ -988,6 +990,9 @@ impl Vm {
                     debug_assert!(i < inst.nfields(), "field index out of range");
                     let meta = h.meta();
                     if Header::state_of(meta) == ObjState::Owned && Header::owner_of(meta) == tid {
+                        if Header::needs_remember(meta) {
+                            ownership::remember(&self.m, h);
+                        }
                         inst.set(i, v);
                     } else {
                         save!();
@@ -1219,7 +1224,7 @@ impl Vm {
                     set!(a, x);
                 }
                 Op::Safepoint => {
-                    if catallaxy_gc::is_gc_requested() {
+                    if unsafe { (*poll).load(Ordering::Relaxed) } {
                         save!();
                         catallaxy_gc::safepoint_slow(&self.m.rec);
                     }

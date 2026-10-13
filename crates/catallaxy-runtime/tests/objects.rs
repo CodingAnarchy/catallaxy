@@ -51,6 +51,9 @@ impl Host {
     fn gc(&mut self) {
         catallaxy_gc::collect_now(&self.m.rec);
     }
+    fn minor(&mut self) {
+        catallaxy_gc::collect_minor(&self.m.rec);
+    }
     fn finish(self) {
         enter_native(&self.m.rec);
         unregister_thread(&self.m.rec);
@@ -409,4 +412,129 @@ fn bench_shared_dict_reads() {
         }
     }
     h.finish();
+}
+
+fn young(v: Value) -> bool {
+    v.header().is_some_and(|h| h.is_young())
+}
+
+#[test]
+fn minor_collection_frees_young_garbage_and_keeps_roots() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let keep = h.m.alloc_str("kept");
+    let hk = h.m.root(keep);
+    assert!(young(keep), "new objects start young");
+    let before = catallaxy_gc::stats::minors().3;
+    for i in 0..n(2000) {
+        let _ = h.m.alloc_str(&format!("garbage {i}"));
+        let _ = h.m.alloc_list(vec![Value::small_int(i as i64)]);
+    }
+    h.minor();
+    assert!(catallaxy_gc::stats::minors().3 > before, "garbage was freed");
+    let keep = h.m.get(hk);
+    assert_eq!(str_of(keep), Some("kept"));
+    assert!(!young(keep), "survivors are promoted");
+    h.finish();
+}
+
+#[test]
+fn remembered_set_keeps_young_values_in_old_containers() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let list = h.m.alloc_list(Vec::new());
+    let hl = h.m.root(list);
+    let d = h.m.alloc_dict(DictTable::new());
+    let hd = h.m.root(d);
+    h.gc(); // both containers are old now
+    assert!(!young(h.m.get(hl)) && !young(h.m.get(hd)));
+    for round in 0..3 {
+        for i in 0..n(300) {
+            let (list, d) = (h.m.get(hl), h.m.get(hd));
+            let s = h.m.alloc_str(&format!("r{round}-{i}"));
+            ownership::write_list(h.m, list, |l, access| unsafe { l.push(s, access) }).unwrap();
+            let key = Value::small_int((round * 100_000 + i) as i64);
+            let hash = ops::hash_value(&mut h, key).unwrap();
+            let v = h.m.alloc_list(vec![s]);
+            ownership::write_dict(h.m, d, |t, access| unsafe { t.insert_new(hash, key, v, access) }).unwrap();
+            let _ = h.m.alloc_str("garbage");
+        }
+        h.minor();
+    }
+    let items = ownership::read_list(h.m, h.m.get(hl)).unwrap().to_vec();
+    assert_eq!(items.len(), 3 * n(300));
+    for (k, v) in items.iter().enumerate() {
+        assert_eq!(str_of(*v), Some(format!("r{}-{}", k / n(300), k % n(300)).as_str()));
+        assert!(!young(*v));
+    }
+    let entries = ownership::read_dict(h.m, h.m.get(hd), |t| t.iter().map(|e| e.value).collect::<Vec<_>>()).unwrap();
+    assert_eq!(entries.len(), 3 * n(300));
+    for v in entries {
+        let inner = unsafe { as_list(v) }.to_vec();
+        assert!(str_of(inner[0]).is_some_and(|s| s.starts_with('r')));
+    }
+    h.finish();
+}
+
+#[test]
+fn escaping_values_are_tenured() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    // Freezing: a young list holding young (frozen-at-birth) strings.
+    let s1 = h.m.alloc_str("a");
+    let l1 = h.m.alloc_list(vec![s1]);
+    h.m.root(l1);
+    ownership::freeze_deep(h.m, l1).unwrap();
+    assert!(!young(l1) && !young(s1));
+    // Publishing into a shared list.
+    let shared = h.m.alloc_list(Vec::new());
+    h.m.root(shared);
+    ownership::share_deep(h.m, shared, false).unwrap();
+    assert!(!young(shared));
+    let s2 = h.m.alloc_str("b");
+    let l2 = h.m.alloc_list(vec![s2]);
+    ownership::publish_into_shared(h.m, l2).unwrap();
+    ownership::write_list(h.m, shared, |l, access| unsafe { l.push(l2, access) }).unwrap();
+    assert!(!young(l2) && !young(s2));
+    // An old list written since the last minor collection: its young items escape with it.
+    let old = h.m.alloc_list(Vec::new());
+    let ho = h.m.root(old);
+    h.gc();
+    let s3 = h.m.alloc_str("c");
+    ownership::write_list(h.m, h.m.get(ho), |l, access| unsafe { l.push(s3, access) }).unwrap();
+    ownership::transfer_deep(h.m.get(ho), h.m.tid, ownership::TRANSIT_TID);
+    assert!(!young(s3));
+    h.minor();
+    assert_eq!(str_of(s1), Some("a"));
+    assert_eq!(str_of(s2), Some("b"));
+    assert_eq!(str_of(s3), Some("c"));
+    h.finish();
+}
+
+#[test]
+fn moved_values_survive_the_senders_minor_collection() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut a = Host::new();
+    let items: Vec<Value> = (0..n(200)).map(|i| a.m.alloc_str(&format!("m{i}"))).collect();
+    let list = a.m.alloc_list(items);
+    // Move it out (as a channel send does), then let the sender collect its nursery.
+    ownership::transfer_deep(list, a.m.tid, ownership::TRANSIT_TID);
+    let addr = list.0;
+    for _ in 0..n(500) {
+        let _ = a.m.alloc_str("sender garbage");
+    }
+    a.minor();
+    let reader = std::thread::spawn(move || {
+        let mut b = Host::new();
+        let list = Value(addr);
+        ownership::transfer_deep(list, ownership::TRANSIT_TID, b.m.tid);
+        b.m.root(list);
+        b.minor();
+        let items = ownership::read_list(b.m, list).unwrap().to_vec();
+        let ok = items.iter().enumerate().all(|(i, v)| str_of(*v) == Some(format!("m{i}").as_str()));
+        b.finish();
+        ok
+    });
+    assert!(catallaxy_gc::blocking(&a.m.rec, || reader.join().unwrap()));
+    a.finish();
 }

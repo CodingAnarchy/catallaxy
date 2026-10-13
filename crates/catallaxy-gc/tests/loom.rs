@@ -23,7 +23,7 @@ unsafe impl Send for Obj {}
 
 fn new_obj() -> Arc<Obj> {
     let mut o = std::mem::MaybeUninit::<Header>::uninit();
-    unsafe { Header::init(o.as_mut_ptr(), &VT, 1, 1) };
+    unsafe { Header::init(o.as_mut_ptr(), &VT, 1, 1, false) };
     Arc::new(Obj { header: unsafe { o.assume_init() }, data: UnsafeCell::new(0) })
 }
 

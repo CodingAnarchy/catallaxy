@@ -174,11 +174,22 @@ fn run_program(program: &Program) -> i32 {
     }
     catallaxy_stdlib::flush();
     if std::env::var_os("CATX_GC_STATS").is_some() {
+        let (total, max) = catallaxy_gc::stats::pauses();
         eprintln!(
-            "gc: {} collections, {:.1} MB heap, {:.1} MB live after last",
+            "gc: {} collections, {:.1} MB heap, {:.1} MB live after last, pauses {:.1} ms total / {:.2} ms max",
             catallaxy_gc::stats::collections(),
             catallaxy_gc::total_heap_bytes() as f64 / 1e6,
-            catallaxy_gc::stats::live_bytes() as f64 / 1e6
+            catallaxy_gc::stats::live_bytes() as f64 / 1e6,
+            total as f64 / 1e6,
+            max as f64 / 1e6
+        );
+        let (n, ns, max_ns, freed, promoted) = catallaxy_gc::stats::minors();
+        eprintln!(
+            "gc: {n} minor collections, {:.1} ms total / {:.2} ms max, {:.1} MB freed, {:.1} MB promoted",
+            ns as f64 / 1e6,
+            max_ns as f64 / 1e6,
+            freed as f64 / 1e6,
+            promoted as f64 / 1e6
         );
     }
     0

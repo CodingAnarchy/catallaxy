@@ -87,6 +87,10 @@ impl Shape {
             return None;
         }
         SHAPE_ROOTS.call_once(|| catallaxy_gc::add_global_roots(Box::new(ShapeKeyRoots)));
+        // The registry is a global root, which minor collections do not scan.
+        if let Some(h) = key.header() {
+            h.tenure();
+        }
         let id = reg.count as u32;
         reg.count += 1;
         reg.keys.push(key);
