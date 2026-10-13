@@ -6,7 +6,7 @@ frozen class Pos {
   col: Int
   fn neighbors(self) -> List[Pos] {
     [Pos.new(self.row - 1, self.col), Pos.new(self.row + 1, self.col),
-     Pos.new(self.row, self.col - 1), Pos.new(self.row, self.col + 1)]
+      Pos.new(self.row, self.col - 1), Pos.new(self.row, self.col + 1)]
   }
   fn key(self) -> (Int, Int) { (self.row, self.col) }
 }
@@ -66,7 +66,6 @@ fn shortest_path(maze: Maze, start: Pos, goal: Pos) -> List[Pos]? {
   }
   nil
 }
-
 
 fn solve(name: String, text: String) {
   maze = parse_maze(text)
