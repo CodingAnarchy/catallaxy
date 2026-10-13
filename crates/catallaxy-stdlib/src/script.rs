@@ -332,6 +332,13 @@ impl CommandSpec {
     fn command(&self) -> std::process::Command {
         let mut c = std::process::Command::new(&self.cmd);
         c.args(&self.args);
+        // The program's `Env.set` / `Env.remove` changes, then this call's `env`.
+        for (k, v) in crate::sys::env_overlay() {
+            match v {
+                Some(v) => c.env(k, v),
+                None => c.env_remove(k),
+            };
+        }
         c.envs(self.env.iter().map(|(k, v)| (k, v)));
         if let Some(d) = &self.dir {
             c.current_dir(d);
