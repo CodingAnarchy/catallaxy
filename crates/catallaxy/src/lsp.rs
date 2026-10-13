@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use catallaxy_compiler::diag::{Severity, SourceFile};
-use catallaxy_compiler::driver::{compile_path, Compilation, OverlayLoader, Options, PRELUDE};
+use catallaxy_compiler::driver::{compile_path, Compilation, Options, OverlayLoader, PRELUDE};
 use catallaxy_compiler::query::{self, CompletionKind as QK};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types as lt;
@@ -143,7 +143,8 @@ struct Checked {
 
 impl Server<'_> {
     fn compile(&self, path: &Path, text_override: Option<String>) -> Checked {
-        let mut files: FxHashMap<PathBuf, String> = self.docs.iter().map(|(p, (_, t))| (p.clone(), t.clone())).collect();
+        let mut files: FxHashMap<PathBuf, String> =
+            self.docs.iter().map(|(p, (_, t))| (p.clone(), t.clone())).collect();
         if let Some(t) = text_override {
             files.insert(path.to_path_buf(), t);
         }
@@ -185,7 +186,9 @@ impl Server<'_> {
             let mut related = Vec::new();
             for (note, sp) in &d.notes {
                 match sp.and_then(|sp| Self::location(c, sp)) {
-                    Some(loc) => related.push(lt::DiagnosticRelatedInformation { location: loc, message: note.clone() }),
+                    Some(loc) => {
+                        related.push(lt::DiagnosticRelatedInformation { location: loc, message: note.clone() })
+                    }
                     None => {
                         message.push_str("\nnote: ");
                         message.push_str(note);
@@ -250,7 +253,8 @@ impl Server<'_> {
                 if let Some(path) = uri_to_path(&p.text_document.uri) {
                     self.docs.remove(&path);
                 }
-                let params = lt::PublishDiagnosticsParams { uri: p.text_document.uri, diagnostics: Vec::new(), version: None };
+                let params =
+                    lt::PublishDiagnosticsParams { uri: p.text_document.uri, diagnostics: Vec::new(), version: None };
                 self.notify("textDocument/publishDiagnostics", params);
                 self.publish_all();
             }
@@ -267,7 +271,13 @@ impl Server<'_> {
             "textDocument/definition" => parse(req.params).map(|p| to_json(self.definition(p))),
             "textDocument/completion" => parse(req.params).map(|p| to_json(self.completion(p))),
             "textDocument/formatting" => parse(req.params).map(|p| to_json(self.formatting(p))),
-            other => return Response::new_err(id, ErrorCode::MethodNotFound as i32, format!("unsupported request `{other}`")),
+            other => {
+                return Response::new_err(
+                    id,
+                    ErrorCode::MethodNotFound as i32,
+                    format!("unsupported request `{other}`"),
+                )
+            }
         };
         match result {
             Ok(v) => Response::new_ok(id, v),
@@ -310,7 +320,9 @@ impl Server<'_> {
         let (path, text, off) = self.locate(&p.text_document_position)?;
         let bytes = text.as_bytes();
         let mut start = off as usize;
-        while start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_' || bytes[start - 1] >= 0x80) {
+        while start > 0
+            && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_' || bytes[start - 1] >= 0x80)
+        {
             start -= 1;
         }
         let items = if start > 0 && bytes[start - 1] == b'.' && !(start > 1 && bytes[start - 2] == b'.') {
@@ -327,9 +339,11 @@ impl Server<'_> {
             let ck = &mut c.comp.ck;
             let recv = query::expr_ending_at(&ck.mods[m as usize].ast, dot as u32)?.clone();
             match query::path_res(ck, m, &recv) {
-                Some(res @ (catallaxy_compiler::check::NameRes::Class(_)
-                | catallaxy_compiler::check::NameRes::Enum(_)
-                | catallaxy_compiler::check::NameRes::Module(_))) => query::path_completions(ck, res),
+                Some(
+                    res @ (catallaxy_compiler::check::NameRes::Class(_)
+                    | catallaxy_compiler::check::NameRes::Enum(_)
+                    | catallaxy_compiler::check::NameRes::Module(_)),
+                ) => query::path_completions(ck, res),
                 _ => {
                     let t = *ck.expr_ty.get(&recv.id)?;
                     query::member_completions(ck, m, t)

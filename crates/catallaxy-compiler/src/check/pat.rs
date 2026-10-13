@@ -138,11 +138,7 @@ impl Checker {
                 }
             }
         } else {
-            let prefix = ast::Expr {
-                id: u32::MAX - 1,
-                kind: path_expr(&path[..path.len() - 1]),
-                span: path[0].span,
-            };
+            let prefix = ast::Expr { id: u32::MAX - 1, kind: path_expr(&path[..path.len() - 1]), span: path[0].span };
             match self.resolve_path(&prefix) {
                 Some(expr::PathRes::Enum(en, _)) => {
                     self.enums[en as usize].variants.iter().position(|v| &v.name == name).map(|t| (en, t as u32))
@@ -179,10 +175,8 @@ impl Checker {
         }
         // A type test: `Int`, `Point`, `List[Int]`.
         if !shorthand {
-            let te = ast::TypeExpr {
-                kind: ast::TypeExprKind::Named { path: path.to_vec(), args: vec![] },
-                span: p.span,
-            };
+            let te =
+                ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.to_vec(), args: vec![] }, span: p.span };
             let before = self.diags.len();
             self.suppress_diags += 1;
             let t = self.resolve_type(&te, &mut self.type_scope());
@@ -309,7 +303,8 @@ impl Checker {
             (PatternKind::Literal(e), _) if matches!(e.kind, ExprKind::Nil) => Some(self.types.nil),
             (PatternKind::Typed { ty: te, .. }, _) => Some(self.resolve_type(te, &mut self.type_scope())),
             (PatternKind::Ctor { path, .. }, Some(PatRes::Type { .. })) => {
-                let te = ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
+                let te =
+                    ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
                 self.suppress_diags += 1;
                 let before = self.diags.len();
                 let t = self.resolve_type(&te, &mut self.type_scope());
@@ -339,7 +334,8 @@ impl Checker {
                 }
             }
             (PatternKind::Ctor { path, .. }, Some(PatRes::Type { .. })) => {
-                let te = ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
+                let te =
+                    ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
                 self.suppress_diags += 1;
                 let t = self.resolve_type(&te, &mut self.type_scope());
                 self.suppress_diags -= 1;
@@ -357,11 +353,11 @@ impl Checker {
             let msg = format!("`match` does not cover {}", missing.join(", "));
             let insert_at = Span::new(e.span.file, e.span.end - 1, e.span.end - 1);
             let arms_text: String = missing.iter().map(|m| format!("  {m} => panic(\"unhandled\")\n")).collect();
-            self.emit(
-                Diag::error("E0360", msg, e.span)
-                    .fix("add the missing arms", insert_at, arms_text)
-                    .fix("add a catch-all arm", insert_at, "  _ => panic(\"unhandled\")\n"),
-            );
+            self.emit(Diag::error("E0360", msg, e.span).fix("add the missing arms", insert_at, arms_text).fix(
+                "add a catch-all arm",
+                insert_at,
+                "  _ => panic(\"unhandled\")\n",
+            ));
         }
     }
 
@@ -383,7 +379,9 @@ impl Checker {
                 _ => AP::Lit,
             },
             (PatternKind::Range { .. }, _) => AP::Lit,
-            (PatternKind::Tuple(ps), _) => AP::Ctor(Key::Tuple(ps.len()), ps.iter().map(|x| self.abstract_pat(x)).collect()),
+            (PatternKind::Tuple(ps), _) => {
+                AP::Ctor(Key::Tuple(ps.len()), ps.iter().map(|x| self.abstract_pat(x)).collect())
+            }
             (PatternKind::Or(alts), _) => AP::Or(alts.iter().map(|x| self.abstract_pat(x)).collect()),
             (PatternKind::Typed { ty, .. }, _) => {
                 let t = self.resolve_type(ty, &mut self.type_scope());
@@ -403,7 +401,8 @@ impl Checker {
                 AP::Ctor(Key::Variant(class), sub)
             }
             (PatternKind::Ctor { path, .. }, Some(PatRes::Type { .. })) => {
-                let te = ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
+                let te =
+                    ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
                 self.suppress_diags += 1;
                 let before = self.diags.len();
                 let t = self.resolve_type(&te, &mut self.type_scope());
@@ -519,7 +518,9 @@ impl Checker {
                     for r in &rows {
                         let head = match &r[0] {
                             AP::Wild => Some(vec![AP::Wild; fts.len()]),
-                            AP::Ctor(k, sub) if *k == key => Some(if sub.len() == fts.len() { sub.clone() } else { vec![AP::Wild; fts.len()] }),
+                            AP::Ctor(k, sub) if *k == key => {
+                                Some(if sub.len() == fts.len() { sub.clone() } else { vec![AP::Wild; fts.len()] })
+                            }
                             AP::Type(pt) => {
                                 let pt = *pt;
                                 if self.trial(|c| c.assignable(kt, pt)) {
@@ -578,7 +579,6 @@ impl Checker {
             }
         }
     }
-
 }
 
 fn path_expr(path: &[ast::Ident]) -> ExprKind {

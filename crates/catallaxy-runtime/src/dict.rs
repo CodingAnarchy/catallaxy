@@ -218,7 +218,8 @@ impl DictTable {
 
     pub fn heap_bytes(&self) -> usize {
         unsafe {
-            8 * (WordBuf::cap(self.entries.load(Ordering::Relaxed)) + WordBuf::cap(self.indices.load(Ordering::Relaxed)))
+            8 * (WordBuf::cap(self.entries.load(Ordering::Relaxed))
+                + WordBuf::cap(self.indices.load(Ordering::Relaxed)))
         }
     }
 

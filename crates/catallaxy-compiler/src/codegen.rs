@@ -80,11 +80,8 @@ impl<'a> Codegen<'a> {
             self.prog.funcs[fid as usize] = proto;
         }
         self.gen_classes();
-        self.prog.globals = ck
-            .globals
-            .iter()
-            .map(|g| GlobalProto { name: g.name.clone(), is_const: g.is_const })
-            .collect();
+        self.prog.globals =
+            ck.globals.iter().map(|g| GlobalProto { name: g.name.clone(), is_const: g.is_const }).collect();
         self.prog.entry = ck.mods.iter().map(|m| m.main_fn).collect();
         (self.prog, self.errors)
     }
@@ -509,7 +506,13 @@ impl<'a> Codegen<'a> {
     }
 
     /// Generates a closure (or for-body block) function and returns the code creating it.
-    fn gen_closure_fn(&mut self, outer: &mut FnState, info: &ClosureInfo, body: &Block, pattern: Option<&Pattern>) -> FnId {
+    fn gen_closure_fn(
+        &mut self,
+        outer: &mut FnState,
+        info: &ClosureInfo,
+        body: &Block,
+        pattern: Option<&Pattern>,
+    ) -> FnId {
         let ck = self.ck;
         let fid = info.fn_id;
         let mut st = self.new_state(fid);
@@ -755,7 +758,10 @@ impl<'a> Codegen<'a> {
     fn expr_reg(&mut self, st: &mut FnState, e: &Expr) -> u8 {
         if let ExprKind::Ident(_) | ExprKind::SelfValue = e.kind {
             if let Some(NameRes::Local(l)) = self.ck.names.get(&e.id) {
-                if !self.ck.locals[*l as usize].is_cell() && !st.caps.contains_key(l) && !self.ck.coerce.contains_key(&e.id) {
+                if !self.ck.locals[*l as usize].is_cell()
+                    && !st.caps.contains_key(l)
+                    && !self.ck.coerce.contains_key(&e.id)
+                {
                     if let Some(&r) = st.regs.get(l) {
                         return r;
                     }
@@ -837,7 +843,11 @@ impl<'a> Codegen<'a> {
                             self.expr_to(st, value, r);
                             return;
                         }
-                        if declare && ck.locals[l as usize].is_cell() && !st.caps.contains_key(&l) && !st.regs.contains_key(&l) {
+                        if declare
+                            && ck.locals[l as usize].is_cell()
+                            && !st.caps.contains_key(&l)
+                            && !st.regs.contains_key(&l)
+                        {
                             // Create the cell first so a closure in the value can capture it.
                             let r = self.local_reg(st, l);
                             self.emit(st, encode(Op::LoadNil, r, 0, 0));
@@ -854,8 +864,11 @@ impl<'a> Codegen<'a> {
                                 // `x op= v` on a register local: evaluate v first (it may read x),
                                 // then combine in place.
                                 let mark = st.next;
-                                if let (Some(BinRes::Arith(ArithKind::Int)), BinOp::Add | BinOp::Sub, ExprKind::Int(lit)) =
-                                    (ck.bins.get(&e.id), o, &value.kind)
+                                if let (
+                                    Some(BinRes::Arith(ArithKind::Int)),
+                                    BinOp::Add | BinOp::Sub,
+                                    ExprKind::Int(lit),
+                                ) = (ck.bins.get(&e.id), o, &value.kind)
                                 {
                                     if let Ok(i) = lit.parse::<i64>() {
                                         let i = if *o == BinOp::Sub { -i } else { i };
@@ -1192,7 +1205,14 @@ impl<'a> Codegen<'a> {
             ExprKind::While { cond, body } => {
                 let start = st.code.len();
                 let fails = self.cond_jump(st, cond);
-                st.loops.push(LoopLabels { start, breaks: fails, continues: Vec::new(), result: None, with_depth: st.withs.len(), continue_patch: false });
+                st.loops.push(LoopLabels {
+                    start,
+                    breaks: fails,
+                    continues: Vec::new(),
+                    result: None,
+                    with_depth: st.withs.len(),
+                    continue_patch: false,
+                });
                 self.block_stmts(st, body);
                 self.jmp_back(st, start);
                 let lp = st.loops.pop().unwrap();
@@ -1204,7 +1224,14 @@ impl<'a> Codegen<'a> {
             ExprKind::Loop { body } => {
                 let start = st.code.len();
                 self.emit(st, encode(Op::Safepoint, 0, 0, 0));
-                st.loops.push(LoopLabels { start, breaks: Vec::new(), continues: Vec::new(), result: Some(dst), with_depth: st.withs.len(), continue_patch: false });
+                st.loops.push(LoopLabels {
+                    start,
+                    breaks: Vec::new(),
+                    continues: Vec::new(),
+                    result: Some(dst),
+                    with_depth: st.withs.len(),
+                    continue_patch: false,
+                });
                 let t = self.alloc(st);
                 self.block_to(st, body, t);
                 self.jmp_back(st, start);
@@ -1246,37 +1273,35 @@ impl<'a> Codegen<'a> {
                     }
                 }
             }
-            ExprKind::Break(v) => {
-                match ck.control.get(&e.id) {
-                    Some(Control::BreakUnwind(fl)) => {
-                        let r = match v {
-                            Some(x) => self.expr_reg(st, x),
-                            None => {
-                                let t = self.alloc(st);
-                                self.emit(st, encode(Op::LoadNil, t, 0, 0));
-                                t
-                            }
-                        };
-                        let f = self.alloc(st);
-                        self.load_local(st, *fl, f);
-                        self.emit(st, encode(Op::Unwind, 0, f, r));
+            ExprKind::Break(v) => match ck.control.get(&e.id) {
+                Some(Control::BreakUnwind(fl)) => {
+                    let r = match v {
+                        Some(x) => self.expr_reg(st, x),
+                        None => {
+                            let t = self.alloc(st);
+                            self.emit(st, encode(Op::LoadNil, t, 0, 0));
+                            t
+                        }
+                    };
+                    let f = self.alloc(st);
+                    self.load_local(st, *fl, f);
+                    self.emit(st, encode(Op::Unwind, 0, f, r));
+                }
+                _ => {
+                    let target = st.loops.last().and_then(|l| l.result);
+                    if let (Some(x), Some(rr)) = (v, target) {
+                        self.expr_to(st, x, rr);
+                    } else if let Some(rr) = target {
+                        self.emit(st, encode(Op::LoadNil, rr, 0, 0));
                     }
-                    _ => {
-                        let target = st.loops.last().and_then(|l| l.result);
-                        if let (Some(x), Some(rr)) = (v, target) {
-                            self.expr_to(st, x, rr);
-                        } else if let Some(rr) = target {
-                            self.emit(st, encode(Op::LoadNil, rr, 0, 0));
-                        }
-                        let depth = st.loops.last().map(|l| l.with_depth).unwrap_or(0);
-                        self.unlock_withs(st, depth);
-                        let j = self.jmp(st);
-                        if let Some(lp) = st.loops.last_mut() {
-                            lp.breaks.push(j);
-                        }
+                    let depth = st.loops.last().map(|l| l.with_depth).unwrap_or(0);
+                    self.unlock_withs(st, depth);
+                    let j = self.jmp(st);
+                    if let Some(lp) = st.loops.last_mut() {
+                        lp.breaks.push(j);
                     }
                 }
-            }
+            },
             ExprKind::Continue => match ck.control.get(&e.id) {
                 Some(Control::ContinueReturn) => {
                     self.emit(st, encode(Op::ReturnNil, 0, 0, 0));
@@ -1664,7 +1689,16 @@ impl<'a> Codegen<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn call(&mut self, st: &mut FnState, e: &Expr, callee: Option<&Expr>, recv: Option<&Expr>, args: &[Arg], block: Option<&Expr>, dst: u8) {
+    fn call(
+        &mut self,
+        st: &mut FnState,
+        e: &Expr,
+        callee: Option<&Expr>,
+        recv: Option<&Expr>,
+        args: &[Arg],
+        block: Option<&Expr>,
+        dst: u8,
+    ) {
         let ck = self.ck;
         let mark = st.next;
         let Some(res) = ck.calls.get(&e.id).cloned() else {
@@ -1786,7 +1820,7 @@ impl<'a> Codegen<'a> {
         let v = self.alloc(st);
         self.expr_to(st, x, v);
         let is_result = ck.calls.contains_key(&e.id);
-        
+
         let ok_jump = if is_result {
             // Ok has tag 0.
             let t = self.alloc(st);
@@ -1858,7 +1892,14 @@ impl<'a> Codegen<'a> {
                 let start = st.code.len();
                 let _ = c;
                 let exit = self.emit_fused(st, if excl == Some(true) { Op::JNLtI } else { Op::JNLeI }, i, hi);
-                st.loops.push(LoopLabels { start, breaks: vec![exit], continues: Vec::new(), result: None, with_depth: st.withs.len(), continue_patch: true });
+                st.loops.push(LoopLabels {
+                    start,
+                    breaks: vec![exit],
+                    continues: Vec::new(),
+                    result: None,
+                    with_depth: st.withs.len(),
+                    continue_patch: true,
+                });
                 let mut fails = Vec::new();
                 self.pattern(st, pattern, i, &mut fails);
                 self.block_stmts(st, body);
@@ -1892,7 +1933,14 @@ impl<'a> Codegen<'a> {
                 self.emit(st, encode(Op::ListLen, n, list, 0));
                 let _ = c;
                 let exit = self.emit_fused(st, Op::JNLtI, i, n);
-                st.loops.push(LoopLabels { start, breaks: vec![exit], continues: Vec::new(), result: None, with_depth: st.withs.len(), continue_patch: true });
+                st.loops.push(LoopLabels {
+                    start,
+                    breaks: vec![exit],
+                    continues: Vec::new(),
+                    result: None,
+                    with_depth: st.withs.len(),
+                    continue_patch: true,
+                });
                 let item = self.alloc(st);
                 self.emit(st, encode(Op::ListGet, item, list, i));
                 let mut fails = Vec::new();
@@ -1964,7 +2012,8 @@ impl<'a> Codegen<'a> {
             }
             (PatternKind::Tuple(ps), _) => {
                 // The subject may be optional or a union: check it is a tuple first.
-                let is_tuple = matches!(ck.types.get(ck.types.shallow_resolve(ck.ty_of_pattern_subject(p))), Ty::Tuple(_));
+                let is_tuple =
+                    matches!(ck.types.get(ck.types.shallow_resolve(ck.ty_of_pattern_subject(p))), Ty::Tuple(_));
                 if !is_tuple {
                     let t = self.alloc(st);
                     self.emit(st, encode(Op::IsKind, t, subj, KIND_TUPLE));

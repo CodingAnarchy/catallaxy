@@ -41,7 +41,9 @@ pub enum CtxKind {
     /// `break`, `continue` and `return` inside it unwind to the enclosing frames.
     ForBody,
     /// A `spawn` block or `par_*` block: captures are copied and must be thread-safe.
-    Spawn { is_move: bool },
+    Spawn {
+        is_move: bool,
+    },
 }
 
 pub struct FnCtx {

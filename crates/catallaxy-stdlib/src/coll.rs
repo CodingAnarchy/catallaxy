@@ -36,10 +36,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             ownership::write_list(&vm.m, a[0], |l, _| unsafe { l.pop() }.unwrap_or(Value::NIL))
         },
         "List.shift" => |vm, a| list_write(vm, a[0], &[], |v| if v.is_empty() { Value::NIL } else { v.remove(0) }),
-        "List.unshift" => |vm, a| list_write(vm, a[0], &[a[1]], |v| {
-            v.insert(0, a[1]);
-            Value::NIL
-        }),
+        "List.unshift" => |vm, a| {
+            list_write(vm, a[0], &[a[1]], |v| {
+                v.insert(0, a[1]);
+                Value::NIL
+            })
+        },
         "List.insert" => |vm, a| {
             let i = int(a[1])?;
             let item = a[2];
@@ -64,10 +66,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
                 Ok(v.remove(idx as usize))
             })?
         },
-        "List.clear" => |vm, a| list_write(vm, a[0], &[], |v| {
-            v.clear();
-            Value::NIL
-        }),
+        "List.clear" => |vm, a| {
+            list_write(vm, a[0], &[], |v| {
+                v.clear();
+                Value::NIL
+            })
+        },
         "List.concat" => |vm, a| {
             let other = list_items(vm, a[1])?;
             let h = unsafe { &*a[0].as_ptr() };
@@ -110,10 +114,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             items.reverse();
             Ok(new_list(vm, items))
         },
-        "List.reverse_in_place" => |vm, a| list_write(vm, a[0], &[], |v| {
-            v.reverse();
-            Value::NIL
-        }),
+        "List.reverse_in_place" => |vm, a| {
+            list_write(vm, a[0], &[], |v| {
+                v.reverse();
+                Value::NIL
+            })
+        },
         "List.swap" => |vm, a| {
             let (i, j) = (int(a[1])?, int(a[2])?);
             list_read(vm, a[0])?;
@@ -166,9 +172,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
 
         "Dict.new" => |vm, _| Ok(vm.m.alloc_dict(DictTable::new())),
         "Set.new" => |vm, _| Ok(vm.m.alloc_set(DictTable::new())),
-        "Dict.length" | "Set.length" => |vm, a| {
-            dict_read(vm, a[0], |t| Value::small_int(t.len() as i64))
-        },
+        "Dict.length" | "Set.length" => |vm, a| dict_read(vm, a[0], |t| Value::small_int(t.len() as i64)),
         "Dict.[]" | "Dict.get" => |vm, a| Ok(slow::dict_get(vm, a[0], a[1])?.unwrap_or(Value::NIL)),
         "Dict.[]=" => |vm, a| {
             slow::dict_set(vm, a[0], a[1], a[2])?;
@@ -267,7 +271,12 @@ pub(crate) fn list_read<'a>(vm: &Vm, l: Value) -> RtResult<&'a ListObj> {
 }
 
 /// Mutates a list; `incoming` values are published first when the list is shared.
-pub(crate) fn list_write<R>(vm: &Vm, l: Value, incoming: &[Value], f: impl FnOnce(&mut Vec<Value>) -> R) -> RtResult<R> {
+pub(crate) fn list_write<R>(
+    vm: &Vm,
+    l: Value,
+    incoming: &[Value],
+    f: impl FnOnce(&mut Vec<Value>) -> R,
+) -> RtResult<R> {
     if kind_of(l) != ObjKind::List {
         return panic("TypeError: expected List");
     }

@@ -27,8 +27,8 @@ pub use catallaxy_runtime::{HandleScope, Local, Mutator, RtResult, Trap, Value};
 pub use catallaxy_vm::{NativeFn, Program, Vm};
 
 use catallaxy_compiler::driver::{compile_path, compile_source, FsLoader, Options};
-use catallaxy_vm::interp::MAIN_STACK;
 use catallaxy_runtime::Trap as RtTrap;
+use catallaxy_vm::interp::MAIN_STACK;
 
 /// Helpers for writing native functions.
 pub mod native {
@@ -196,4 +196,3 @@ fn run_program(program: &Program) -> i32 {
     }
     0
 }
-

@@ -90,7 +90,13 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "String.swapcase" => |vm, a| {
             str_map(vm, a, |x| {
                 x.chars()
-                    .map(|c| if c.is_uppercase() { c.to_lowercase().collect::<String>() } else { c.to_uppercase().collect() })
+                    .map(|c| {
+                        if c.is_uppercase() {
+                            c.to_lowercase().collect::<String>()
+                        } else {
+                            c.to_uppercase().collect()
+                        }
+                    })
                     .collect()
             })
         },
@@ -98,9 +104,9 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "String.strip" => |vm, a| str_map(vm, a, |x| x.trim().to_string()),
         "String.lstrip" => |vm, a| str_map(vm, a, |x| x.trim_start().to_string()),
         "String.rstrip" => |vm, a| str_map(vm, a, |x| x.trim_end().to_string()),
-        "String.chomp" => |vm, a| {
-            str_map(vm, a, |x| x.strip_suffix("\r\n").or_else(|| x.strip_suffix('\n')).unwrap_or(x).to_string())
-        },
+        "String.chomp" => {
+            |vm, a| str_map(vm, a, |x| x.strip_suffix("\r\n").or_else(|| x.strip_suffix('\n')).unwrap_or(x).to_string())
+        }
         "String.split" => str_split,
         "String.lines" => |vm, a| {
             let parts: Vec<String> = s(a[0])?.lines().map(|l| l.to_string()).collect();
@@ -292,7 +298,11 @@ fn str_index(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     if idx < 0 || idx >= n {
         return panic(format!("IndexError: index {i} out of range for string of length {n}"));
     }
-    let c = if x.is_ascii() { x[idx as usize..idx as usize + 1].to_string() } else { x.chars().nth(idx as usize).unwrap().to_string() };
+    let c = if x.is_ascii() {
+        x[idx as usize..idx as usize + 1].to_string()
+    } else {
+        x.chars().nth(idx as usize).unwrap().to_string()
+    };
     Ok(new_str(vm, &c))
 }
 

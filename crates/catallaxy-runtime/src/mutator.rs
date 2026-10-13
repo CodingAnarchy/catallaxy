@@ -64,7 +64,12 @@ impl Mutator {
     /// A second context for the same thread (a fiber): same heap and thread record, its own
     /// handle stack. Release it with [`Mutator::free_handles`].
     pub fn sharing(other: &Mutator) -> Self {
-        Mutator { tid: other.tid, rec: other.rec.clone(), heap: other.heap, handles: Box::into_raw(Box::new(Vec::new())) }
+        Mutator {
+            tid: other.tid,
+            rec: other.rec.clone(),
+            heap: other.heap,
+            handles: Box::into_raw(Box::new(Vec::new())),
+        }
     }
 
     /// Frees the handle stack of a context made by [`Mutator::sharing`].

@@ -109,9 +109,10 @@ pub fn cmd_disasm(args: &[String]) -> i32 {
             continue;
         }
         if (func.file as usize >= 2 || filter.is_some_and(|n| func.name.contains(n.as_str())))
-            && filter.is_none_or(|n| func.name.contains(n.as_str())) {
-                println!("{}", catallaxy_vm::bytecode::disassemble(&p, func));
-            }
+            && filter.is_none_or(|n| func.name.contains(n.as_str()))
+        {
+            println!("{}", catallaxy_vm::bytecode::disassemble(&p, func));
+        }
     }
     0
 }
@@ -142,10 +143,8 @@ pub fn cmd_test(args: &[String]) -> i32 {
         } else {
             let expected_out = f.with_extension("out");
             let want = std::fs::read_to_string(&expected_out).unwrap_or_default();
-            let want_code: i32 = src
-                .lines()
-                .find_map(|l| l.strip_prefix("# exit:").map(|c| c.trim().parse().unwrap_or(0)))
-                .unwrap_or(0);
+            let want_code: i32 =
+                src.lines().find_map(|l| l.strip_prefix("# exit:").map(|c| c.trim().parse().unwrap_or(0))).unwrap_or(0);
             let input = f.with_extension("in");
             let mut cmd = Command::new(&exe);
             cmd.arg("run").arg(f);

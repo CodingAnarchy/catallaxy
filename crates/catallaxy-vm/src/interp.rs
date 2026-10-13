@@ -153,8 +153,7 @@ impl Vm {
             root_rs: rs,
             no_park: 0,
         });
-        let roots: Box<dyn RootSource> =
-            Box::new(VmRoots { stack: vm.stack, rs: vm.rs, handles: vm.m.handles_ptr() });
+        let roots: Box<dyn RootSource> = Box::new(VmRoots { stack: vm.stack, rs: vm.rs, handles: vm.m.handles_ptr() });
         let roots_ptr = Box::into_raw(roots);
         let heap_ptr = vm.m.heap_ptr();
         unsafe { catallaxy_gc::install(&vm.m.rec, roots_ptr, heap_ptr) };
@@ -897,7 +896,11 @@ impl Vm {
                     #[allow(clippy::neg_cmp_op_on_partial_ord)]
                     let jump = if x.is_float() && y.is_float() {
                         let (x, y) = (x.as_f64(), y.as_f64());
-                        if op_of(w) == Op::JNLtF as u8 { !(x < y) } else { !(x <= y) }
+                        if op_of(w) == Op::JNLtF as u8 {
+                            !(x < y)
+                        } else {
+                            !(x <= y)
+                        }
                     } else {
                         save!();
                         tri!(slow::fused_jump(Op::from_u8(op_of(w)), x, y))

@@ -366,7 +366,12 @@ fn leave_native_slow(rec: &ThreadRecord) {
     loop {
         if rec
             .state
-            .compare_exchange(ThreadState::InNative as u8, ThreadState::Running as u8, Ordering::SeqCst, Ordering::SeqCst)
+            .compare_exchange(
+                ThreadState::InNative as u8,
+                ThreadState::Running as u8,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
             .is_ok()
         {
             return;

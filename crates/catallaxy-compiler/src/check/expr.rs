@@ -40,14 +40,16 @@ impl Checker {
             return true;
         }
         let (exp, got) = (self.show(ty), self.show(t));
-        let mut d = Diag::error("E0300", format!("mismatched types in {what}: expected `{exp}`, found `{got}`"), e.span);
+        let mut d =
+            Diag::error("E0300", format!("mismatched types in {what}: expected `{exp}`, found `{got}`"), e.span);
         let tr = self.types.shallow_resolve(t);
         if let Some(inner) = self.types.strip_nil(tr) {
             if self.trial(|c| c.assignable(inner, ty)) {
-                d = d
-                    .note("the value may be nil")
-                    .fix("assert it is not nil", e.span.after(), "!")
-                    .fix("provide a default", e.span.after(), " ?? <default>");
+                d = d.note("the value may be nil").fix("assert it is not nil", e.span.after(), "!").fix(
+                    "provide a default",
+                    e.span.after(),
+                    " ?? <default>",
+                );
             }
         }
         if tr == self.types.float && self.types.shallow_resolve(ty) == self.types.int {
@@ -56,7 +58,10 @@ impl Checker {
         if let Ty::Iface(..) = self.types.get(self.types.shallow_resolve(ty)).clone() {
             let missing = self.missing_methods(t, ty);
             if !missing.is_empty() {
-                d = d.note(format!("`{got}` is missing: {}", missing.iter().map(|m| format!("`{m}`")).collect::<Vec<_>>().join(", ")));
+                d = d.note(format!(
+                    "`{got}` is missing: {}",
+                    missing.iter().map(|m| format!("`{m}`")).collect::<Vec<_>>().join(", ")
+                ));
             }
         }
         if matches!(self.types.get(tr), Ty::Dyn) {
@@ -123,10 +128,11 @@ impl Checker {
             ExprKind::List(items) => self.check_list(items, expected),
             ExprKind::Dict(entries) => self.check_dict(entries, expected),
             ExprKind::Tuple(items) => {
-                let exp: Option<Vec<TyId>> = expected.and_then(|t| match self.types.get(self.types.shallow_resolve(t)) {
-                    Ty::Tuple(ts) if ts.len() == items.len() => Some(ts.clone()),
-                    _ => None,
-                });
+                let exp: Option<Vec<TyId>> =
+                    expected.and_then(|t| match self.types.get(self.types.shallow_resolve(t)) {
+                        Ty::Tuple(ts) if ts.len() == items.len() => Some(ts.clone()),
+                        _ => None,
+                    });
                 let ts: Vec<TyId> = items
                     .iter()
                     .enumerate()
@@ -157,7 +163,9 @@ impl Checker {
                 self.check_member(e, recv, name, args, block.as_deref(), *parens, *safe, expected)
             }
             ExprKind::Index { recv, args } => self.check_index(e, recv, args),
-            ExprKind::Closure { params, ret, body, .. } => self.check_closure(e, params, ret.as_ref(), body, expected, None),
+            ExprKind::Closure { params, ret, body, .. } => {
+                self.check_closure(e, params, ret.as_ref(), body, expected, None)
+            }
             ExprKind::If { cond, then, else_ } => self.check_if(cond, then, else_.as_deref(), expected),
             ExprKind::IfLet { pattern, value, then, else_ } => {
                 self.check_if_let(pattern, value, then, else_.as_deref(), expected)
@@ -231,7 +239,11 @@ impl Checker {
                     None => {
                         if !matches!(self.types.get(self.types.shallow_resolve(t)), Ty::Dyn | Ty::Error | Ty::Open(_)) {
                             let msg = format!("`!` on a value of type `{}`, which is never nil", self.show(t));
-                            self.emit(Diag::warning("W0001", msg, e.span).fix("remove `!`", Span::new(e.span.file, e.span.end - 1, e.span.end), ""));
+                            self.emit(Diag::warning("W0001", msg, e.span).fix(
+                                "remove `!`",
+                                Span::new(e.span.file, e.span.end - 1, e.span.end),
+                                "",
+                            ));
                         }
                         t
                     }
@@ -253,7 +265,9 @@ impl Checker {
             }
             ExprKind::WithLock { obj, body } => {
                 let t = self.check_expr(obj, None);
-                if self.cap_of(t) != Cap::Shareable && !matches!(self.types.get(self.types.shallow_resolve(t)), Ty::Error | Ty::Dyn) {
+                if self.cap_of(t) != Cap::Shareable
+                    && !matches!(self.types.get(self.types.shallow_resolve(t)), Ty::Error | Ty::Dyn)
+                {
                     let msg = format!("`with lock` needs an instance of a `shared class`, found `{}`", self.show(t));
                     self.err("E0607", msg, obj.span);
                 }
@@ -338,7 +352,11 @@ impl Checker {
                 self.types.error
             }
             Some(ScopeItem::Module(_)) => {
-                self.err("E0308", format!("module `{name}` is not a value; access its items with `{name}.item`"), e.span);
+                self.err(
+                    "E0308",
+                    format!("module `{name}` is not a value; access its items with `{name}.item`"),
+                    e.span,
+                );
                 self.types.error
             }
             None => {
@@ -365,10 +383,20 @@ impl Checker {
     /// The type of a named function used as a value.
     fn fn_value_ty(&mut self, f: FnId, span: Span) -> TyId {
         if self.fns[f as usize].has_untyped_params {
-            self.err("E0309", "a function with untyped parameters cannot be used as a value; annotate its parameters", span);
+            self.err(
+                "E0309",
+                "a function with untyped parameters cannot be used as a value; annotate its parameters",
+                span,
+            );
             return self.types.error;
         }
-        let m = MethodRef { fid: f, subst: FxHashMap::default(), self_ty: self.types.error, dispatch: Dispatch::Static(f), frozen: false };
+        let m = MethodRef {
+            fid: f,
+            subst: FxHashMap::default(),
+            self_ty: self.types.error,
+            dispatch: Dispatch::Static(f),
+            frozen: false,
+        };
         let (ps, r) = self.instantiate_sig(&m);
         let pts = ps.iter().map(|p| p.ty).collect();
         self.types.func(pts, r)
@@ -610,13 +638,18 @@ impl Checker {
                     self.bins.insert(e.id, BinRes::Arith(ArithKind::Float));
                     return float;
                 }
-                if op == BinOp::Add && self.types.shallow_resolve(lt) == string && self.types.shallow_resolve(rt) == string {
+                if op == BinOp::Add
+                    && self.types.shallow_resolve(lt) == string
+                    && self.types.shallow_resolve(rt) == string
+                {
                     self.bins.insert(e.id, BinRes::Concat);
                     return string;
                 }
                 if self.is_dynamic(lt) || self.is_dynamic(rt) {
                     self.bins.insert(e.id, BinRes::Arith(ArithKind::Generic));
-                    return if matches!(self.types.get(self.types.shallow_resolve(lt)), Ty::Error) || matches!(self.types.get(self.types.shallow_resolve(rt)), Ty::Error) {
+                    return if matches!(self.types.get(self.types.shallow_resolve(lt)), Ty::Error)
+                        || matches!(self.types.get(self.types.shallow_resolve(rt)), Ty::Error)
+                    {
                         self.types.error
                     } else {
                         self.types.dyn_
@@ -804,7 +837,7 @@ impl Checker {
     /// Checks a Bool condition and computes the narrowings it implies.
     pub fn check_cond(&mut self, e: &Expr) -> Narrowings {
         let bool_ = self.types.bool;
-        
+
         match &e.kind {
             ExprKind::Unary(UnOp::Not, x) => {
                 let (t, f) = self.check_cond(x);
@@ -955,7 +988,14 @@ impl Checker {
         }
     }
 
-    fn check_if_let(&mut self, pattern: &ast::Pattern, value: &Expr, then: &Block, else_: Option<&Expr>, expected: Option<TyId>) -> TyId {
+    fn check_if_let(
+        &mut self,
+        pattern: &ast::Pattern,
+        value: &Expr,
+        then: &Block,
+        else_: Option<&Expr>,
+        expected: Option<TyId>,
+    ) -> TyId {
         let vt = self.check_expr(value, None);
         self.push_scope();
         // A plain binding unwraps an optional.
@@ -1128,7 +1168,10 @@ impl Checker {
                     _ => false,
                 };
                 if !ret_ok {
-                    let msg = format!("`?` on a Result requires the function to return a `Result`, but it returns `{}`", self.show(ret));
+                    let msg = format!(
+                        "`?` on a Result requires the function to return a `Result`, but it returns `{}`",
+                        self.show(ret)
+                    );
                     self.err("E0321", msg, e.span);
                 }
                 self.calls.insert(e.id, CallRes::None);
@@ -1138,7 +1181,10 @@ impl Checker {
         }
         if let Some(inner) = self.types.strip_nil(tr) {
             if !self.types.is_nilable(ret) && !matches!(self.types.get(ret), Ty::Var(_)) {
-                let msg = format!("`?` on an optional requires the function to return an optional, but it returns `{}`", self.show(ret));
+                let msg = format!(
+                    "`?` on an optional requires the function to return an optional, but it returns `{}`",
+                    self.show(ret)
+                );
                 self.err("E0321", msg, e.span);
             }
             if matches!(self.types.get(ret), Ty::Var(_)) {
@@ -1196,7 +1242,10 @@ impl Checker {
                     let owner = self.locals[l as usize].ctx as usize;
                     if self.ctxs[owner + 1..].iter().any(|c| matches!(c.kind, CtxKind::Spawn { .. })) {
                         let msg = format!("cannot assign to captured variable `{name}` inside a parallel block");
-                        self.emit(Diag::error("E0609", msg, target.span).note("parallel blocks receive copies of captured variables"));
+                        self.emit(
+                            Diag::error("E0609", msg, target.span)
+                                .note("parallel blocks receive copies of captured variables"),
+                        );
                     }
                     let declared = self.locals[l as usize].ty;
                     let vt = match op {
@@ -1228,7 +1277,11 @@ impl Checker {
                     }
                     self.clear_narrowing(l);
                     let declared_r = self.types.shallow_resolve(declared);
-                    if self.types.is_nilable(declared_r) && !self.types.is_nilable(vt) && !self.is_never(vt) && !self.types.has_vars(vt) {
+                    if self.types.is_nilable(declared_r)
+                        && !self.types.is_nilable(vt)
+                        && !self.is_never(vt)
+                        && !self.types.has_vars(vt)
+                    {
                         self.narrow(l, vt);
                     }
                     self.assigns.insert(e.id, AssignRes::Local(l));
@@ -1349,7 +1402,10 @@ impl Checker {
                         }
                         let rtr = self.types.shallow_resolve(rt);
                         let generic = matches!(self.types.get(rtr), Ty::Class(builtin::LIST | builtin::DICT, _));
-                        self.assigns.insert(e.id, if generic { AssignRes::IndexGeneric } else { AssignRes::Index(m.dispatch.clone()) });
+                        self.assigns.insert(
+                            e.id,
+                            if generic { AssignRes::IndexGeneric } else { AssignRes::Index(m.dispatch.clone()) },
+                        );
                         self.note_self_call(&m, recv);
                     }
                     None => {
@@ -1479,7 +1535,14 @@ impl Checker {
         }
     }
 
-    fn check_call(&mut self, e: &Expr, callee: &Expr, args: &[Arg], block: Option<&Expr>, expected: Option<TyId>) -> TyId {
+    fn check_call(
+        &mut self,
+        e: &Expr,
+        callee: &Expr,
+        args: &[Arg],
+        block: Option<&Expr>,
+        expected: Option<TyId>,
+    ) -> TyId {
         if let ExprKind::Ident(n) = &callee.kind {
             if n == "freeze" && self.lookup_local(n).is_none() && self.lookup_name(self.cur_module, n).is_none() {
                 if args.len() != 1 || block.is_some() {
@@ -1499,9 +1562,18 @@ impl Checker {
                     if self.fns[f as usize].has_untyped_params {
                         return self.call_implicit(e, f, args, block);
                     }
-                    let m = MethodRef { fid: f, subst: FxHashMap::default(), self_ty: self.types.error, dispatch: Dispatch::Static(f), frozen: false };
+                    let m = MethodRef {
+                        fid: f,
+                        subst: FxHashMap::default(),
+                        self_ty: self.types.error,
+                        dispatch: Dispatch::Static(f),
+                        frozen: false,
+                    };
                     let (slots, ret) = self.check_args(e, &m, args, block, expected, false);
-                    self.calls.insert(e.id, CallRes::Fn { dispatch: Dispatch::Static(f), recv: false, args: slots, safe: false });
+                    self.calls.insert(
+                        e.id,
+                        CallRes::Fn { dispatch: Dispatch::Static(f), recv: false, args: slots, safe: false },
+                    );
                     return ret;
                 }
                 PathRes::Variant(en, tag, targs) => return self.construct_variant(e, en, tag, targs, args, expected),
@@ -1625,7 +1697,8 @@ impl Checker {
                         ok = false;
                     }
                     None => {
-                        let mut d = Diag::error("E0336", format!("`{fname}` has no parameter named `{}`", n.name), n.span);
+                        let mut d =
+                            Diag::error("E0336", format!("`{fname}` has no parameter named `{}`", n.name), n.span);
                         if let Some(s) = crate::util::suggest(&n.name, params.iter().map(|p| p.name.as_str())) {
                             d = d.fix(format!("did you mean `{s}`?"), n.span, s);
                         }
@@ -1723,7 +1796,10 @@ impl Checker {
                         let mut d = Diag::error("E0368", msg, call.span);
                         let missing = self.missing_methods(actual, b);
                         if !missing.is_empty() {
-                            d = d.note(format!("missing: {}", missing.iter().map(|x| format!("`{x}`")).collect::<Vec<_>>().join(", ")));
+                            d = d.note(format!(
+                                "missing: {}",
+                                missing.iter().map(|x| format!("`{x}`")).collect::<Vec<_>>().join(", ")
+                            ));
                         }
                         self.emit(d);
                     }
@@ -1753,7 +1829,15 @@ impl Checker {
         }
     }
 
-    fn construct_variant(&mut self, e: &Expr, en: EnumId, tag: u32, targs: Option<Vec<TyId>>, args: &[Arg], expected: Option<TyId>) -> TyId {
+    fn construct_variant(
+        &mut self,
+        e: &Expr,
+        en: EnumId,
+        tag: u32,
+        targs: Option<Vec<TyId>>,
+        args: &[Arg],
+        expected: Option<TyId>,
+    ) -> TyId {
         let info = self.enums[en as usize].clone();
         let targs = targs.unwrap_or_else(|| {
             // Use the expected enum's arguments when available.
@@ -1962,7 +2046,9 @@ impl Checker {
                     *rr = ret;
                     *rhs = self.subst_opens(*rhs, map);
                 }
-                OpenReq::Unary { ret: rr, .. } | OpenReq::Index { ret: rr, .. } | OpenReq::Call { ret: rr, .. } => *rr = ret,
+                OpenReq::Unary { ret: rr, .. } | OpenReq::Index { ret: rr, .. } | OpenReq::Call { ret: rr, .. } => {
+                    *rr = ret
+                }
                 OpenReq::Iter { elem, .. } => *elem = ret,
             }
             self.opens[co as usize].reqs.push(r);
@@ -2098,7 +2184,9 @@ impl Checker {
         }
         if let Some(path) = self.resolve_path(recv) {
             match path {
-                PathRes::Class(c, targs) => return self.check_static_member(e, c, targs, name, args, block, parens, expected),
+                PathRes::Class(c, targs) => {
+                    return self.check_static_member(e, c, targs, name, args, block, parens, expected)
+                }
                 PathRes::Enum(en, targs) => {
                     if let Some(tag) = self.enums[en as usize].variants.iter().position(|v| v.name == name.name) {
                         if !parens && self.enums[en as usize].variants[tag].fields.is_empty() {
@@ -2115,7 +2203,10 @@ impl Checker {
                             let self_ty = self.types.intern(Ty::Enum(en, ta));
                             let m = MethodRef { fid: f, subst, self_ty, dispatch: Dispatch::Static(f), frozen: false };
                             let (slots, ret) = self.check_args(e, &m, args, block, expected, false);
-                            self.calls.insert(e.id, CallRes::Fn { dispatch: Dispatch::Static(f), recv: false, args: slots, safe: false });
+                            self.calls.insert(
+                                e.id,
+                                CallRes::Fn { dispatch: Dispatch::Static(f), recv: false, args: slots, safe: false },
+                            );
                             return ret;
                         }
                     }
@@ -2147,9 +2238,18 @@ impl Checker {
                             if self.fns[f as usize].has_untyped_params {
                                 return self.call_implicit(e, f, args, block);
                             }
-                            let m = MethodRef { fid: f, subst: FxHashMap::default(), self_ty: self.types.error, dispatch: Dispatch::Static(f), frozen: false };
+                            let m = MethodRef {
+                                fid: f,
+                                subst: FxHashMap::default(),
+                                self_ty: self.types.error,
+                                dispatch: Dispatch::Static(f),
+                                frozen: false,
+                            };
                             let (slots, ret) = self.check_args(e, &m, args, block, expected, false);
-                            self.calls.insert(e.id, CallRes::Fn { dispatch: Dispatch::Static(f), recv: false, args: slots, safe: false });
+                            self.calls.insert(
+                                e.id,
+                                CallRes::Fn { dispatch: Dispatch::Static(f), recv: false, args: slots, safe: false },
+                            );
                             return ret;
                         }
                         ScopeItem::Global(g) => {
@@ -2244,7 +2344,12 @@ impl Checker {
                     let slots = (0..args.len()).map(ArgSlot::Arg).chain(block.map(|_| ArgSlot::Block)).collect();
                     self.calls.insert(
                         e.id,
-                        CallRes::Fn { dispatch: Dispatch::Dynamic(name.name.clone(), None), recv: true, args: slots, safe: false },
+                        CallRes::Fn {
+                            dispatch: Dispatch::Dynamic(name.name.clone(), None),
+                            recv: true,
+                            args: slots,
+                            safe: false,
+                        },
                     );
                 }
                 return self.types.dyn_;
@@ -2261,11 +2366,22 @@ impl Checker {
                 }
                 let named = args.iter().map(|a| a.name.as_ref().map(|n| n.name.clone())).collect();
                 let ret = self.new_open(o);
-                self.opens[o as usize].reqs.push(OpenReq::Method { name: name.name.clone(), args: tys, named, ret, span: e.span });
+                self.opens[o as usize].reqs.push(OpenReq::Method {
+                    name: name.name.clone(),
+                    args: tys,
+                    named,
+                    ret,
+                    span: e.span,
+                });
                 let slots = (0..args.len()).map(ArgSlot::Arg).chain(block.map(|_| ArgSlot::Block)).collect();
                 self.calls.insert(
                     e.id,
-                    CallRes::Fn { dispatch: Dispatch::Dynamic(name.name.clone(), None), recv: true, args: slots, safe: false },
+                    CallRes::Fn {
+                        dispatch: Dispatch::Dynamic(name.name.clone(), None),
+                        recv: true,
+                        args: slots,
+                        safe: false,
+                    },
                 );
                 return ret;
             }
@@ -2281,7 +2397,10 @@ impl Checker {
                 }
             }
             Ty::Var(_) => {
-                let msg = format!("the type of this value must be known before calling `{}`; add a type annotation", name.name);
+                let msg = format!(
+                    "the type of this value must be known before calling `{}`; add a type annotation",
+                    name.name
+                );
                 self.err("E0345", msg, recv.span);
                 self.check_args_loose(args, block);
                 return self.types.error;
@@ -2309,7 +2428,10 @@ impl Checker {
         if m.frozen {
             if f.mutating {
                 let msg = format!("cannot call mutating method `{}` on frozen `{}`", f.name, self.show(rt));
-                self.emit(Diag::error("E0614", msg, name.span).note("frozen values are deeply immutable; use `.dup()` for a mutable copy"));
+                self.emit(
+                    Diag::error("E0614", msg, name.span)
+                        .note("frozen values are deeply immutable; use `.dup()` for a mutable copy"),
+                );
             } else if !f.is_native {
                 self.frozen_calls.push((name.span, m.fid, self.show(rt)));
             }
@@ -2324,10 +2446,9 @@ impl Checker {
                         f.name,
                         self.show(et)
                     );
-                    self.emit(
-                        Diag::error("E0615", msg, name.span)
-                            .note("freeze the list first (`freeze(list).par_map {...}`) or use frozen/shared element types"),
-                    );
+                    self.emit(Diag::error("E0615", msg, name.span).note(
+                        "freeze the list first (`freeze(list).par_map {...}`) or use frozen/shared element types",
+                    ));
                 }
             }
         }
@@ -2342,7 +2463,10 @@ impl Checker {
         let on_self = match &recv.kind {
             ExprKind::SelfValue => true,
             ExprKind::Member { recv: r, parens: false, .. } => matches!(r.kind, ExprKind::SelfValue),
-            ExprKind::Index { recv: r, .. } => matches!(r.kind, ExprKind::SelfValue) || matches!(&r.kind, ExprKind::Member { recv: rr, .. } if matches!(rr.kind, ExprKind::SelfValue)),
+            ExprKind::Index { recv: r, .. } => {
+                matches!(r.kind, ExprKind::SelfValue)
+                    || matches!(&r.kind, ExprKind::Member { recv: rr, .. } if matches!(rr.kind, ExprKind::SelfValue))
+            }
             _ => false,
         };
         if !on_self {
@@ -2446,7 +2570,8 @@ impl Checker {
                 };
                 let m = MethodRef { fid: f, subst: sub, self_ty, dispatch: Dispatch::Static(f), frozen: false };
                 let (slots, ret) = self.check_args(e, &m, args, block, expected, false);
-                self.calls.insert(e.id, CallRes::Fn { dispatch: Dispatch::Static(f), recv: false, args: slots, safe: false });
+                self.calls
+                    .insert(e.id, CallRes::Fn { dispatch: Dispatch::Static(f), recv: false, args: slots, safe: false });
                 return ret;
             }
             cur = info.superclass.and_then(|t| match self.types.get(t) {
@@ -2486,7 +2611,15 @@ impl Checker {
         self.types.error
     }
 
-    fn check_super_call(&mut self, e: &Expr, recv: &Expr, name: &ast::Ident, args: &[Arg], block: Option<&Expr>, expected: Option<TyId>) -> TyId {
+    fn check_super_call(
+        &mut self,
+        e: &Expr,
+        recv: &Expr,
+        name: &ast::Ident,
+        args: &[Arg],
+        block: Option<&Expr>,
+        expected: Option<TyId>,
+    ) -> TyId {
         let ci = self.return_ctx();
         let fid = self.ctxs[ci].fn_id;
         let Owner::Class(cid) = self.fns[fid as usize].owner else {
@@ -2515,7 +2648,8 @@ impl Checker {
             self.names.insert(recv.id, NameRes::Local(s));
         }
         let (slots, ret) = self.check_args(e, &m, args, block, expected, false);
-        self.calls.insert(e.id, CallRes::Fn { dispatch: Dispatch::Static(m.fid), recv: true, args: slots, safe: false });
+        self.calls
+            .insert(e.id, CallRes::Fn { dispatch: Dispatch::Static(m.fid), recv: true, args: slots, safe: false });
         let callee_mut = self.fns[m.fid as usize].mutating;
         if callee_mut {
             self.fns[fid as usize].mutating = true;
@@ -2731,7 +2865,12 @@ impl Checker {
             if let Some(te) = &p.ty {
                 let t = self.resolve_type(te, &mut self.type_scope());
                 if i < ptys.len() && !matches!(self.types.get(ptys[i]), Ty::Error) && !self.assignable(ptys[i], t) {
-                    let msg = format!("block parameter `{}` is `{}` but `{}` is passed", p.name.name, self.show(t), self.show(ptys[i]));
+                    let msg = format!(
+                        "block parameter `{}` is `{}` but `{}` is passed",
+                        p.name.name,
+                        self.show(t),
+                        self.show(ptys[i])
+                    );
                     self.err("E0357", msg, te.span);
                 }
                 if i < ptys.len() {
@@ -2795,7 +2934,11 @@ impl Checker {
         };
         {
             let f = &mut self.fns[fid as usize];
-            f.params = ptys.iter().zip(plocals.iter()).map(|(&t, _)| PInfo { name: String::new(), ty: t, has_default: false, is_move: false, span: e.span }).collect();
+            f.params = ptys
+                .iter()
+                .zip(plocals.iter())
+                .map(|(&t, _)| PInfo { name: String::new(), ty: t, has_default: false, is_move: false, span: e.span })
+                .collect();
             f.ret = final_ret;
             f.state = CheckState::Done;
         }
@@ -2805,7 +2948,8 @@ impl Checker {
         }
         let n_params = if destructure { 1 } else { plocals.len() };
         let _ = n_params;
-        self.closures.insert(e.id, ClosureInfo { fn_id: fid, captures, params: plocals, destructure, is_for_body: false });
+        self.closures
+            .insert(e.id, ClosureInfo { fn_id: fid, captures, params: plocals, destructure, is_for_body: false });
         let fn_params = if destructure { vec![self.types.tuple(ptys)] } else { ptys };
         // A reported parameter mismatch should not be repeated as an argument mismatch.
         if self.diags[errors_before..].iter().any(|d| matches!(d.code, "E0355" | "E0356" | "E0357")) {
@@ -2817,7 +2961,11 @@ impl Checker {
     fn new_closure_fn(&mut self, e: &Expr, is_spawn: bool) -> FnId {
         let id = self.fns.len() as FnId;
         let mut f = self.fns[self.ctxs.last().map(|c| c.fn_id).unwrap_or(0) as usize].clone();
-        f.name = if is_spawn { "<spawn>".into() } else { format!("<block in {}>", f.name.trim_start_matches("<block in ").trim_end_matches('>')) };
+        f.name = if is_spawn {
+            "<spawn>".into()
+        } else {
+            format!("<block in {}>", f.name.trim_start_matches("<block in ").trim_end_matches('>'))
+        };
         f.owner = Owner::None;
         f.type_params = Vec::new();
         f.self_kind = ast::SelfKind::None;
@@ -2886,7 +3034,9 @@ impl Checker {
         let itr = self.types.shallow_resolve(it);
         let (kind, elem) = match self.types.get(itr).clone() {
             Ty::Class(builtin::LIST, a) => (ForKind::List, a[0]),
-            Ty::Frozen(inner) if matches!(self.types.get(self.types.shallow_resolve(inner)), Ty::Class(builtin::LIST, _)) => {
+            Ty::Frozen(inner)
+                if matches!(self.types.get(self.types.shallow_resolve(inner)), Ty::Class(builtin::LIST, _)) =>
+            {
                 let et = self.elem_type(itr).unwrap();
                 (ForKind::List, et)
             }
@@ -2940,7 +3090,10 @@ impl Checker {
             f.params = vec![PInfo { name: "$item".into(), ty: elem, has_default: false, is_move: false, span: e.span }];
             f.ret = nil;
             f.state = CheckState::Done;
-            self.for_bodies.insert(e.id, ClosureInfo { fn_id: fid, captures, params: vec![param], destructure: false, is_for_body: true });
+            self.for_bodies.insert(
+                e.id,
+                ClosureInfo { fn_id: fid, captures, params: vec![param], destructure: false, is_for_body: true },
+            );
         } else {
             self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: false });
             self.push_scope();
@@ -2979,8 +3132,12 @@ impl Checker {
 /// Converts an expression written in type position into a type expression.
 pub fn expr_to_type_expr(e: &Expr) -> Option<TypeExpr> {
     let kind = match &e.kind {
-        ExprKind::Ident(n) => TypeExprKind::Named { path: vec![ast::Ident { name: n.clone(), span: e.span }], args: vec![] },
-        ExprKind::Nil => TypeExprKind::Named { path: vec![ast::Ident { name: "Nil".into(), span: e.span }], args: vec![] },
+        ExprKind::Ident(n) => {
+            TypeExprKind::Named { path: vec![ast::Ident { name: n.clone(), span: e.span }], args: vec![] }
+        }
+        ExprKind::Nil => {
+            TypeExprKind::Named { path: vec![ast::Ident { name: "Nil".into(), span: e.span }], args: vec![] }
+        }
         ExprKind::Index { recv, args } => {
             let base = expr_to_type_expr(recv)?;
             let TypeExprKind::Named { path, .. } = base.kind else { return None };
@@ -2998,9 +3155,7 @@ pub fn expr_to_type_expr(e: &Expr) -> Option<TypeExpr> {
         }
         ExprKind::Try(inner) => TypeExprKind::Optional(Box::new(expr_to_type_expr(inner)?)),
         ExprKind::Tuple(items) => TypeExprKind::Tuple(items.iter().map(expr_to_type_expr).collect::<Option<Vec<_>>>()?),
-        ExprKind::Binary(BinOp::BitOr, l, r) => {
-            TypeExprKind::Union(vec![expr_to_type_expr(l)?, expr_to_type_expr(r)?])
-        }
+        ExprKind::Binary(BinOp::BitOr, l, r) => TypeExprKind::Union(vec![expr_to_type_expr(l)?, expr_to_type_expr(r)?]),
         _ => return None,
     };
     Some(TypeExpr { kind, span: e.span })

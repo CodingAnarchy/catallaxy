@@ -80,11 +80,8 @@ impl Checker {
             self.last_inst.push((tp, v));
         }
         self.last_inst_subst = sub.clone();
-        let params: Vec<PInfo> = f
-            .params
-            .iter()
-            .map(|p| PInfo { ty: self.types.subst(p.ty, &sub, Some(m.self_ty)), ..p.clone() })
-            .collect();
+        let params: Vec<PInfo> =
+            f.params.iter().map(|p| PInfo { ty: self.types.subst(p.ty, &sub, Some(m.self_ty)), ..p.clone() }).collect();
         let mut ret = self.types.subst(f.ret, &sub, Some(m.self_ty));
         if m.frozen {
             ret = self.freeze_ty(ret);
@@ -128,7 +125,9 @@ impl Checker {
                 }
                 self.lookup_ext(r, name, false).or_else(|| self.lookup_default(r, name, false))
             }
-            Ty::Iface(iid, args) => self.lookup_in_iface(r, iid, &args, name).or_else(|| self.lookup_ext(r, name, true)),
+            Ty::Iface(iid, args) => {
+                self.lookup_in_iface(r, iid, &args, name).or_else(|| self.lookup_ext(r, name, true))
+            }
             Ty::Inter(parts) => {
                 for p in parts {
                     if let Some(mut m) = self.lookup_method(p, name, allow_getters) {
@@ -181,7 +180,9 @@ impl Checker {
                 m.self_ty = r;
                 Some(m)
             }
-            Ty::Tuple(_) | Ty::Fn(..) => self.lookup_ext(r, name, false).or_else(|| self.lookup_default(r, name, false)),
+            Ty::Tuple(_) | Ty::Fn(..) => {
+                self.lookup_ext(r, name, false).or_else(|| self.lookup_default(r, name, false))
+            }
             _ => None,
         }
     }
@@ -207,7 +208,9 @@ impl Checker {
             if let Some(&fid) = ci.methods.get(name) {
                 let sc = &self.classes[&static_cls];
                 let dispatch = match sc.vslots.get(name) {
-                    Some(&slot) if !sc.subclasses.is_empty() && self.fns[fid as usize].self_kind != ast::SelfKind::None => {
+                    Some(&slot)
+                        if !sc.subclasses.is_empty() && self.fns[fid as usize].self_kind != ast::SelfKind::None =>
+                    {
                         Dispatch::Virtual(fid, slot)
                     }
                     _ => Dispatch::Static(fid),
@@ -238,7 +241,13 @@ impl Checker {
         let mut subst: FxHashMap<ParamId, TyId> = info.params.iter().copied().zip(args.iter().copied()).collect();
         subst.insert(info.self_param, r);
         let fallback = if self.fns[fid as usize].is_default { Some(fid) } else { None };
-        Some(MethodRef { fid, subst, self_ty: r, dispatch: Dispatch::Dynamic(name.to_string(), fallback), frozen: false })
+        Some(MethodRef {
+            fid,
+            subst,
+            self_ty: r,
+            dispatch: Dispatch::Dynamic(name.to_string(), fallback),
+            frozen: false,
+        })
     }
 
     /// Extension methods visible in the current module whose target matches `r`.

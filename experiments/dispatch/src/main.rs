@@ -76,22 +76,22 @@ fn loop_prog(n: i16) -> Vec<u32> {
 /// Frame layout: r0 = n, r1 = result, r2/r3 call slots. Entry at 0; main at 13.
 fn fib_prog(n: i16) -> Vec<u32> {
     vec![
-        enc_sbx(Op::LoadInt, 2, 2),  // 0
-        enc(Op::JNLtI, 0, 2, 2),     // 1 -> 5
+        enc_sbx(Op::LoadInt, 2, 2), // 0
+        enc(Op::JNLtI, 0, 2, 2),    // 1 -> 5
         0,
-        enc(Op::Move, 1, 0, 0),      // 3
-        enc_sbx(Op::Jmp, 0, 7),      // 4 -> 12
-        enc(Op::AddIK, 2, 0, 0xff),  // 5  r2 = n - 1
-        enc(Op::Call, 2, 0, 0),      // 6  r2 = fib(r2)
-        enc(Op::AddIK, 3, 0, 0xfe),  // 7  r3 = n - 2
-        enc(Op::Call, 3, 0, 0),      // 8
-        enc(Op::AddI, 1, 2, 3),      // 9
-        enc(Op::Return, 1, 0, 0),    // 10 (unused slot 11 below)
-        enc(Op::Halt, 0, 0, 0),      // 11
-        enc(Op::Return, 1, 0, 0),    // 12
-        enc_sbx(Op::LoadInt, 4, n),  // 13 main
-        enc(Op::Call, 4, 0, 0),      // 14
-        enc(Op::Halt, 4, 0, 0),      // 15
+        enc(Op::Move, 1, 0, 0),     // 3
+        enc_sbx(Op::Jmp, 0, 7),     // 4 -> 12
+        enc(Op::AddIK, 2, 0, 0xff), // 5  r2 = n - 1
+        enc(Op::Call, 2, 0, 0),     // 6  r2 = fib(r2)
+        enc(Op::AddIK, 3, 0, 0xfe), // 7  r3 = n - 2
+        enc(Op::Call, 3, 0, 0),     // 8
+        enc(Op::AddI, 1, 2, 3),     // 9
+        enc(Op::Return, 1, 0, 0),   // 10 (unused slot 11 below)
+        enc(Op::Halt, 0, 0, 0),     // 11
+        enc(Op::Return, 1, 0, 0),   // 12
+        enc_sbx(Op::LoadInt, 4, n), // 13 main
+        enc(Op::Call, 4, 0, 0),     // 14
+        enc(Op::Halt, 4, 0, 0),     // 15
     ]
 }
 
@@ -229,7 +229,8 @@ fn run_threaded(code: &[u32], entry: usize, regs: &mut [i64]) -> i64 {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let (style, prog) = (args.get(1).map(String::as_str).unwrap_or("switch"), args.get(2).map(String::as_str).unwrap_or("loop"));
+    let (style, prog) =
+        (args.get(1).map(String::as_str).unwrap_or("switch"), args.get(2).map(String::as_str).unwrap_or("loop"));
     let (code, entry, reps) = match prog {
         "loop" => (loop_prog(30000), 0, 700),
         _ => (fib_prog(32), 13, 1),
