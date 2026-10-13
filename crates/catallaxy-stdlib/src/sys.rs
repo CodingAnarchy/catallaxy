@@ -287,9 +287,7 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<serde_json::Value> {
             Ok(J::Array(out))
         }
         ObjKind::Dict => {
-            let pairs: Vec<(Value, Value)> = catallaxy_runtime::ownership::with_read(&vm.m, v, || {
-                unsafe { as_dict(v).table() }.iter().map(|e| (e.key, e.value)).collect()
-            })?;
+            let pairs: Vec<(Value, Value)> = catallaxy_runtime::ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| (e.key, e.value)).collect())?;
             let mut map = serde_json::Map::new();
             for (k, x) in pairs {
                 let key = to_s(vm, k)?;

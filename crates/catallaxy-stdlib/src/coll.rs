@@ -178,7 +178,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "Dict.delete" => |vm, a| dict_delete(vm, a[0], a[1]),
         "Set.remove" => |vm, a| Ok(Value::bool(!dict_delete(vm, a[0], a[1])?.is_empty_marker())),
         "Dict.clear" | "Set.clear" => |vm, a| {
-            ownership::with_write(&vm.m, a[0], |_| unsafe { as_dict(a[0]).table_mut() }.clear())?;
+            ownership::write_dict(&vm.m, a[0], |t, access| unsafe { t.clear(access) })?;
             Ok(Value::NIL)
         },
         "Dict.keys" | "Set.to_list" => |vm, a| {
@@ -280,23 +280,20 @@ pub(crate) fn list_write<R>(vm: &Vm, l: Value, incoming: &[Value], f: impl FnOnc
     ownership::write_list(&vm.m, l, |list, access| unsafe { list.modify(access, f) })
 }
 
-fn dict_read<R>(vm: &Vm, d: Value, f: impl FnOnce(&DictTable) -> R) -> RtResult<R> {
-    ownership::with_read(&vm.m, d, || f(unsafe { as_dict(d).table() }))
+fn dict_read<R>(vm: &Vm, d: Value, f: impl Fn(&DictTable) -> R) -> RtResult<R> {
+    ownership::read_dict(&vm.m, d, f)
 }
 
 /// Removes `k`; returns its value, nil (dict, absent) or the empty marker (absent, for sets).
 fn dict_delete(vm: &mut Vm, d: Value, k: Value) -> RtResult<Value> {
     loop {
+        let version = ownership::read_dict(&vm.m, d, |t| t.version())?;
         let Some(idx) = ops::dict_lookup(vm, d, k)? else {
             return Ok(if kind_of(d) == ObjKind::Set { Value::EMPTY } else { Value::NIL });
         };
-        let r = ownership::with_write(&vm.m, d, |_| {
-            let t = unsafe { as_dict(d).table_mut() };
-            if t.raw_entry(idx).is_some() {
-                Some(t.remove_at(idx))
-            } else {
-                None
-            }
+        // Act only if no user `==` changed the table since the lookup.
+        let r = ownership::write_dict(&vm.m, d, |t, access| {
+            (t.version() == version).then(|| unsafe { t.remove_at(idx, access) })
         })?;
         if let Some(v) = r {
             return Ok(v);

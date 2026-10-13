@@ -3,6 +3,7 @@
 //!
 //! All `unsafe` code in the language implementation lives here and in `catallaxy-gc`.
 
+pub mod buf;
 pub mod class;
 pub mod dict;
 pub mod mutator;

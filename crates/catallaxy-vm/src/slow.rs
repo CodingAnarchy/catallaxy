@@ -2,7 +2,6 @@
 //! runtime type conformance and error construction.
 
 use catallaxy_runtime::class::{class_id_of, class_of, heap_class, ids, ObjKind};
-use catallaxy_runtime::dict::Probe;
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ops::{self, Interop};
 use catallaxy_runtime::ownership::{self, Access};
@@ -102,11 +101,7 @@ pub fn dyn_get(vm: &mut Vm, recv: Value, ic: &program::Ic) -> RtResult<Value> {
     if kind_of(recv) == ObjKind::Dict {
         let key = vm.m.alloc_str(name);
         let Some(idx) = ops::dict_lookup(vm, recv, key)? else { return Ok(Value::NIL) };
-        let (v, shape) =
-            ownership::with_read(&vm.m, recv, || {
-                let t = unsafe { as_dict(recv).table() };
-                (t.entry(idx).value, t.shape().map(|s| s.id))
-            })?;
+        let (v, shape) = ownership::read_dict(&vm.m, recv, |t| (t.entry(idx).value, t.shape().map(|s| s.id)))?;
         if let Some(id) = shape {
             ic.cache.store(((id.wrapping_add(1) as u64) << 32) | idx as u64, std::sync::atomic::Ordering::Relaxed);
         }
@@ -135,7 +130,7 @@ pub fn dyn_member(vm: &mut Vm, recv: Value, n: &str) -> RtResult<Value> {
 
 pub fn dict_get(vm: &mut Vm, d: Value, k: Value) -> RtResult<Option<Value>> {
     match ops::dict_lookup(vm, d, k)? {
-        Some(idx) => Ok(Some(ownership::with_read(&vm.m, d, || unsafe { as_dict(d).table() }.entry(idx).value)?)),
+        Some(idx) => Ok(Some(ownership::read_dict(&vm.m, d, |t| t.entry(idx).value)?)),
         None => Ok(None),
     }
 }
@@ -148,36 +143,21 @@ pub fn dict_set(vm: &mut Vm, d: Value, k: Value, v: Value) -> RtResult<()> {
     }
     let hash = ops::hash_value(vm, k)?;
     loop {
+        // A lookup may run user `==`, which can mutate the table; act only if the version
+        // is unchanged since before it.
+        let version = ownership::read_dict(&vm.m, d, |t| t.version())?;
         let found = ops::dict_lookup_hashed(vm, d, k, hash)?;
-        let done = ownership::with_write(&vm.m, d, |_| {
-            let t = unsafe { as_dict(d).table_mut() };
-            match found {
-                Some(idx) => {
-                    // The table may have changed since the lookup (user `==`); re-validate.
-                    if t.raw_entry(idx).is_some_and(|e| e.hash == hash) {
-                        t.set_value_at(idx, v);
-                        true
-                    } else {
-                        false
-                    }
-                }
-                None => match t.probe(hash, k) {
-                    Probe::Found(idx) => {
-                        t.set_value_at(idx, v);
-                        true
-                    }
-                    Probe::Absent => {
-                        let before = t.heap_bytes();
-                        t.insert_new(hash, k, v);
-                        let after = t.heap_bytes();
-                        if after > before {
-                            catallaxy_runtime::note_external(after - before);
-                        }
-                        true
-                    }
-                    Probe::Check(_) => false,
-                },
+        let done = ownership::write_dict(&vm.m, d, |t, access| {
+            if t.version() != version {
+                return false;
             }
+            unsafe {
+                match found {
+                    Some(idx) => t.set_value_at(idx, v, access),
+                    None => t.insert_new(hash, k, v, access),
+                }
+            }
+            true
         })?;
         if done {
             return Ok(());
@@ -438,7 +418,7 @@ fn conforms_ty(vm: &mut Vm, v: Value, t: &RtType) -> RtResult<bool> {
             let items: Vec<Value> = if want == ObjKind::List {
                 ownership::read_list(&vm.m, v)?.to_vec()
             } else {
-                ownership::with_read(&vm.m, v, || unsafe { as_dict(v).table() }.iter().map(|e| e.key).collect())?
+                ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| e.key).collect())?
             };
             for x in items {
                 if !conforms_ty(vm, x, et)? {
@@ -455,7 +435,7 @@ fn conforms_ty(vm: &mut Vm, v: Value, t: &RtType) -> RtResult<bool> {
                 return Ok(true);
             }
             let entries: Vec<(Value, Value)> =
-                ownership::with_read(&vm.m, v, || unsafe { as_dict(v).table() }.iter().map(|e| (e.key, e.value)).collect())?;
+                ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| (e.key, e.value)).collect())?;
             for (k, x) in entries {
                 if !conforms_ty(vm, k, kt)? || !conforms_ty(vm, x, vt)? {
                     return Ok(false);

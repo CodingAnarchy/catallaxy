@@ -18,7 +18,7 @@ use crate::class::{heap_class, ids, Class, ObjKind};
 use crate::dict::Probe;
 use crate::mutator::{panic, Mutator, RtResult, Trap};
 use crate::object::*;
-use crate::ownership::{read_list, with_read};
+use crate::ownership::{read_dict, read_list, with_read};
 use crate::symbol::{intern, Sym};
 use crate::value::{fits_small, Value};
 
@@ -435,10 +435,10 @@ fn write_value(ix: &mut dyn Interop, v: Value, out: &mut String, quoted: bool, d
         ObjKind::Dict | ObjKind::Set => {
             let is_set = cls.kind == ObjKind::Set;
             out.push_str(if is_set { "Set[" } else { "[" });
-            let n = with_read(m, v, || unsafe { as_dict(v).table().raw_len() })?;
+            let n = read_dict(m, v, |t| t.raw_len())?;
             let mut first = true;
             for i in 0..n {
-                let e = with_read(m, v, || unsafe { as_dict(v).table().raw_entry(i) })?;
+                let e = read_dict(m, v, |t| t.raw_entry(i))?;
                 let Some(e) = e else { continue };
                 if !first {
                     out.push_str(", ");
@@ -571,19 +571,19 @@ pub fn values_eq(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<bool> {
             }
         }
         ObjKind::Dict | ObjKind::Set => {
-            let len = |v: Value| with_read(m, v, || unsafe { as_dict(v).table().len() });
+            let len = |v: Value| read_dict(m, v, |t| t.len());
             if len(a)? != len(b)? {
                 return Ok(false);
             }
-            let n = with_read(m, a, || unsafe { as_dict(a).table().raw_len() })?;
+            let n = read_dict(m, a, |t| t.raw_len())?;
             for i in 0..n {
-                let e = with_read(m, a, || unsafe { as_dict(a).table().raw_entry(i) })?;
+                let e = read_dict(m, a, |t| t.raw_entry(i))?;
                 let Some(e) = e else { continue };
                 match dict_lookup(ix, b, e.key)? {
                     None => return Ok(false),
                     Some(idx) => {
                         if ca.kind == ObjKind::Dict {
-                            let bv = with_read(m, b, || unsafe { as_dict(b).table().entry(idx).value })?;
+                            let bv = read_dict(m, b, |t| t.entry(idx).value)?;
                             if !values_eq(ix, e.value, bv)? {
                                 return Ok(false);
                             }
@@ -654,9 +654,9 @@ pub fn hash_value(ix: &mut dyn Interop, v: Value) -> RtResult<u64> {
         }
         ObjKind::Dict | ObjKind::Set => {
             let mut acc = 0x6469_6374_u64;
-            let n = with_read(m, v, || unsafe { as_dict(v).table().raw_len() })?;
+            let n = read_dict(m, v, |t| t.raw_len())?;
             for i in 0..n {
-                let e = with_read(m, v, || unsafe { as_dict(v).table().raw_entry(i) })?;
+                let e = read_dict(m, v, |t| t.raw_entry(i))?;
                 if let Some(e) = e {
                     let hv = if cls.kind == ObjKind::Dict { hash_value(ix, e.value)? } else { 0 };
                     acc ^= mix(e.hash ^ hv.rotate_left(17));
@@ -694,20 +694,20 @@ pub fn dict_lookup_hashed(ix: &mut dyn Interop, dict: Value, key: Value, hash: u
     let m = unsafe { &*(ix.mutator() as *mut Mutator) };
     loop {
         let (probe, version) =
-            with_read(m, dict, || unsafe { let t = as_dict(dict).table(); (t.probe(hash, key), t.version()) })?;
+            read_dict(m, dict, |t| (t.probe(hash, key), t.version()))?;
         match probe {
             Probe::Found(i) => return Ok(Some(i)),
             Probe::Absent => return Ok(None),
             Probe::Check(cands) => {
                 let mut found = None;
                 for idx in cands {
-                    let k = with_read(m, dict, || unsafe { as_dict(dict).table().entry(idx).key })?;
+                    let k = read_dict(m, dict, |t| t.entry(idx).key)?;
                     if values_eq(ix, k, key)? {
                         found = Some(idx);
                         break;
                     }
                 }
-                let still = with_read(m, dict, || unsafe { as_dict(dict).table().version() })?;
+                let still = read_dict(m, dict, |t| t.version())?;
                 if still == version {
                     return Ok(found);
                 }

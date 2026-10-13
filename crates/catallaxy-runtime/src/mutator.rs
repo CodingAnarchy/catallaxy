@@ -157,7 +157,6 @@ impl Mutator {
     }
 
     pub fn alloc_list(&mut self, items: Vec<Value>) -> Value {
-        crate::note_external(items.capacity() * 8);
         let h = self.alloc_raw(std::mem::size_of::<ListObj>(), BUILTINS.list);
         unsafe { ListObj::init(h as *mut ListObj, items) };
         Value::from_ptr(h)
@@ -172,9 +171,8 @@ impl Mutator {
     }
 
     fn alloc_table(&mut self, table: DictTable, cls: &'static Class) -> Value {
-        crate::note_external(table.heap_bytes());
         let h = self.alloc_raw(std::mem::size_of::<DictObj>(), cls);
-        unsafe { std::ptr::write((*(h as *mut DictObj)).table.get(), table) };
+        unsafe { std::ptr::write(std::ptr::addr_of_mut!((*(h as *mut DictObj)).table), table) };
         Value::from_ptr(h)
     }
 

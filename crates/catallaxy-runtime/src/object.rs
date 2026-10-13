@@ -6,13 +6,13 @@
 //! buffers; the ownership rules (and per-object locks for shared objects) guarantee those are
 //! never mutated while another thread reads them.
 
-use std::alloc::Layout;
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 
 use catallaxy_gc::{GcVTable, Header, Tracer, HEADER_SIZE};
 use num_bigint::BigInt;
 
+use crate::buf::WordBuf;
 use crate::class::{heap_class, ObjKind};
 use crate::dict::DictTable;
 use crate::ownership::Access;
@@ -111,64 +111,6 @@ pub struct BigIntObj {
     pub value: BigInt,
 }
 
-/// A list's backing array: a capacity word followed by `cap` slots. Slots at or past the list's
-/// length always hold `nil`, so a racing reader that sees a stale length never sees a stale
-/// pointer.
-#[repr(C)]
-pub struct ListBuf {
-    cap: usize,
-    slots: [AtomicU64; 0],
-}
-
-/// The buffer of every list with no capacity. Never written, never freed.
-static EMPTY_LIST_BUF: ListBuf = ListBuf { cap: 0, slots: [] };
-
-impl ListBuf {
-    fn layout(cap: usize) -> Layout {
-        Layout::from_size_align(8 * (cap + 1), 8).expect("list too large")
-    }
-
-    fn alloc(cap: usize) -> *mut ListBuf {
-        if cap == 0 {
-            return &EMPTY_LIST_BUF as *const ListBuf as *mut ListBuf;
-        }
-        unsafe {
-            let p = std::alloc::alloc(Self::layout(cap)) as *mut ListBuf;
-            if p.is_null() {
-                std::alloc::handle_alloc_error(Self::layout(cap));
-            }
-            std::ptr::addr_of_mut!((*p).cap).write(cap);
-            let slots = Self::slots_ptr(p);
-            for i in 0..cap {
-                slots.add(i).write(AtomicU64::new(Value::NIL.0));
-            }
-            p
-        }
-    }
-
-    /// # Safety
-    /// `p` must come from [`ListBuf::alloc`] and be unreachable by any reader.
-    unsafe fn free(p: *mut u8) {
-        let b = p as *mut ListBuf;
-        let cap = (*b).cap;
-        if cap > 0 {
-            std::alloc::dealloc(p, Self::layout(cap));
-        }
-    }
-
-    #[inline(always)]
-    fn slots_ptr(p: *const ListBuf) -> *mut AtomicU64 {
-        unsafe { (p as *mut u8).add(8) as *mut AtomicU64 }
-    }
-
-    /// # Safety
-    /// `p` must be a live buffer; the slice must not outlive the next safepoint.
-    #[inline(always)]
-    unsafe fn slots<'a>(p: *const ListBuf) -> &'a [AtomicU64] {
-        std::slice::from_raw_parts(Self::slots_ptr(p), (*p).cap)
-    }
-}
-
 /// A list: header, length and a pointer to a backing array.
 ///
 /// Reads never lock, even on shared lists. The length and buffer pointer are atomic words, and a
@@ -180,17 +122,16 @@ impl ListBuf {
 pub struct ListObj {
     pub header: Header,
     len: AtomicUsize,
-    buf: AtomicPtr<ListBuf>,
+    buf: AtomicPtr<WordBuf>,
 }
 
 impl ListObj {
     /// # Safety
     /// `p` must point to freshly allocated, unpublished list memory.
     pub(crate) unsafe fn init(p: *mut ListObj, items: Vec<Value>) {
-        let buf = ListBuf::alloc(items.capacity());
-        let slots = ListBuf::slots_ptr(buf);
-        for (i, v) in items.iter().enumerate() {
-            (*slots.add(i)).store(v.0, Ordering::Relaxed);
+        let buf = WordBuf::alloc(items.capacity(), Value::NIL.0);
+        for (s, v) in WordBuf::slots(buf).iter().zip(&items) {
+            s.store(v.0, Ordering::Relaxed);
         }
         std::ptr::addr_of_mut!((*p).len).write(AtomicUsize::new(items.len()));
         std::ptr::addr_of_mut!((*p).buf).write(AtomicPtr::new(buf));
@@ -208,7 +149,7 @@ impl ListObj {
 
     #[inline(always)]
     fn slots(&self) -> &[AtomicU64] {
-        unsafe { ListBuf::slots(self.buf.load(Ordering::Acquire)) }
+        unsafe { WordBuf::slots(self.buf.load(Ordering::Acquire)) }
     }
 
     /// The item at `i`, if in bounds. Safe against concurrent writers; the caller must still have
@@ -227,7 +168,7 @@ impl ListObj {
         if i >= self.len.load(Ordering::Relaxed) {
             return None;
         }
-        let slots = unsafe { ListBuf::slots(self.buf.load(Ordering::Relaxed)) };
+        let slots = unsafe { WordBuf::slots(self.buf.load(Ordering::Relaxed)) };
         slots.get(i).map(|x| Value(x.load(Ordering::Relaxed)))
     }
 
@@ -239,7 +180,7 @@ impl ListObj {
     }
 
     pub fn capacity(&self) -> usize {
-        unsafe { (*self.buf.load(Ordering::Acquire)).cap }
+        unsafe { WordBuf::cap(self.buf.load(Ordering::Acquire)) }
     }
 
     // Writers. Each requires write access per the ownership rules: the owning thread, or the
@@ -289,8 +230,8 @@ impl ListObj {
         let old_len = self.len.load(Ordering::Relaxed);
         let n = items.len();
         if n > self.capacity() {
-            let buf = ListBuf::alloc(n.max(4));
-            let slots = ListBuf::slots(buf);
+            let buf = WordBuf::alloc(n.max(4), Value::NIL.0);
+            let slots = WordBuf::slots(buf);
             for (s, v) in slots.iter().zip(items) {
                 s.store(v.0, Ordering::Relaxed);
             }
@@ -327,47 +268,31 @@ impl ListObj {
     unsafe fn grow(&self, need: usize, access: Access) {
         let n = self.len.load(Ordering::Relaxed);
         let cap = need.max(self.capacity() * 2).max(4);
-        let buf = ListBuf::alloc(cap);
-        let new = ListBuf::slots(buf);
+        let buf = WordBuf::alloc(cap, Value::NIL.0);
+        let new = WordBuf::slots(buf);
         for (d, s) in new.iter().zip(&self.slots()[..n]) {
             d.store(s.load(Ordering::Relaxed), Ordering::Relaxed);
         }
         self.swap_buf(buf, access);
     }
 
-    unsafe fn swap_buf(&self, buf: *mut ListBuf, access: Access) {
-        crate::note_external((*buf).cap * 8);
+    unsafe fn swap_buf(&self, buf: *mut WordBuf, access: Access) {
         let old = self.buf.swap(buf, Ordering::AcqRel);
-        if (*old).cap == 0 {
-            return;
-        }
-        if access == Access::Local && !crate::ownership::PROMOTE_ON_ACCESS.load(Ordering::Relaxed) {
-            ListBuf::free(old as *mut u8);
-        } else {
-            catallaxy_gc::retire(old as *mut u8, ListBuf::free);
-        }
+        crate::buf::release(old, access);
     }
 }
 
 #[repr(C)]
 pub struct DictObj {
     pub header: Header,
-    pub table: UnsafeCell<DictTable>,
+    pub table: DictTable,
 }
 
 impl DictObj {
-    /// # Safety
-    /// As for [`ListObj::items`].
+    /// The table. Reads are safe under any race (see [`DictTable`]); writes need write access.
     #[inline(always)]
-    pub unsafe fn table(&self) -> &DictTable {
-        &*self.table.get()
-    }
-    /// # Safety
-    /// As for [`ListObj::items_mut`].
-    #[inline(always)]
-    #[allow(clippy::mut_from_ref)]
-    pub unsafe fn table_mut(&self) -> &mut DictTable {
-        &mut *self.table.get()
+    pub fn table(&self) -> &DictTable {
+        &self.table
     }
 }
 
@@ -523,20 +448,20 @@ unsafe fn trace_list(h: *const Header, t: &mut Tracer) {
     }
 }
 unsafe fn fin_list(h: *mut Header) {
-    ListBuf::free(*(*(h as *mut ListObj)).buf.get_mut() as *mut u8);
+    WordBuf::free(*(*(h as *mut ListObj)).buf.get_mut() as *mut u8);
 }
 unsafe fn size_list(h: *const Header) -> usize {
     std::mem::size_of::<ListObj>() + 8 * (*(h as *const ListObj)).capacity()
 }
 
 unsafe fn trace_dict(h: *const Header, t: &mut Tracer) {
-    (*(*(h as *const DictObj)).table.get()).trace(t);
+    (*(h as *const DictObj)).table.trace(t);
 }
 unsafe fn fin_dict(h: *mut Header) {
-    std::ptr::drop_in_place((*(h as *mut DictObj)).table.get());
+    std::ptr::drop_in_place(&mut (*(h as *mut DictObj)).table);
 }
 unsafe fn size_dict(h: *const Header) -> usize {
-    std::mem::size_of::<DictObj>() + (*(*(h as *const DictObj)).table.get()).heap_bytes()
+    std::mem::size_of::<DictObj>() + (*(h as *const DictObj)).table.heap_bytes()
 }
 
 unsafe fn trace_tuple(h: *const Header, t: &mut Tracer) {

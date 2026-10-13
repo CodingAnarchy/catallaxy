@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use catallaxy_gc::{Header, ObjState};
 
 use crate::class::{heap_class, ObjKind};
+use crate::dict::DictTable;
 use crate::mutator::{Mutator, RtResult, Trap};
 use crate::object::*;
 use crate::value::Value;
@@ -240,6 +241,31 @@ pub fn read_list<'a>(m: &Mutator, v: Value) -> RtResult<&'a ListObj> {
 #[inline]
 pub fn write_list<R>(m: &Mutator, v: Value, f: impl FnOnce(&ListObj, Access) -> R) -> RtResult<R> {
     with_write(m, v, |access| f(unsafe { as_list(v) }, access))
+}
+
+/// Reads a dict or set. Owned and frozen tables are read directly; shared ones through the
+/// table's seqlock, falling back to the object's lock when writers keep overlapping. `f` may run
+/// more than once and must only read.
+#[inline]
+pub fn read_dict<R>(m: &Mutator, v: Value, f: impl Fn(&DictTable) -> R) -> RtResult<R> {
+    let h = unsafe { &*v.as_ptr() };
+    let t = unsafe { as_dict(v) }.table();
+    match check_read(m, h)? {
+        Access::Local => Ok(f(t)),
+        Access::Shared => match t.read_optimistic(&f) {
+            Some(r) => Ok(r),
+            None => {
+                let _g = lock_obj(m, h);
+                Ok(f(t))
+            }
+        },
+    }
+}
+
+/// Runs `f` on a dict or set with write access: directly when owned, under the lock when shared.
+#[inline]
+pub fn write_dict<R>(m: &Mutator, v: Value, f: impl FnOnce(&DictTable, Access) -> R) -> RtResult<R> {
+    with_write(m, v, |access| f(unsafe { as_dict(v) }.table(), access))
 }
 
 /// Runs `f` on a container's contents with the right synchronization for a read.

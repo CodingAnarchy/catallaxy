@@ -1,0 +1,20 @@
+# Keys whose hashes all collide must still insert, look up, overwrite and delete correctly.
+class Key {
+  n: Int
+  fn hash(self) -> Int { 7 }
+  fn ==(self, other: Key) -> Bool { self.n == other.n }
+}
+
+d = [Key.new(0): "zero"]
+for i in 1...20 {
+  d[Key.new(i)] = "v#{i}"
+}
+puts(d.length)
+puts(d[Key.new(13)])
+d[Key.new(13)] = "thirteen"
+puts(d[Key.new(13)])
+d.delete(Key.new(0))
+d.delete(Key.new(5))
+puts(d.length)
+puts(d.has_key(Key.new(5)))
+puts(d[Key.new(19)])
