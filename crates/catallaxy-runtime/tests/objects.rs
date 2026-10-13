@@ -233,18 +233,22 @@ fn shared_list_reads_do_not_lock_and_stay_safe() {
             std::thread::spawn(move || {
                 let w = Host::new();
                 let l = Value(addr);
-                let mut seen = 0usize;
-                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                // Read at least once: the writer may finish before this thread is scheduled.
+                let mut reads = 0usize;
+                loop {
                     let list = ownership::read_list(w.m, l).unwrap();
                     for i in 0..list.len() + 2 {
                         if let Some(v) = list.get(i) {
                             assert!(v.is_nil() || str_of(v).is_some_and(|s| s.starts_with('s')));
-                            seen += 1;
                         }
                     }
+                    reads += 1;
                     catallaxy_gc::safepoint(&w.m.rec);
+                    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
                 }
-                assert!(seen > 0);
+                assert!(reads > 0);
                 w.finish();
             })
         })
