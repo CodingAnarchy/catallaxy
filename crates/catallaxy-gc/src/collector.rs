@@ -282,8 +282,22 @@ fn minor_collect(rec: &ThreadRecord) {
         let h = o as *const Header;
         unsafe { ((*(*h).vtable()).trace)(h, &mut tracer) };
     }
+    let marked = start.elapsed();
+    let remembered = heap.remembered().len();
     let (freed, promoted) = unsafe { heap.sweep_young() };
     stats::note_minor(start.elapsed().as_nanos() as usize, freed, promoted);
+    if trace_enabled() {
+        let total = start.elapsed();
+        eprintln!(
+            "gc: minor (thread {}): mark {:.3} ms ({} remembered), sweep {:.3} ms, freed {} KB, promoted {} KB",
+            rec.tid,
+            marked.as_secs_f64() * 1e3,
+            remembered,
+            (total - marked).as_secs_f64() * 1e3,
+            freed / 1024,
+            promoted / 1024
+        );
+    }
 }
 
 /// Runs a minor collection of the calling thread now (tests and embedders). The thread must be
