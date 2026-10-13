@@ -108,6 +108,8 @@ struct MarkShared {
     color: AtomicU8,
     marked_bytes: AtomicUsize,
     workers_in: AtomicUsize,
+    /// Threads that took part in the last mark phase (for tracing).
+    markers_seen: AtomicUsize,
 }
 
 static GLOBAL: std::sync::LazyLock<Global> = std::sync::LazyLock::new(|| Global {
@@ -126,6 +128,7 @@ static GLOBAL: std::sync::LazyLock<Global> = std::sync::LazyLock::new(|| Global 
         color: AtomicU8::new(1),
         marked_bytes: AtomicUsize::new(0),
         workers_in: AtomicUsize::new(0),
+        markers_seen: AtomicUsize::new(0),
     },
 });
 
@@ -378,7 +381,49 @@ pub fn collect_now(rec: &ThreadRecord) {
     safepoint_slow(rec);
 }
 
+/// `CATX_GC_TRACE=1` prints the phases of every major collection.
+fn trace_enabled() -> bool {
+    static T: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *T.get_or_init(|| std::env::var_os("CATX_GC_TRACE").is_some())
+}
+
+/// Dedicated marking threads, so a program with few mutators still marks on every core.
+/// `CATX_GC_THREADS` sets how many (default: available cores minus one).
+fn start_mark_helpers() {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        let n = std::env::var("CATX_GC_THREADS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).saturating_sub(1));
+        for i in 0..n.min(64) {
+            let _ = std::thread::Builder::new().name(format!("catx-gc-{i}")).spawn(mark_helper_main);
+        }
+    });
+}
+
+/// A helper sleeps until a mark phase starts, marks, and sleeps again. It is not a mutator: it
+/// never touches objects outside a mark phase, so collections need not wait for it.
+fn mark_helper_main() {
+    let mut joined = 0u64;
+    let mut coord = GLOBAL.coord.lock();
+    loop {
+        if coord.marking && coord.mark_epoch != joined {
+            joined = coord.mark_epoch;
+            GLOBAL.mark.workers_in.fetch_add(1, Ordering::SeqCst);
+            drop(coord);
+            mark_worker();
+            GLOBAL.mark.workers_in.fetch_sub(1, Ordering::SeqCst);
+            GLOBAL.cv.notify_all();
+            coord = GLOBAL.coord.lock();
+            continue;
+        }
+        GLOBAL.cv.wait(&mut coord);
+    }
+}
+
 fn collect(me: &ThreadRecord) {
+    start_mark_helpers();
     let start = std::time::Instant::now();
     let threads = GLOBAL.threads.lock();
     // 1. Stop the world.
@@ -407,6 +452,7 @@ fn collect(me: &ThreadRecord) {
         }
     }
 
+    let t_stopped = start.elapsed();
     // 2. Free retired buffers (no mutator is mid-read), retire every thread's current pages,
     //    then consume last cycle's colors.
     for (p, free) in std::mem::take(&mut *GLOBAL.retired.lock()) {
@@ -419,12 +465,14 @@ fn collect(me: &ThreadRecord) {
         }
     }
     POOL.finish_sweeping();
+    let t_swept = start.elapsed();
 
     // 3. Flip the color and mark from the roots.
     let old = POOL.live_color.load(Ordering::Relaxed);
     let color = if old == 1 { 2 } else { 1 };
     GLOBAL.mark.color.store(color, Ordering::SeqCst);
     GLOBAL.mark.marked_bytes.store(0, Ordering::SeqCst);
+    GLOBAL.mark.markers_seen.store(0, Ordering::Relaxed);
     {
         let mut tracer = Tracer::for_roots(color);
         for t in threads.iter() {
@@ -452,6 +500,7 @@ fn collect(me: &ThreadRecord) {
         }
     }
     GLOBAL.mark.stealers.lock().clear();
+    let t_marked = start.elapsed();
 
     // 4. Publish the new color; sweeping happens lazily.
     POOL.live_color.store(color, Ordering::SeqCst);
@@ -469,6 +518,17 @@ fn collect(me: &ThreadRecord) {
         );
     }
     stats::note_pause(start.elapsed().as_nanos() as usize);
+    if trace_enabled() {
+        eprintln!(
+            "gc: major #{}: stop {:.2} ms, finish sweep {:.2} ms, mark {:.2} ms ({} markers), total {:.2} ms",
+            stats::collections(),
+            t_stopped.as_secs_f64() * 1e3,
+            (t_swept - t_stopped).as_secs_f64() * 1e3,
+            (t_marked - t_swept).as_secs_f64() * 1e3,
+            GLOBAL.mark.markers_seen.load(Ordering::Relaxed),
+            start.elapsed().as_secs_f64() * 1e3
+        );
+    }
     let mut coord = GLOBAL.coord.lock();
     GC_REQUESTED.store(false, Ordering::SeqCst);
     coord.collecting = false;
@@ -532,6 +592,7 @@ fn mark_worker() {
     let worker = Worker::new_lifo();
     m.stealers.lock().push(worker.stealer());
     let mut tracer = Tracer { color: m.color.load(Ordering::SeqCst), local: Some(worker), minor: None };
+    m.markers_seen.fetch_add(1, Ordering::Relaxed);
     m.active.fetch_add(1, Ordering::SeqCst);
     let mut bytes = 0usize;
     loop {

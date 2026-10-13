@@ -105,8 +105,10 @@ Catallaxy 0.1 implements the v1 design (`docs/design.md`, phases 1–4 without f
   concurrency capabilities checked at compile time;
 - the runtime: NaN-boxed values, fixed-layout objects, ownership states with runtime backstops,
   `--promote-on-access`, a parallel mark-sweep collector with thread-local allocation and lazy sweep,
-  plus thread-local young collection (set `CATX_GC_GENERATIONAL=0` to turn it off; `CATX_GC_STATS=1`
-  prints collection and pause statistics);
+  plus thread-local young collection (set `CATX_GC_GENERATIONAL=0` to turn it off). Major
+  collections mark on dedicated helper threads as well as the stopped mutators (`CATX_GC_THREADS`
+  sets how many); `CATX_GC_STATS=1` prints collection and pause statistics and `CATX_GC_TRACE=1`
+  the phases of each major collection;
 - threads, channels, `Mutex`, `Atomic`, `with lock`, `par_map`/`par_each`/`par_reduce` on a
   work-stealing pool;
 - tooling: `check --json`, formatter, REPL, language server, Rust extension API.

@@ -1,0 +1,22 @@
+# Major-collection pauses on a large heap: about 8M long-lived objects, then short-lived
+# garbage that keeps the collector busy. Run with CATX_GC_STATS=1 to see pause times.
+class Node {
+  left: Node?
+  right: Node?
+  id: Int
+}
+fn build(d: Int, id: Int) -> Node {
+  if d == 0 { Node.new(nil, nil, id) } else { Node.new(build(d - 1, id * 2), build(d - 1, id * 2 + 1), id) }
+}
+fn count(t: Node?) -> Int {
+  if let n = t { 1 + count(n.left) + count(n.right) } else { 0 }
+}
+depth = (Env.get("DEPTH") ?? "22").to_i ?? 22
+keep = build(depth, 1)
+churn = 0
+for i in 0...3_000_000 {
+  tmp = [i, i + 1, i + 2]
+  churn += tmp.length
+}
+puts(count(keep))
+puts(churn)
