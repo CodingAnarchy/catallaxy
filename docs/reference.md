@@ -328,6 +328,14 @@ Any type that has all required methods satisfies an interface and gains its defa
 called directly on the concrete type. If two in-scope interfaces provide the same default method to one
 type, the call is ambiguous and must be resolved by defining the method.
 
+`Enumerable`'s `map`, `select` and the like are eager and return lists. `xs.lazy()` returns a
+`Lazy[T]`, whose adaptors (`map`, `flat_map`, `select`/`filter`, `reject`, `take`, `take_while`,
+`drop`, `drop_while`, `with_index`, `zip`, `uniq`) build a pipeline that runs only when consumed
+(`to_list`, `each`, `first`, `find`, `for`, ...), one element at a time. `take`, `take_while`,
+`first` and `find` stop the source early, so pipelines over infinite sources such as
+`Lazy.iterate(0) { |n| n + 1 }` terminate. `Lazy.new { |emit| ... }` makes a sequence from any
+function that feeds elements to `emit`; each consumption calls it again.
+
 ```
 enum Shape {
   Circle(r: Float)
