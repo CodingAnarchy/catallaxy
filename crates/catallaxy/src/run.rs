@@ -223,6 +223,14 @@ fn output_within(cmd: &mut Command, limit: Duration) -> Result<Output, String> {
             break Some(status);
         }
         if start.elapsed() >= limit {
+            if std::env::var_os("CATX_TEST_GDB").is_some() {
+                let bt = Command::new("gdb")
+                    .args(["-batch", "-ex", "thread apply all bt", "-p", &child.id().to_string()])
+                    .output();
+                if let Ok(bt) = bt {
+                    eprintln!("==== backtrace of hung {:?}\n{}", cmd.get_args().collect::<Vec<_>>(), String::from_utf8_lossy(&bt.stdout));
+                }
+            }
             child.kill().ok();
             child.wait().ok();
             break None;
