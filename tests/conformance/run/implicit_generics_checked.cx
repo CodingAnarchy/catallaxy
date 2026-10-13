@@ -1,0 +1,71 @@
+# Implicit generics: each call site is checked against the member types the body uses.
+
+class C { n: Int }
+class D { n: Float }
+class Money {
+  cents: Int
+  fn +(self, o: Money) -> Money { Money.new(self.cents + o.cents) }
+}
+class Version {
+  major: Int
+  fn <=>(self, o: Version) -> Int { self.major <=> o.major }
+}
+class Store {
+  fn put(self, key: String, n: Int = 0) -> String { "#{key}=#{n}" }
+  fn each_n(self, f: fn(Int) -> Int) -> Int { f(20) }
+}
+extend String {
+  fn shout(self) -> String { self.upcase + "!" }
+}
+
+# A requirement waits for the types it mentions: `y.n` is resolved before `x + y.n`.
+fn add(x, y) { x + y.n }
+puts(add(1, C.new(2)))
+puts(add(0.5, D.new(1.5)))
+
+# The untyped value on the right of an operator.
+fn from_ten(x) { 10 - x }
+puts(from_ten(3))
+puts(from_ten(0.5))
+fn has_two(xs) { 2 in xs }
+puts(has_two([1, 2]))
+
+# Union arguments: every member meets the requirement; the result is the union.
+fn bump(v) { v.n + 1 }
+fn via_union(v: C | D) { bump(v) }
+puts(via_union(C.new(1)))
+puts(via_union(D.new(1.5)))
+
+# Calls with named arguments, defaults and a trailing block.
+fn put(s) { s.put("k", n: 2) + " " + s.put("j") }
+puts(put(Store.new()))
+fn with_block(s) { s.each_n { |v: Int| v + 1 } }
+puts(with_block(Store.new()))
+
+# Function values are checked against the arguments they are called with.
+fn apply(f, x) { f(x) }
+puts(apply({ |s: String| s.upcase }, "ok"))
+puts(apply({ |n: Int| n * 2 }, 21))
+
+# Operators defined by the argument's class; comparisons through `<=>`.
+fn double(v) { v + v }
+puts(double(Money.new(5)).cents)
+fn biggest(a, b) { if a > b { a } else { b } }
+puts(biggest(Version.new(2), Version.new(7)).major)
+
+# Element assignment.
+fn inc_first(xs) {
+  xs[0] += 1
+  xs
+}
+puts(inc_first([1, 2]))
+
+# Extension methods of the argument's class are reachable by name.
+fn loud(s) { s.shout }
+puts(loud("hey"))
+
+# Requirements flow through an implicit-generic caller.
+fn size(x) { x.length }
+fn twice(y) { size(y) * 2 }
+puts(twice([1, 2, 3]))
+puts(twice("ab"))
