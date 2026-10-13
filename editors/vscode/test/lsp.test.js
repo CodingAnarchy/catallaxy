@@ -273,7 +273,7 @@ async function main() {
       for (const m of ["wrapped", "largest", "total_area", "Circle"]) assert(labels.includes(m), `no \`${m}\``);
     });
 
-    await check("references: a method and the interface member it implements", async () => {
+    await check("references: a function, with and without its declaration", async () => {
       const r = await c.request("textDocument/references", {
         ...at(shapesUri, shapes, "fn total_area", 0, 3),
         context: { includeDeclaration: true },
