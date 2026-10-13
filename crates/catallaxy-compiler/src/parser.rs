@@ -125,6 +125,16 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// A method or member name: an identifier or any keyword (`x.spawn`, `fn match(self)`).
+    /// After `.` or `fn` inside a type there is no ambiguity, so keywords are allowed there.
+    fn expect_member_name(&mut self) -> PResult<Ident> {
+        if let Tok::Kw(k) = self.tok().clone() {
+            let span = self.bump().span;
+            return Ok(Ident { name: crate::lexer::keyword_text(k).to_string(), span });
+        }
+        self.expect_ident()
+    }
+
     fn id(&mut self) -> NodeId {
         let id = *self.next_id;
         *self.next_id += 1;
@@ -345,6 +355,7 @@ impl<'a> Parser<'a> {
                 };
                 return Ok(Ident { name: name.to_string(), span: span.to(self.prev_span()) });
             }
+            return self.expect_member_name();
         }
         self.expect_ident()
     }
@@ -978,13 +989,7 @@ impl<'a> Parser<'a> {
                         );
                         continue;
                     }
-                    let name = match self.tok().clone() {
-                        Tok::Kw(Kw::Class) => {
-                            let span = self.bump().span;
-                            Ident { name: "class".into(), span }
-                        }
-                        _ => self.expect_ident()?,
-                    };
+                    let name = self.expect_member_name()?;
                     let mut args = Vec::new();
                     let mut parens = false;
                     if self.is_sym("(") && !self.toks[self.pos].space_before {

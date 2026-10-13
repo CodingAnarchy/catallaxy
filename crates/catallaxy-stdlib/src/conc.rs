@@ -24,13 +24,13 @@ use crate::*;
 pub fn lookup(name: &str) -> Option<NativeFn> {
     Some(match name {
         "__spawn" => spawn,
-        "__fiber_spawn" => |vm, a| Ok(Value::small_int(crate::fiber::spawn(vm, a[0]) as i64)),
-        "__fiber_join" => |vm, a| {
-            let id = int(a[0])? as u64;
-            match crate::fiber::join(vm, id)? {
-                Ok(v) => Ok(ok(vm, v)),
-                Err(msg) => Ok(err(vm, &msg)),
-            }
+        "__fiber_spawn" => |vm, a| {
+            crate::fiber::spawn(vm, a[0], a[1])?;
+            Ok(Value::NIL)
+        },
+        "__fiber_join" => |vm, a| match crate::fiber::join(vm, a[0])? {
+            Ok(v) => Ok(ok(vm, v)),
+            Err(msg) => Ok(err(vm, &msg)),
         },
         "__fiber_done" => |_, a| Ok(Value::bool(crate::fiber::is_done(int(a[0])? as u64))),
         "__fiber_yield" => |vm, _| {
