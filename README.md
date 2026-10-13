@@ -88,6 +88,7 @@ catx lsp                        language server (stdio)
 | `catallaxy-compiler` | lexer, parser, type checker, bytecode emitter, formatter |
 | `catallaxy-stdlib` | native standard library (strings, collections, threads, channels, JSON, files) |
 | `catallaxy` | the `catx` command-line tool, REPL and language server |
+| `catallaxy-capi` | C ABI for embedding and native extensions (`include/catallaxy.h`) |
 
 All `unsafe` code lives in `catallaxy-gc` and `catallaxy-runtime`.
 

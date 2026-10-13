@@ -94,6 +94,15 @@ impl Mutator {
     fn handles_len(&self) -> usize {
         unsafe { (*self.handles).len() }
     }
+    /// The current depth of the handle stack, for [`Mutator::release_handles`]. Lets foreign
+    /// code (the C API) manage scopes explicitly.
+    pub fn handle_mark(&self) -> usize {
+        self.handles_len()
+    }
+    /// Releases every handle rooted since `mark`.
+    pub fn release_handles(&mut self, mark: usize) {
+        unsafe { (*self.handles).truncate(mark) };
+    }
     /// Root values for the GC (called while this thread is stopped).
     pub fn handle_values(&self) -> &[Value] {
         unsafe { &*self.handles }

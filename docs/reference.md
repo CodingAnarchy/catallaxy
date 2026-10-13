@@ -364,3 +364,22 @@ Rules for native code: values held across a call back into the VM (`native::call
 runs Catallaxy code) must be rooted in a `HandleScope`; handles borrow the scope, so they cannot
 escape it. Allocation alone never collects. Missing optional arguments arrive as the empty marker
 (`Value::is_empty_marker`). A process runs one program.
+
+### C ABI
+
+The `catallaxy-capi` crate builds a static and a shared library (`libcatallaxy_capi`) with the C
+interface declared in `crates/catallaxy-capi/include/catallaxy.h`: register natives
+(`cx_register`), run programs (`cx_run_file`, `cx_run_source`), build and inspect values
+(`cx_int`, `cx_string`, `cx_list`, `cx_to_int`, `cx_string_data`, ...), call closures (`cx_call`),
+root values across calls (`cx_scope_open`, `cx_root`, `cx_rooted`, `cx_scope_close`) and raise
+panics (`cx_panic`). A native has the signature
+
+```c
+cx_status native(cx_vm *vm, const cx_value *args, size_t nargs, cx_value *out, void *user);
+```
+
+and is declared in Catallaxy with `native fn` exactly like a Rust one. The rooting rule is the same
+as for Rust natives, but unchecked: a value held across `cx_call` must be rooted. Up to 256 C
+natives can be registered per process. `crates/catallaxy-capi/examples/ext.c` is a complete
+example.
+

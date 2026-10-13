@@ -20,6 +20,7 @@ catallaxy-runtime = { path = "crates/catallaxy-runtime", version = "0.1.1" }
 catallaxy-vm = { path = "crates/catallaxy-vm", version = "0.1.1" }
 catallaxy-compiler = { path = "crates/catallaxy-compiler", version = "0.1.1" }
 catallaxy-stdlib = { path = "crates/catallaxy-stdlib", version = "0.1.1" }
+catallaxy = { path = "crates/catallaxy", version = "0.1.1" }
 crossbeam-deque = "0.8"
 crossbeam-utils = "0.8"
 parking_lot = "0.12"

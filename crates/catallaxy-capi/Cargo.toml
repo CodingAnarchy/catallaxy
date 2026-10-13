@@ -1,0 +1,23 @@
+[package]
+name = "catallaxy-capi"
+description = "C ABI for embedding and extending the Catallaxy language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+include = ["src/**", "include/**", "examples/**", "Cargo.toml"]
+
+[lib]
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[dependencies]
+catallaxy.workspace = true
+catallaxy-runtime.workspace = true
+catallaxy-stdlib.workspace = true
+catallaxy-vm.workspace = true

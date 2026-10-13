@@ -32,6 +32,13 @@ jobs:
         run: CATX_GC_STRESS=1 ./target/release/catx test tests/conformance/run
       - name: Examples
         run: ./target/release/catx test examples
+      - name: C ABI example
+        run: |
+          cargo build --release --locked -p catallaxy-capi
+          LIBS=""; if [ "$RUNNER_OS" = "Linux" ]; then LIBS="-lpthread -ldl -lm"; fi
+          cc -Wall -Wextra -Werror -I crates/catallaxy-capi/include crates/catallaxy-capi/examples/ext.c target/release/libcatallaxy_capi.a $LIBS -o ext
+          ./ext 2>/dev/null | diff - crates/catallaxy-capi/examples/ext.out
+          CATX_GC_STRESS=1 ./ext 2>/dev/null | diff - crates/catallaxy-capi/examples/ext.out
       - name: Clippy
         run: cargo clippy --release --locked -- -D warnings
 

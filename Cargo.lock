@@ -47,6 +47,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "catallaxy-capi"
+version = "0.1.1"
+dependencies = [
+ "catallaxy",
+ "catallaxy-runtime",
+ "catallaxy-stdlib",
+ "catallaxy-vm",
+]
+
+[[package]]
 name = "catallaxy-compiler"
 version = "0.1.1"
 dependencies = [
