@@ -16,6 +16,7 @@ struct Host {
     /// Shared with the collector's root scan, so owned through a raw pointer.
     raw: *mut Mutator,
     m: &'static mut Mutator,
+    finished: bool,
 }
 
 struct HandleRoots(*const Vec<Value>);
@@ -46,7 +47,7 @@ impl Host {
         let m = unsafe { &mut *raw };
         unsafe { install(&m.rec, Box::into_raw(roots), m.heap_ptr()) };
         leave_native(&m.rec);
-        Host { raw, m }
+        Host { raw, m, finished: false }
     }
     fn gc(&mut self) {
         catallaxy_gc::collect_now(&self.m.rec);
@@ -54,12 +55,26 @@ impl Host {
     fn minor(&mut self) {
         catallaxy_gc::collect_minor(&self.m.rec);
     }
-    fn finish(self) {
+    fn finish(mut self) {
+        self.unregister();
+    }
+    fn unregister(&mut self) {
+        if std::mem::replace(&mut self.finished, true) {
+            return;
+        }
         enter_native(&self.m.rec);
         unregister_thread(&self.m.rec);
         self.m.release_pages();
         // The mutator is intentionally leaked: the collector may still hold its root pointer.
         let _ = self.raw;
+    }
+}
+
+impl Drop for Host {
+    /// Also runs when a test thread panics: a thread left registered as running would make
+    /// every later collection wait for it forever, turning one failure into a hung test run.
+    fn drop(&mut self) {
+        self.unregister();
     }
 }
 
@@ -278,7 +293,7 @@ fn shared_list_reads_do_not_lock_and_stay_safe() {
             h.gc();
         }
     }
-    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    stop.store(true, std::sync::atomic::Ordering::Release);
     catallaxy_gc::blocking(&h.m.rec, || {
         for t in readers {
             t.join().unwrap();
@@ -308,7 +323,10 @@ fn shared_dict_seqlock_reads_stay_consistent() {
                 let mut w = Host::new();
                 let d = Value(addr);
                 let mut hits = 0usize;
-                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                // Read until the writer stops, then once more: the writer may finish before this
+                // thread is first scheduled, and the final pass sees its last state.
+                loop {
+                    let done = stop.load(std::sync::atomic::Ordering::Acquire);
                     for k in 0..keys {
                         let key = Value::small_int(k);
                         if let Some(idx) = ops::dict_lookup(&mut w, d, key).unwrap() {
@@ -324,8 +342,11 @@ fn shared_dict_seqlock_reads_stay_consistent() {
                     let n = ownership::read_dict(w.m, d, |t| t.iter().count()).unwrap();
                     assert!(n <= keys as usize);
                     catallaxy_gc::safepoint(&w.m.rec);
+                    if done {
+                        break;
+                    }
                 }
-                assert!(hits > 0);
+                assert!(hits > 0, "no key was ever found");
                 w.finish();
             })
         })
@@ -350,7 +371,7 @@ fn shared_dict_seqlock_reads_stay_consistent() {
             h.gc();
         }
     }
-    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    stop.store(true, std::sync::atomic::Ordering::Release);
     catallaxy_gc::blocking(&h.m.rec, || {
         for t in readers {
             t.join().unwrap();
