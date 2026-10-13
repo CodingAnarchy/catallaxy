@@ -1,6 +1,7 @@
 //! Files, time, randomness, environment, JSON, math, and dynamic member access.
 
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 use std::time::Instant;
 
@@ -11,6 +12,7 @@ use catallaxy_runtime::ops;
 use catallaxy_runtime::{intern, panic, ObjKind, RtResult, Value};
 use catallaxy_vm::slow;
 use catallaxy_vm::{NativeFn, Vm};
+use parking_lot::RwLock;
 
 use crate::coll::list_read;
 use crate::*;
@@ -145,10 +147,42 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
 
         "Env.get" => |vm, a| {
-            Ok(match std::env::var(s(a[0])?) {
-                Ok(v) => new_str(vm, &v),
-                Err(_) => Value::NIL,
+            Ok(match env_get(s(a[0])?) {
+                Some(v) => new_str(vm, &v),
+                None => Value::NIL,
             })
+        },
+        "Env.set" => |_, a| {
+            let (name, value) = (s(a[0])?, s(a[1])?);
+            check_env_name(name)?;
+            if value.contains('\0') {
+                return panic("ArgumentError: environment values cannot contain NUL");
+            }
+            ENV_OVERLAY.write().insert(name.to_string(), Some(value.to_string()));
+            Ok(Value::NIL)
+        },
+        "Env.remove" => |_, a| {
+            let name = s(a[0])?;
+            check_env_name(name)?;
+            ENV_OVERLAY.write().insert(name.to_string(), None);
+            Ok(Value::NIL)
+        },
+        "Env.all" => |vm, _| {
+            let mut all: BTreeMap<String, String> = std::env::vars_os()
+                .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+                .collect();
+            for (k, v) in ENV_OVERLAY.read().iter() {
+                match v {
+                    Some(v) => all.insert(k.clone(), v.clone()),
+                    None => all.remove(k),
+                };
+            }
+            let d = vm.m.alloc_dict(DictTable::new());
+            for (k, v) in all {
+                let (kv, vv) = (new_str(vm, &k), new_str(vm, &v));
+                slow::dict_set(vm, d, kv, vv)?;
+            }
+            Ok(d)
         },
         "Env.cpu_count" => {
             |_, _| Ok(Value::small_int(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as i64))
@@ -171,6 +205,34 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "__dyn_member" => dyn_member,
         _ => return None,
     })
+}
+
+/// Variables set or removed by `Env.set` / `Env.remove` (`None`: removed). The process
+/// environment itself is never modified: `std::env::set_var` is unsound while other threads may
+/// read the environment (program threads, the I/O pool, the network reactor, libc's resolver),
+/// and a Catallaxy program cannot rule that out. So the program's environment is this overlay on
+/// top of the inherited one: `Env.get` and `Env.all` read through it and `Process` applies it to
+/// every child. Native code that calls `getenv` itself does not see it.
+static ENV_OVERLAY: LazyLock<RwLock<BTreeMap<String, Option<String>>>> = LazyLock::new(Default::default);
+
+/// A variable as the program sees it (see [`ENV_OVERLAY`]).
+pub(crate) fn env_get(name: &str) -> Option<String> {
+    if let Some(v) = ENV_OVERLAY.read().get(name) {
+        return v.clone();
+    }
+    std::env::var(name).ok()
+}
+
+/// The program's changes to the inherited environment, to apply to a child process.
+pub(crate) fn env_overlay() -> Vec<(String, Option<String>)> {
+    ENV_OVERLAY.read().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+fn check_env_name(name: &str) -> RtResult<()> {
+    if name.is_empty() || name.contains(['=', '\0']) {
+        return panic(format!("ArgumentError: invalid environment variable name {name:?}"));
+    }
+    Ok(())
 }
 
 /// The origin of `Time.monotonic` and `Instant`: the first use of the monotonic clock, which
