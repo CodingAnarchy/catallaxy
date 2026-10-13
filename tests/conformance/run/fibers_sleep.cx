@@ -1,0 +1,8 @@
+# Ten thousand sleeping fibers share one thread: total time is one sleep, not ten thousand.
+start = Time.now()
+fs = (1..10000).map { |i| Fiber.start { sleep(0.05); i } }
+total = 0
+for f in fs { total += f.join().unwrap() }
+puts(total)
+elapsed = Time.now() - start
+puts(elapsed < 3.0)

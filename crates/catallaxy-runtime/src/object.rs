@@ -365,6 +365,22 @@ pub struct ChannelInner {
     pub not_empty: parking_lot::Condvar,
     pub not_full: parking_lot::Condvar,
     pub capacity: usize,
+    /// Wakers of fibers waiting to send or receive; all are woken on any change. Registered
+    /// while holding `queue`, so a change made after the check cannot be missed.
+    pub waiters: parking_lot::Mutex<Vec<Wake>>,
+}
+
+/// Wakes a parked fiber (see the standard library's fiber scheduler).
+pub type Wake = std::sync::Arc<dyn Fn() + Send + Sync>;
+
+impl ChannelInner {
+    /// Wakes every fiber waiting on the channel.
+    pub fn wake_fibers(&self) {
+        let ws = std::mem::take(&mut *self.waiters.lock());
+        for w in ws {
+            w();
+        }
+    }
 }
 
 pub struct ChannelState {

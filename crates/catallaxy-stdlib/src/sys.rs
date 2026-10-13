@@ -30,7 +30,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
 
         "File.read" => |vm, a| {
             let p = s(a[0])?.to_string();
-            let r = blocking(vm, || std::fs::read_to_string(&p));
+            let r = crate::fiber::blocking_io(vm, || std::fs::read_to_string(&p));
             Ok(match r {
                 Ok(text) => {
                     let v = new_str(vm, &text);
@@ -41,7 +41,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "File.read_lines" => |vm, a| {
             let p = s(a[0])?.to_string();
-            let r = blocking(vm, || std::fs::read_to_string(&p));
+            let r = crate::fiber::blocking_io(vm, || std::fs::read_to_string(&p));
             Ok(match r {
                 Ok(text) => {
                     let items: Vec<Value> = text.lines().map(|l| vm.m.alloc_str(l)).collect();
@@ -54,7 +54,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "File.write" => |vm, a| {
             let p = s(a[0])?.to_string();
             let c = s(a[1])?.to_string();
-            let r = blocking(vm, || std::fs::write(&p, c));
+            let r = crate::fiber::blocking_io(vm, || std::fs::write(&p, c));
             Ok(match r {
                 Ok(()) => ok(vm, Value::NIL),
                 Err(e) => err(vm, &format!("{p}: {e}")),
@@ -63,7 +63,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "File.append" => |vm, a| {
             let p = s(a[0])?.to_string();
             let c = s(a[1])?.to_string();
-            let r = blocking(vm, || {
+            let r = crate::fiber::blocking_io(vm, || {
                 use std::io::Write as _;
                 std::fs::OpenOptions::new().create(true).append(true).open(&p).and_then(|mut f| f.write_all(c.as_bytes()))
             });
@@ -75,7 +75,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "File.exists" => |_, a| Ok(Value::bool(std::path::Path::new(s(a[0])?).exists())),
         "File.delete" => |vm, a| {
             let p = s(a[0])?.to_string();
-            let r = blocking(vm, || std::fs::remove_file(&p));
+            let r = crate::fiber::blocking_io(vm, || std::fs::remove_file(&p));
             Ok(match r {
                 Ok(()) => ok(vm, Value::NIL),
                 Err(e) => err(vm, &format!("{p}: {e}")),
@@ -83,7 +83,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "File.list_dir" => |vm, a| {
             let p = s(a[0])?.to_string();
-            let r = blocking(vm, || -> std::io::Result<Vec<String>> {
+            let r = crate::fiber::blocking_io(vm, || -> std::io::Result<Vec<String>> {
                 let mut names: Vec<String> =
                     std::fs::read_dir(&p)?.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
                 names.sort();

@@ -6,6 +6,7 @@
 mod coll;
 mod conc;
 mod core;
+pub mod fiber;
 mod sys;
 
 use std::io::Write;

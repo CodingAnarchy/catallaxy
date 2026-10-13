@@ -417,6 +417,20 @@ Everything here is available in every module without an import.
 - `fn join(self) -> Result[T, String]`
 - `fn is_done(self) -> Bool`
 
+## Fiber[T]
+
+- `fn start(f: fn() -> T) -> Fiber[T]`
+- `fn join(self) -> Result[T, String]`
+- `fn is_done(self) -> Bool`
+- `fn yield()`
+
+## Global functions
+
+- `fn __fiber_spawn[T](f: fn() -> T) -> Int`
+- `fn __fiber_join[T](id: Int) -> Result[T, String]`
+- `fn __fiber_done(id: Int) -> Bool`
+- `fn __fiber_yield()`
+
 ## Math
 
 - `const PI: Float = 3.141592653589793`

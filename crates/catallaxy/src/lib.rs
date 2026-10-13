@@ -172,6 +172,8 @@ fn run_program(program: &Program) -> i32 {
             }
         }
     }
+    // The program ends when its fibers do.
+    catallaxy_stdlib::fiber::drain(&mut vm);
     catallaxy_stdlib::flush();
     if std::env::var_os("CATX_GC_STATS").is_some() {
         let (total, max) = catallaxy_gc::stats::pauses();

@@ -573,6 +573,25 @@ extend Thread[T] {
   native fn is_done(self) -> Bool
 }
 
+# A fiber: a lightweight cooperative thread for I/O-bound work. It runs on the OS thread that
+# spawned it, interleaving with that thread's other fibers wherever one waits (channels, `join`,
+# `sleep`, file and console I/O, `Fiber.yield`), so its block may capture owned values. A thread
+# finishes only after its fibers do.
+pub class Fiber[T] {
+  id: Int
+  fn start(f: fn() -> T) -> Fiber[T] { Fiber.new(__fiber_spawn(f)) }
+  # Waits for the fiber and returns its result, or the message of the panic that ended it.
+  fn join(self) -> Result[T, String] { __fiber_join(self.id) }
+  fn is_done(self) -> Bool { __fiber_done(self.id) }
+  # Lets the thread's other fibers run.
+  fn yield() { __fiber_yield() }
+}
+
+native fn __fiber_spawn[T](f: fn() -> T) -> Int
+native fn __fiber_join[T](id: Int) -> Result[T, String]
+native fn __fiber_done(id: Int) -> Bool
+native fn __fiber_yield()
+
 # ---------------------------------------------------------------------------------------------
 # Namespaces
 
