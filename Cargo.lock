@@ -31,7 +31,7 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
 name = "catallaxy"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "catallaxy-compiler",
  "catallaxy-gc",
@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "catallaxy-capi"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "catallaxy",
  "catallaxy-runtime",
@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "catallaxy-compiler"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "catallaxy-vm",
  "num-bigint",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "catallaxy-gc"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "crossbeam-deque",
  "loom",
@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "catallaxy-runtime"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "catallaxy-gc",
  "num-bigint",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "catallaxy-stdlib"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "catallaxy-gc",
  "catallaxy-runtime",
@@ -107,7 +107,7 @@ dependencies = [
 
 [[package]]
 name = "catallaxy-vm"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "catallaxy-gc",
  "catallaxy-runtime",
