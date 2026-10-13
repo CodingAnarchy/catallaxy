@@ -207,18 +207,33 @@ struct Scheduler {
     /// Parked or ready fibers (a running fiber is taken out while it runs).
     fibers: HashMap<u64, Fiber>,
     ready: VecDeque<u64>,
+    /// The ids in `ready`, so queueing is O(1) even when thousands of fibers wake at once.
+    queued: std::collections::HashSet<u64>,
     /// (deadline, id) min-heap via `Reverse`.
     timers: BinaryHeap<std::cmp::Reverse<(Instant, u64)>>,
     ctl: HashMap<u64, Arc<Ctl>>,
 }
 
 impl Scheduler {
+    fn enqueue(&mut self, id: u64) {
+        if self.queued.insert(id) {
+            self.ready.push_back(id);
+        }
+    }
+
+    fn dequeue(&mut self) -> Option<u64> {
+        let id = self.ready.pop_front()?;
+        self.queued.remove(&id);
+        Some(id)
+    }
+
     fn new() -> Self {
         Scheduler {
             shared: Arc::new(Shared { woken: Mutex::new(Vec::new()), cv: Condvar::new() }),
             root_flag: Arc::new(AtomicBool::new(false)),
             fibers: HashMap::new(),
             ready: VecDeque::new(),
+            queued: std::collections::HashSet::new(),
             timers: BinaryHeap::new(),
             ctl: HashMap::new(),
         }
@@ -336,7 +351,7 @@ pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
             },
         );
         s.ctl.insert(id, ctl);
-        s.ready.push_back(id);
+        s.enqueue(id);
     });
     Ok(id)
 }
@@ -360,7 +375,7 @@ fn resume(id: u64) {
             with_sched(|s| {
                 s.fibers.insert(id, fiber);
                 if woken {
-                    s.ready.push_back(id);
+                    s.enqueue(id);
                 }
             });
         }
@@ -379,8 +394,8 @@ fn absorb() {
     with_sched(|s| {
         let woken = std::mem::take(&mut *s.shared.woken.lock());
         for id in woken {
-            if id != ROOT && s.fibers.contains_key(&id) && !s.ready.contains(&id) {
-                s.ready.push_back(id);
+            if id != ROOT && s.fibers.contains_key(&id) {
+                s.enqueue(id);
             }
         }
         while let Some(std::cmp::Reverse((t, id))) = s.timers.peek().copied() {
@@ -392,9 +407,7 @@ fn absorb() {
                 s.root_flag.store(true, Ordering::Release);
             } else if let Some(f) = s.fibers.get(&id) {
                 f.flag.store(true, Ordering::Release);
-                if !s.ready.contains(&id) {
-                    s.ready.push_back(id);
-                }
+                s.enqueue(id);
             }
         }
     });
@@ -410,7 +423,7 @@ fn run_until(vm: &mut Vm, mut done: impl FnMut() -> bool) {
         if done() {
             return;
         }
-        if let Some(id) = with_sched(|s| s.ready.pop_front()) {
+        if let Some(id) = with_sched(|s| s.dequeue()) {
             resume(id);
             catallaxy_gc::safepoint(&vm.m.rec);
             continue;
@@ -484,6 +497,31 @@ pub fn wait_event(vm: &mut Vm, arm: impl FnOnce(Wake) -> bool) -> bool {
     true
 }
 
+/// As [`wait_event`], with a deadline: returns `Some(timed_out)` when it waited cooperatively
+/// (`timed_out` is true if the deadline passed before a wakeup), `None` when the caller must
+/// block the thread itself. After `Some(false)`, re-check the condition.
+pub fn wait_event_until(vm: &mut Vm, deadline: Option<Instant>, arm: impl FnOnce(Wake) -> bool) -> Option<bool> {
+    let Some(deadline) = deadline else {
+        return wait_event(vm, arm).then_some(false);
+    };
+    if !vm.park_allowed() || (!in_fiber() && !has_fibers()) {
+        return None;
+    }
+    let id = CURRENT.with(|c| c.get());
+    let w = current_waker();
+    let flag = w.flag.clone();
+    if !arm(w.into_wake()) {
+        return Some(false);
+    }
+    with_sched(|s| s.timers.push(std::cmp::Reverse((deadline, id))));
+    if in_fiber() {
+        park();
+    } else {
+        run_until(vm, || flag.swap(false, Ordering::AcqRel) || Instant::now() >= deadline);
+    }
+    Some(Instant::now() >= deadline)
+}
+
 /// Sleeps without blocking the thread when it has fibers (or is one).
 pub fn sleep(vm: &mut Vm, d: Duration) {
     let deadline = Instant::now() + d;
@@ -519,7 +557,7 @@ pub fn yield_now(vm: &mut Vm) {
         let n = with_sched(|s| s.ready.len());
         for _ in 0..n {
             absorb();
-            match with_sched(|s| s.ready.pop_front()) {
+            match with_sched(|s| s.dequeue()) {
                 Some(id) => resume(id),
                 None => break,
             }

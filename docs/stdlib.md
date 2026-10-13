@@ -564,3 +564,37 @@ Everything here is available in every module without an import.
 - `fn parse(text: String) -> Result[Dyn, String]`
 - `fn stringify(value: Dyn) -> String`
 - `fn pretty(value: Dyn) -> String`
+
+## Net
+
+- `fn connect(host: String, port: Int, timeout: Float? = nil) -> Result[Socket, String]`
+- `fn listen(host: String, port: Int) -> Result[Listener, String]`
+
+## Socket
+
+- field `peer: String`
+- field `handle: NativeHandle`
+- `fn read(self, max: Int = 65536) -> Result[String, String]`
+- `fn read_line(self) -> Result[String?, String]`
+- `fn write(self, data: String) -> Result[Int, String]`
+- `fn close(self)`
+- `fn set_timeout(self, seconds: Float?)`
+
+## Listener
+
+- field `port: Int`
+- field `handle: NativeHandle`
+- `fn accept(self) -> Result[Socket, String]`
+- `fn close(self)`
+
+## HttpResponse
+
+- field `status: Int`
+- field `headers: Dict[String, String]`
+- field `body: String`
+- `fn ok(self) -> Bool`
+
+## Http
+
+- `fn get(url: String, headers: Dict[String, String] = [:]) -> Result[HttpResponse, String]`
+- `fn post(url: String, body: String, headers: Dict[String, String] = [:]) -> Result[HttpResponse, String]`

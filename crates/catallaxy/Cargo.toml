@@ -41,3 +41,6 @@ op-profile = ["catallaxy-vm/op-profile"]
 
 [dev-dependencies]
 serde_json = "1"
+
+[target."cfg(unix)".dependencies]
+libc = "0.2"

@@ -1,0 +1,10 @@
+echo c0-0,echo c0-1,echo c0-2
+echo c19-0,echo c19-1,echo c19-2
+true
+20
+60
+ping
+pong
+true
+read: timed out
+connect refused
