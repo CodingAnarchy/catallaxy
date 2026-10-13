@@ -1,0 +1,56 @@
+# Process: running and talking to other programs. Uses `git`, which every CI platform has.
+v = Process.run("git", ["--version"]).unwrap()
+puts(v.stdout.starts_with("git version"))
+puts("#{v.status} #{v.success()} #{v.stderr.length}")
+
+bad = Process.run("git", ["--no-such-flag"]).unwrap()
+puts("#{bad.success()} #{bad.stderr.length > 0}")
+puts(Process.run("catx-no-such-program", ["x"]).is_err())
+puts(Process.start("catx-no-such-program").is_err())
+
+# Standard input.
+h = Process.run("git", ["hash-object", "--stdin"], input: "hello\n").unwrap()
+puts(h.stdout.strip)
+
+# Working directory and environment, in a scratch repository.
+root = "catx_proc_#{Time.millis()}_#{Random.int(0, 1000000)}"
+Dir.create(Path.join(root, "sub"), recursive: true).unwrap()
+puts(Process.run("git", ["init", "-q"], dir: root).unwrap().status)
+puts(Process.run("git", ["rev-parse", "--show-prefix"], dir: Path.join(root, "sub")).unwrap().stdout.strip)
+who = ["GIT_AUTHOR_NAME": "Ada", "GIT_AUTHOR_EMAIL": "ada@example.com", "GIT_AUTHOR_DATE": "1700000000 +0000"]
+puts(Process.run("git", ["var", "GIT_AUTHOR_IDENT"], env: who, dir: root).unwrap().stdout.strip)
+
+# An interactive child: write a line, read its answer.
+c = Process.start("git", ["cat-file", "--batch-check"], dir: root).unwrap()
+puts(c.pid > 0)
+for id in ["0000000000000000000000000000000000000001", "ce013625030ba8dba906f756967f9e9ca394464a"] {
+  c.write("#{id}\n").unwrap()
+  puts(c.read_line())
+}
+c.close_stdin()
+puts(c.read_line())
+puts(c.wait())
+puts(c.write("late\n").is_err())
+
+# One fiber writes while another reads the whole output.
+w = Process.start("git", ["hash-object", "--stdin"]).unwrap()
+reader = Fiber.start { w.read_all().strip }
+writer = Fiber.start {
+  for part in ["hel", "lo", "\n"] { w.write(part).unwrap() }
+  w.close_stdin()
+}
+writer.join().unwrap()
+puts(reader.join().unwrap())
+puts(w.wait().unwrap())
+
+# Runs in fibers overlap; results come back in order.
+inputs = ["a", "b", "c", "d"]
+fs = inputs.map { |s| Fiber.start { Process.run("git", ["hash-object", "--stdin"], input: s).unwrap().stdout.strip.length } }
+puts(fs.map { |f| f.join().unwrap() })
+
+# Killing a child that would wait forever for input.
+k = Process.start("git", ["cat-file", "--batch-check"], dir: root).unwrap()
+puts(k.kill().is_ok())
+puts(k.wait().is_ok())
+
+puts(Dir.remove(root, recursive: true).is_ok())

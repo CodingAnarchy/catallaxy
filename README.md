@@ -87,7 +87,7 @@ catx lsp                        language server (stdio)
 | `catallaxy-runtime` | NaN-boxed values, object layouts, classes, ownership states |
 | `catallaxy-vm` | bytecode format, interpreter, inline caches, program loader |
 | `catallaxy-compiler` | lexer, parser, type checker, bytecode emitter, formatter |
-| `catallaxy-stdlib` | native standard library (strings, collections, threads, channels, JSON, files) |
+| `catallaxy-stdlib` | native standard library (strings, collections, threads, channels, JSON, files, directories, regexes, processes) |
 | `catallaxy` | the `catx` command-line tool, REPL and language server |
 | `catallaxy-capi` | C ABI for embedding and native extensions (`include/catallaxy.h`) |
 

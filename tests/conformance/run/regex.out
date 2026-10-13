@@ -1,0 +1,40 @@
+(?P<year>\d{4})-(?P<month>\d{2})(-(\d{2}))?
+(?P<year>\d{4})-(?P<month>\d{2})(-(\d{2}))?
+true
+false
+true
+2024-05
+8 15
+["2024-05", "2024", "05", nil, nil]
+["2024", "05", nil, nil]
+2024
+nil
+nil
+2024
+nil
+["year": "2024", "month": "05"]
+true
+["year", "month"]
+3
+2020-01 at 0..7 day=-
+2021-02-03 at 9..19 day=03
+2022-04 at 24..31 day=-
+["one", "two", "three"]
+0
+from 01/2020 to 2021-02
+from 01/2020 to 02/2021
+$1
+1=a, 2=b
+[a], b=2
+[a], [b]
+["a", "b", "c", "d"]
+[""]
+1\+1=2\?
+false
+true
+true
+ΑΒΓδε 4 9
+356
+[2, 1, 0, 4]
+[true, false, true]
+2000 true

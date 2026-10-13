@@ -249,6 +249,10 @@ Everything here is available in every module without an import.
 - `fn tr(self, from: String, to: String) -> String`
 - `fn each_char(self, f: fn(String))`
 - `fn repeat(self, n: Int) -> String`
+- `fn matches(self, re: Regex) -> Bool`
+- `fn scan(self, re: Regex) -> List[String]`
+- `fn sub(self, re: Regex, replacement: String) -> String`
+- `fn gsub(self, re: Regex, replacement: String) -> String`
 
 ## List[T]
 
@@ -419,6 +423,7 @@ Everything here is available in every module without an import.
 
 ## Fiber[T]
 
+- field `id: Int`
 - `fn start(f: fn() -> T) -> Fiber[T]`
 - `fn join(self) -> Result[T, String]`
 - `fn is_done(self) -> Bool`
@@ -458,6 +463,82 @@ Everything here is available in every module without an import.
 - `fn delete(path: String) -> Result[Nil, String]`
 - `fn read_lines(path: String) -> Result[List[String], String]`
 - `fn list_dir(path: String) -> Result[List[String], String]`
+- `fn metadata(path: String) -> Result[Metadata, String]`
+
+## Metadata
+
+- field `size: Int`
+- field `is_dir: Bool`
+- field `is_file: Bool`
+- field `modified: Float`
+
+## Dir
+
+- `fn list(path: String) -> Result[List[String], String]`
+- `fn create(path: String, recursive: Bool = false) -> Result[Nil, String]`
+- `fn remove(path: String, recursive: Bool = false) -> Result[Nil, String]`
+- `fn exists(path: String) -> Bool`
+- `fn current() -> String`
+
+## Path
+
+- `fn join(base: String, part: String) -> String`
+- `fn join_all(parts: List[String]) -> String`
+- `fn basename(path: String) -> String`
+- `fn dirname(path: String) -> String`
+- `fn extension(path: String) -> String?`
+- `fn stem(path: String) -> String`
+- `fn is_absolute(path: String) -> Bool`
+
+## Regex (frozen)
+
+- field `pattern: String`
+- field `handle: NativeHandle`
+- `fn new(pattern: String) -> Result[Regex, String]`
+- `fn escape(text: String) -> String`
+- `fn matches(self, text: String) -> Bool`
+- `fn find(self, text: String) -> Match?`
+- `fn find_all(self, text: String) -> List[Match]`
+- `fn replace(self, text: String, replacement: String) -> String`
+- `fn replace_all(self, text: String, replacement: String) -> String`
+- `fn split(self, text: String) -> List[String]`
+- `fn capture_names(self) -> List[String]`
+- `fn to_s(self) -> String`
+
+## Match
+
+- field `text: String`
+- field `start: Int`
+- field `end: Int`
+- field `groups: List[String?]`
+- field `named_groups: Dict[String, String]`
+- `fn [](self, index: Int) -> String?`
+- `fn captures(self) -> List[String?]`
+- `fn named(self, name: String) -> String?`
+- `fn to_s(self) -> String`
+
+## Process
+
+- `fn run(cmd: String, args: List[String] = [], env: Dict[String, String] = [:], dir: String? = nil, input: String? = nil) -> Result[Output, String]`
+- `fn start(cmd: String, args: List[String] = [], env: Dict[String, String] = [:], dir: String? = nil) -> Result[Subprocess, String]`
+
+## Output
+
+- field `status: Int`
+- field `stdout: String`
+- field `stderr: String`
+- `fn success(self) -> Bool`
+
+## Subprocess
+
+- field `pid: Int`
+- field `handle: NativeHandle`
+- `fn write(self, text: String) -> Result[Nil, String]`
+- `fn close_stdin(self)`
+- `fn read_line(self) -> String?`
+- `fn read_all(self) -> String`
+- `fn wait(self) -> Result[Int, String]`
+- `fn kill(self) -> Result[Nil, String]`
 
 ## Time
 
