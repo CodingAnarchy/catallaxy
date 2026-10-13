@@ -353,8 +353,8 @@ impl LocalHeap {
     /// thread writes into an object it owns whose metadata satisfies
     /// [`Header::needs_remember`].
     #[inline]
-    pub fn remember(&mut self, h: *const Header) {
-        if self.generational && unsafe { (*h).set_remembered() } {
+    pub fn remember(&mut self, h: &Header) {
+        if self.generational && h.set_remembered() {
             self.remset.push(h);
         }
     }

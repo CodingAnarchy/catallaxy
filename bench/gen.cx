@@ -1,0 +1,21 @@
+# Generational workload: a large long-lived structure plus a stream of short-lived garbage.
+# Every major collection must mark the whole live set; young collection should not.
+class Node {
+  left: Node?
+  right: Node?
+  label: String
+}
+fn build(d: Int) -> Node {
+  if d == 0 { Node.new(nil, nil, "leaf") } else { Node.new(build(d - 1), build(d - 1), "n#{d}") }
+}
+fn count(t: Node?) -> Int {
+  if let n = t { 1 + count(n.left) + count(n.right) } else { 0 }
+}
+keep = build(19)                     # ~1M long-lived nodes
+churn = 0
+for i in 0...2_000_000 {
+  tmp = ["a#{i}", "b#{i % 97}"]       # short-lived list and strings
+  churn += tmp[0].length + tmp[1].length
+}
+puts(count(keep))
+puts(churn)

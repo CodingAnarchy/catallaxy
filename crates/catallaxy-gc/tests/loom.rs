@@ -100,3 +100,47 @@ fn marking_does_not_lose_lock_bits() {
         assert!(!o.header.try_mark(2), "mark survived concurrent lock traffic");
     });
 }
+
+/// The safepoint poll handshake (collector.rs): a requester sets the global request and then
+/// raises each thread's flag; a thread entering its safepoint lowers its own flag and then reads
+/// the request. Whatever the interleaving, the thread either sees the request now or finds its
+/// flag raised for the next poll: a major request is never lost.
+#[test]
+fn poll_requests_are_never_lost() {
+    // Store-buffering shape: it needs SeqCst fences (loom models SeqCst accesses only as
+    // acquire/release, but models SeqCst fences exactly), as collector.rs has.
+    use loom::sync::atomic::{fence, AtomicBool, Ordering::SeqCst};
+    loom::model(|| {
+        let requested = Arc::new(AtomicBool::new(false));
+        let poll = Arc::new(AtomicBool::new(true)); // a minor collection was wanted
+        let (r, p) = (requested.clone(), poll.clone());
+        let requester = thread::spawn(move || {
+            if !r.swap(true, SeqCst) {
+                fence(SeqCst);
+                p.store(true, SeqCst);
+            }
+        });
+        poll.store(false, SeqCst);
+        fence(SeqCst);
+        let saw = requested.load(SeqCst);
+        requester.join().unwrap();
+        assert!(saw || poll.load(SeqCst), "request lost");
+    });
+}
+
+/// Tenuring (clearing the young bit) racing with another update of the same header word keeps
+/// both: generation bits share the word with the identity hash and the lock.
+#[test]
+fn tenure_and_hash_do_not_lose_updates() {
+    loom::model(|| {
+        let mut o = std::mem::MaybeUninit::<Header>::uninit();
+        unsafe { Header::init(o.as_mut_ptr(), &VT, 1, 1, true) };
+        let o = Arc::new(Obj { header: unsafe { o.assume_init() }, data: UnsafeCell::new(0) });
+        let o2 = o.clone();
+        let t = thread::spawn(move || o2.header.identity_hash());
+        o.header.tenure();
+        let h = t.join().unwrap();
+        assert!(!o.header.is_young());
+        assert_eq!(o.header.identity_hash(), h);
+    });
+}
