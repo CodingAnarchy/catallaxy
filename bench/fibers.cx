@@ -1,5 +1,5 @@
 # 10,000 fibers doing channel, sleep and file work on one OS thread (plus the I/O pool).
-path = "/tmp/catx_fibers_bench.txt"
+path = "catx_fibers_bench.txt"
 File.write(path, "x" * 1000).unwrap()
 results: Channel[Int] = Channel.new()
 fs = (1..10000).map { |i|

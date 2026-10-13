@@ -18,7 +18,7 @@ for i in 1..4 { ch.send(i) }
 puts(t.join().unwrap())
 
 # File I/O in fibers runs on the I/O pool while other fibers continue.
-path = "/tmp/catx_fiber_io_#{Time.now().to_i}.txt"
+path = "catx_fiber_io_#{Time.now().to_i}.txt"
 File.write(path, "hello fibers").unwrap()
 readers = (0...8).map { |i| Fiber.start { (File.read(path).unwrap()).length + i } }
 s = 0
