@@ -1,0 +1,8 @@
+# expect: E0301
+interface Copyable { fn copy(self) -> Self }
+class P { x: Int
+  fn copy(self) -> P { P.new(self.x) } }
+class Q { y: Int
+  fn copy(self) -> Q { Q.new(self.y) } }
+# `Self` is the receiver's type `T`, so the result can't be a `U` even though both are Copyable.
+fn swap[T: Copyable, U: Copyable](x: T, y: U) -> U { x.copy() }

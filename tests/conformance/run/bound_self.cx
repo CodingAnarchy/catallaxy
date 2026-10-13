@@ -1,0 +1,25 @@
+# `Self` in an interface member, reached through a bound `T: I` or an intersection, means `T`.
+interface Copyable { fn copy(self) -> Self }
+interface Scalable { fn scale(self, k: Int) -> Self }
+interface Same {
+  fn same(self, other: Self) -> Bool
+  fn twin(self) -> Self { self }
+}
+
+class P {
+  x: Int
+  fn copy(self) -> P { P.new(self.x) }
+  fn scale(self, k: Int) -> P { P.new(self.x * k) }
+  fn same(self, other: P) -> Bool { self.x == other.x }
+}
+
+fn dup[T: Copyable](x: T) -> T { x.copy() }
+fn grow[T: Copyable & Scalable](x: T) -> T { x.copy().scale(2).scale(3) }
+fn pair_same[T: Same](a: T, b: T) -> Bool { a.same(b) && a.twin().same(b) }
+
+p = P.new(3)
+q: P = dup(p)
+puts(q.x)
+puts(grow(p).x)
+puts(pair_same(p, P.new(3)))
+puts(pair_same(p, P.new(4)))
