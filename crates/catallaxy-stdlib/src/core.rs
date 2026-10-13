@@ -62,8 +62,8 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "String.to_s" => |_, a| Ok(a[0]),
         "String.<=>" => |_, a| Ok(Value::small_int(s(a[0])?.cmp(s(a[1])?) as i64)),
         "String.+" => |vm, a| {
-            let r = format!("{}{}", s(a[0])?, s(a[1])?);
-            Ok(new_str(vm, &r))
+            let parts = [str_obj(a[0])?, str_obj(a[1])?];
+            Ok(vm.m.alloc_concat(2, |i| parts[i]))
         },
         "String.*" => |vm, a| {
             let n = int(a[1])?;

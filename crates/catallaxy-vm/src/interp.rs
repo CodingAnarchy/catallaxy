@@ -863,17 +863,17 @@ impl Vm {
                 // ---- strings ----
                 Op::Concat => {
                     let (b, n) = (b_of(w), c_of(w));
-                    let mut s = String::new();
                     for i in 0..n {
-                        match str_of(r!(b + i)) {
-                            Some(x) => s.push_str(x),
-                            None => {
-                                save!();
-                                return Err(Trap::Panic("internal error: Concat of a non-string".into()));
-                            }
+                        if str_of(r!(b + i)).is_none() {
+                            save!();
+                            return Err(Trap::Panic("internal error: Concat of a non-string".into()));
                         }
                     }
-                    let v = self.m.alloc_str(&s);
+                    // Allocation never collects, so the parts stay valid while they are copied.
+                    let v = self.m.alloc_concat(n, |i| {
+                        let x = r!(b + i);
+                        unsafe { as_str_obj(x) }
+                    });
                     set!(a, v);
                 }
                 Op::ToS => {

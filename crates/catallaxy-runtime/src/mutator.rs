@@ -16,6 +16,17 @@ use crate::dict::DictTable;
 use crate::object::*;
 use crate::value::{fits_small, Value};
 
+/// Copies `parts` one after another to `dst`.
+///
+/// # Safety
+/// `dst` must have room for all the parts' bytes.
+unsafe fn copy_parts<'a>(mut dst: *mut u8, parts: impl Iterator<Item = &'a str>) {
+    for p in parts {
+        std::ptr::copy_nonoverlapping(p.as_ptr(), dst, p.len());
+        dst = dst.add(p.len());
+    }
+}
+
 /// A recoverable interruption of execution.
 #[derive(Debug)]
 pub enum Trap {
@@ -156,28 +167,46 @@ impl Mutator {
     }
 
     pub fn alloc_str(&mut self, s: &str) -> Value {
-        let chars = (s.len() >= StrObj::INDEX_MIN).then(|| if s.is_ascii() { s.len() } else { s.chars().count() });
-        self.alloc_str_parts(&[s], chars)
+        self.alloc_str_parts(&[s])
     }
 
-    /// Allocates the concatenation of `parts`, which together hold `chars` characters (`None`
-    /// if unknown; it must be known for results of at least [`StrObj::INDEX_MIN`] bytes).
-    pub fn alloc_str_parts(&mut self, parts: &[&str], chars: Option<usize>) -> Value {
+    /// Allocates the concatenation of `parts`.
+    pub fn alloc_str_parts(&mut self, parts: &[&str]) -> Value {
         let len: usize = parts.iter().map(|p| p.len()).sum();
+        let chars = (len >= StrObj::INDEX_MIN)
+            .then(|| parts.iter().map(|p| if p.is_ascii() { p.len() } else { p.chars().count() }).sum());
+        // SAFETY: the parts are UTF-8 and together `len` bytes with `chars` characters.
+        unsafe { self.alloc_str_with(len, chars, |dst| copy_parts(dst, parts.iter().copied())) }
+    }
+
+    /// Allocates the concatenation of `n` strings, `part(i)` being the `i`th, copying each once.
+    /// The character count comes from the parts' cached counts, so no byte is scanned twice.
+    pub fn alloc_concat<'a>(&mut self, n: usize, part: impl Fn(usize) -> &'a StrObj) -> Value {
+        let len: usize = (0..n).map(|i| part(i).len).sum();
+        let chars = (len >= StrObj::INDEX_MIN).then(|| (0..n).map(|i| part(i).char_count()).sum());
+        // SAFETY: as above. Allocation never collects, so the parts stay valid while copied.
+        unsafe { self.alloc_str_with(len, chars, |dst| copy_parts(dst, (0..n).map(|i| part(i).as_str()))) }
+    }
+
+    /// Allocates a frozen string of `len` bytes; `fill` writes them. `chars` (the character
+    /// count) must be known for strings of at least [`StrObj::INDEX_MIN`] bytes.
+    ///
+    /// # Safety
+    /// `fill` must write exactly `len` bytes of UTF-8 holding `chars` characters.
+    unsafe fn alloc_str_with(&mut self, len: usize, chars: Option<usize>, fill: impl FnOnce(*mut u8)) -> Value {
         debug_assert!(len < StrObj::INDEX_MIN || chars.is_some());
         let (size, word) = StrObj::layout(len, chars);
-        let h = self.alloc_raw(size, BUILTINS.string);
-        unsafe {
-            let o = &mut *(h as *mut StrObj);
-            o.len = len;
-            *o.chars.get_mut() = word;
-            let mut dst = o.data_ptr();
-            for p in parts {
-                std::ptr::copy_nonoverlapping(p.as_ptr(), dst, p.len());
-                dst = dst.add(p.len());
-            }
-            (*h).set_state(ObjState::Frozen);
-        }
+        // Large strings skip zeroing: every byte is written below, before any safepoint.
+        let h = (*self.heap).alloc_uninit(size, &BUILTINS.string.gc as *const _);
+        let o = h as *mut StrObj;
+        std::ptr::addr_of_mut!((*o).len).write(len);
+        std::ptr::addr_of_mut!((*o).hash).write(AtomicU64::new(0));
+        std::ptr::addr_of_mut!((*o).chars).write(AtomicU64::new(word));
+        let data = (h as *mut u8).add(StrObj::BASE);
+        fill(data);
+        // The char index (and padding) start zeroed.
+        std::ptr::write_bytes(data.add(len), 0, size - StrObj::BASE - len);
+        (*h).set_state(ObjState::Frozen);
         Value::from_ptr(h)
     }
 
