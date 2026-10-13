@@ -134,6 +134,8 @@ pub fn request_gc() {
     if GC_REQUESTED.swap(true, Ordering::SeqCst) {
         return;
     }
+    // Pairs with the fence in `safepoint_slow` (store-buffering: see tests/loom.rs).
+    std::sync::atomic::fence(Ordering::SeqCst);
     for t in GLOBAL.pollers.lock().iter() {
         t.poll.store(true, Ordering::SeqCst);
     }
@@ -252,6 +254,7 @@ pub fn safepoint_slow(rec: &ThreadRecord) {
     }
     // Lower the flag before looking at the reasons, so a request racing with us re-raises it.
     rec.poll.store(false, Ordering::SeqCst);
+    std::sync::atomic::fence(Ordering::SeqCst);
     if GC_REQUESTED.load(Ordering::SeqCst) {
         major_safepoint(rec);
     }

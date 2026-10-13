@@ -43,7 +43,8 @@ instead of a global lock.
 - **Errors are values.** `Result[T, E]` and `?` for recoverable errors, `T?` for absence, panics for bugs.
   A panic unwinds only its own thread.
 - **Fast enough to matter.** A register-based bytecode VM with NaN-boxed values, typed opcodes, inline
-  caches and a parallel mark-sweep collector with thread-local allocation.
+  caches, and a garbage collector in which each thread collects its own young objects without
+  stopping the others, backed by a parallel mark-sweep of the whole heap.
 
 ## Install
 
@@ -103,7 +104,9 @@ Catallaxy 0.1 implements the v1 design (`docs/design.md`, phases 1–4 without f
   generics, nullables, unions, exhaustive `match`, `Result` and `?`, extensions, frozen types,
   concurrency capabilities checked at compile time;
 - the runtime: NaN-boxed values, fixed-layout objects, ownership states with runtime backstops,
-  `--promote-on-access`, a parallel mark-sweep collector with thread-local allocation and lazy sweep;
+  `--promote-on-access`, a parallel mark-sweep collector with thread-local allocation and lazy sweep,
+  plus thread-local young collection (set `CATX_GC_GENERATIONAL=0` to turn it off; `CATX_GC_STATS=1`
+  prints collection and pause statistics);
 - threads, channels, `Mutex`, `Atomic`, `with lock`, `par_map`/`par_each`/`par_reduce` on a
   work-stealing pool;
 - tooling: `check --json`, formatter, REPL, language server, Rust extension API.
