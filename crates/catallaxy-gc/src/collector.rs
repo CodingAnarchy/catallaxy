@@ -526,6 +526,10 @@ fn collect(me: &ThreadRecord) {
     POOL.sweep_large(color);
     POOL.mark_all_unswept();
     stats::after_collection(GLOBAL.mark.marked_bytes.load(Ordering::SeqCst), threads.len());
+    // Every page is swept now (step 2), so wholly empty segments are known; keep enough empty
+    // pages for the allocation budget until the next collection and return the rest.
+    let released = POOL.release_empty_segments(stats::threshold() + crate::heap::nursery_reserve(threads.len()));
+    stats::note_released(released);
 
     // 5. Resume the world.
     for t in threads.iter() {
@@ -539,13 +543,14 @@ fn collect(me: &ThreadRecord) {
     stats::note_pause(start.elapsed().as_nanos() as usize);
     if trace_enabled() {
         eprintln!(
-            "gc: major #{}: stop {:.2} ms, finish sweep {:.2} ms, mark {:.2} ms ({} markers), total {:.2} ms",
+            "gc: major #{}: stop {:.2} ms, finish sweep {:.2} ms, mark {:.2} ms ({} markers), total {:.2} ms, released {:.1} MB",
             stats::collections(),
             t_stopped.as_secs_f64() * 1e3,
             (t_swept - t_stopped).as_secs_f64() * 1e3,
             (t_marked - t_swept).as_secs_f64() * 1e3,
             GLOBAL.mark.markers_seen.load(Ordering::Relaxed),
-            start.elapsed().as_secs_f64() * 1e3
+            start.elapsed().as_secs_f64() * 1e3,
+            released as f64 / 1e6
         );
     }
     let mut coord = GLOBAL.coord.lock();
