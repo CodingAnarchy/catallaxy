@@ -1,0 +1,21 @@
+name: dispatch experiment
+# Issue #6: measures switch vs tail-call threaded dispatch on an x86-64 runner. Manual only.
+on: workflow_dispatch
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install perf
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq linux-tools-common "linux-tools-$(uname -r)" || sudo apt-get install -yq linux-tools-azure || true
+          sudo sysctl -w kernel.perf_event_paranoid=-1 || true
+      - name: Build
+        run: cargo build --release --manifest-path experiments/dispatch/Cargo.toml
+      - name: Measure
+        run: |
+          lscpu | head -20
+          python3 experiments/dispatch/measure.py experiments/dispatch/target/release/dispatch-experiment

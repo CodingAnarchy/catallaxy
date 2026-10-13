@@ -1,0 +1,12 @@
+[package]
+name = "dispatch-experiment"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone: not part of the workspace.
+[workspace]
+
+[profile.release]
+debug = true
+codegen-units = 1
