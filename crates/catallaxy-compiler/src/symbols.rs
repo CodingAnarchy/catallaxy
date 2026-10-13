@@ -726,6 +726,8 @@ fn shown_param(ck: &Checker, t: TyId) -> Option<String> {
                 format!("fn {name}({}){}", ps.join(", "), ret(*r))
             }
             OpenReq::BinOp { op, rhs, ret: r, .. } => format!("fn {}(self, {}){}", op.symbol(), show(*rhs), ret(*r)),
+            OpenReq::BinOpRhs { op, lhs, ret: r, .. } => format!("{} {} self{}", show(*lhs), op.symbol(), ret(*r)),
+            OpenReq::SetIndex { index, value, .. } => format!("fn []=(self, {}, {})", show(*index), show(*value)),
             OpenReq::Unary { op, ret: r, .. } => {
                 let sym = match op {
                     crate::ast::UnOp::Neg => "-",

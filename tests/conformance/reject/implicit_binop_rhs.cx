@@ -1,0 +1,4 @@
+# expect: E0342
+# The untyped parameter on the right of an operator.
+fn sub_from(x) { 10 - x }
+sub_from("a")

@@ -1,0 +1,3 @@
+# expect: E0342
+fn add_one(x) { x.push(1) }
+add_one(freeze([1]))

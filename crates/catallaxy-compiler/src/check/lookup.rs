@@ -119,7 +119,7 @@ impl Checker {
                 let ps = parts.into_iter().map(|p| self.freeze_ty(p)).collect();
                 self.types.tuple(ps)
             }
-            Ty::Var(_) | Ty::Error | Ty::Never | Ty::Dyn | Ty::Open(_) => t,
+            Ty::Var(_) | Ty::Error | Ty::Never | Ty::Dyn => t,
             _ => self.types.frozen(t),
         }
     }
