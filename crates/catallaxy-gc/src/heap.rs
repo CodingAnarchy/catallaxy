@@ -286,7 +286,13 @@ pub fn set_generational(on: bool) {
 /// Young bytes a thread allocates before it asks for a minor collection.
 fn nursery_bytes() -> usize {
     static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *N.get_or_init(|| if stats::stress() { 64 * 1024 } else { 4 * 1024 * 1024 })
+    *N.get_or_init(|| {
+        if stats::stress() {
+            return 64 * 1024;
+        }
+        // CATX_GC_NURSERY (bytes) overrides the default; see docs/gc-minor-cost.md.
+        std::env::var("CATX_GC_NURSERY").ok().and_then(|v| v.parse().ok()).unwrap_or(4 * 1024 * 1024)
+    })
 }
 
 /// A thread's allocation state: one current page per size class, plus its young generation:
