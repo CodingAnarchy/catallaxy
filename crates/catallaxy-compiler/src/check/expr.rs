@@ -1475,7 +1475,23 @@ impl Checker {
                         };
                     }
                 }
-                match self.lookup_name(self.cur_module, name)? {
+                let item = self.lookup_name(self.cur_module, name)?;
+                // Record type and module names used as path prefixes for tooling (hover,
+                // references); values (functions, globals) are recorded where they are checked.
+                let res = match item {
+                    ScopeItem::Class(c) => Some(NameRes::Class(c)),
+                    ScopeItem::Enum(en) => Some(NameRes::Enum(en)),
+                    ScopeItem::Iface(i) => Some(NameRes::Iface(i)),
+                    ScopeItem::Module(m) => Some(NameRes::Module(m)),
+                    ScopeItem::Variant(en, t) => Some(NameRes::Variant(en, t)),
+                    ScopeItem::Fn(_) | ScopeItem::Global(_) => None,
+                };
+                if let Some(r) = res {
+                    if e.id < u32::MAX - 2 {
+                        self.names.insert(e.id, r);
+                    }
+                }
+                match item {
                     ScopeItem::Class(c) => Some(PathRes::Class(c, None)),
                     ScopeItem::Enum(en) => Some(PathRes::Enum(en, None)),
                     ScopeItem::Iface(i) => Some(PathRes::Iface(i)),
@@ -2543,8 +2559,9 @@ impl Checker {
         let subst: FxHashMap<ParamId, TyId> = ci.params.iter().copied().zip(targs.iter().copied()).collect();
         if name.name == "new" && !ci.is_builtin {
             let ctor = ci.constructor.unwrap();
-            if ci.modifier == ast::ClassModifier::Plain && ci.methods.contains_key("new") {
-                // A user static `new` overrides the generated constructor.
+            if ci.modifier != ast::ClassModifier::Shared && ci.methods.contains_key("new") {
+                // A user static `new` overrides the generated constructor (the standard library's
+                // frozen `Regex` builds its instances natively this way).
             } else {
                 let m = MethodRef { fid: ctor, subst, self_ty, dispatch: Dispatch::Static(ctor), frozen: false };
                 let (slots, ret) = self.check_args(e, &m, args, block, expected, false);

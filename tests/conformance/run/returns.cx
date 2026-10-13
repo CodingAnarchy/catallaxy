@@ -1,0 +1,45 @@
+# Returns from every kind of tail position (the compiler turns jumps to a return into returns).
+fn sign(x: Int) -> String {
+  if x < 0 { "neg" } else if x == 0 { "zero" } else { "pos" }
+}
+fn classify(x: Int?) -> String {
+  match x {
+    nil => "none"
+    v => if v % 2 == 0 { "even #{v}" } else { "odd #{v}" }
+  }
+}
+fn first_over(xs: List[Int], limit: Int) -> Int? {
+  for x in xs {
+    if x > limit { return x }
+  }
+  nil
+}
+fn nested(a: Int, b: Int) -> Int {
+  if a > 0 {
+    if b > 0 { a + b } else { a - b }
+  } else {
+    { let t = a * b; t + 1 }
+  }
+}
+shared class Box {
+  n: Int
+}
+fn locked_value(b: Box) -> Int {
+  with lock(b) {
+    if b.n > 5 { return b.n * 10 }
+    b.n
+  }
+}
+fn noop(x: Int) {
+  if x > 0 { return }
+  puts("noop with #{x}")
+}
+puts([sign(-3), sign(0), sign(9)])
+puts([classify(nil), classify(4), classify(7)])
+puts([first_over([1, 5, 9, 12], 6), first_over([1, 2], 6)])
+puts([nested(2, 3), nested(2, -3), nested(-2, 3)])
+puts([locked_value(Box.new(3)), locked_value(Box.new(8))])
+noop(1)
+noop(-1)
+adder = { |x: Int| if x > 10 { x } else { x + 100 } }
+puts([adder(5), adder(50)])

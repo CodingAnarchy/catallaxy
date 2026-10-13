@@ -1,0 +1,63 @@
+# Paths, directories and file metadata. Works under a fresh relative directory.
+puts(Path.join("a", "b.txt"))
+puts(Path.join("a/", "b.txt"))
+puts(Path.join("", "b.txt"))
+puts(Path.join("a", "/etc/x"))
+puts(Path.join_all(["src", "lib", "main.cx"]))
+puts(Path.basename("dir/sub/file.tar.gz"))
+puts(Path.basename("dir/sub/"))
+puts(Path.dirname("dir/sub/file.txt"))
+puts(Path.dirname("file.txt"))
+puts(Path.extension("dir/file.tar.gz"))
+puts(Path.extension("dir/README"))
+puts(Path.extension(".hidden"))
+puts(Path.stem("dir/file.tar.gz"))
+puts(Path.is_absolute("a/b"))
+puts(Path.is_absolute(Dir.current()))
+
+root = "catx_paths_#{Time.millis()}_#{Random.int(0, 1000000)}"
+puts(Dir.exists(root))
+puts(Dir.create(root).is_ok())
+puts(Dir.exists(root))
+puts(Dir.create(root).is_err())
+puts(Dir.create(root, recursive: true).is_ok())
+nested = Path.join_all([root, "x", "y", "z"])
+puts(Dir.create(nested).is_err())
+puts(Dir.create(nested, recursive: true).is_ok())
+
+f = Path.join(root, "notes.txt")
+puts(File.exists(f))
+File.write(f, "hello, metadata").unwrap()
+puts(File.exists(f))
+md = File.metadata(f).unwrap()
+puts("#{md.size} #{md.is_file} #{md.is_dir}")
+puts(md.modified > 1600000000.0)
+dmd = File.metadata(nested).unwrap()
+puts("#{dmd.is_file} #{dmd.is_dir}")
+puts(File.metadata(Path.join(root, "missing")).is_err())
+
+File.write(Path.join(root, "b.cx"), "").unwrap()
+File.write(Path.join(root, "a.cx"), "").unwrap()
+puts(Dir.list(root).unwrap())
+puts(Dir.list(Path.join(root, "missing")).is_err())
+cx = Dir.list(root).unwrap().select { |n| Path.extension(n) == "cx" }
+puts(cx)
+
+# Filesystem calls park fibers instead of blocking the thread.
+fs = (0...6).map { |i|
+  Fiber.start {
+    d = Path.join(root, "f#{i}")
+    Dir.create(d).unwrap()
+    File.write(Path.join(d, "data"), "x" * i).unwrap()
+    File.metadata(Path.join(d, "data")).unwrap().size
+  }
+}
+puts(fs.map { |fb| fb.join().unwrap() })
+puts(Dir.list(root).unwrap().length)
+
+# remove: non-recursive needs an empty directory.
+puts(Dir.remove(Path.join(root, "x")).is_err())
+puts(Dir.remove(nested).is_ok())
+puts(Dir.remove(root, recursive: true).is_ok())
+puts(Dir.exists(root))
+puts(File.exists(f))

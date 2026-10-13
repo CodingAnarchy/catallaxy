@@ -194,7 +194,8 @@ impl Checker {
                 p.ty
             };
             open_params.push(ty);
-            let l = self.new_local(&p.name, ty, p.span, true);
+            // The local's span is the parameter's name (tooling renames and references it).
+            let l = self.new_local(&p.name, ty, decl.params[i].name.span, true);
             self.ctx().scopes[0].insert(p.name.clone(), l);
         }
         if f.has_untyped_params {
