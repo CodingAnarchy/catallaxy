@@ -503,10 +503,30 @@ impl Vm {
                 }
                 save!();
                 let top = (base + f.nregs).max(fr.top);
-                frames!().push(Frame { func: f, pc: 0, base, ret: $ret, closure: $closure, serial: 0, top });
+                // The new frame is built here and kept in locals, not read back from the stack.
+                fr = Frame { func: f, pc: 0, base, ret: $ret, closure: $closure, serial: 0, top };
+                frames!().push(fr);
+                code = f.code.as_ptr();
+                pc = 0;
+                regs = unsafe { self.stack.add(base) };
                 if unsafe { (*poll).load(Ordering::Relaxed) } {
                     catallaxy_gc::safepoint_slow(&self.m.rec);
                 }
+            }};
+        }
+        // Pops the current frame (its return slot is already in `fr`) and resumes the caller.
+        macro_rules! return_value {
+            ($v:expr) => {{
+                let v: Value = $v;
+                let frames = frames!();
+                frames.pop();
+                if unsafe { !(*rs).held_locks.is_empty() } {
+                    self.release_locks();
+                }
+                if frames!().len() == stop {
+                    return Ok(v);
+                }
+                unsafe { *self.stack.add(fr.ret) = v };
                 load_frame!();
             }};
         }
@@ -931,18 +951,11 @@ impl Vm {
                         pc = (pc as isize + sbx_of(w)) as usize;
                     }
                 }
-                Op::Return | Op::ReturnNil => {
-                    let v = if Op::from_u8(op_of(w)) == Op::Return { r!(a) } else { Value::NIL };
-                    let done = frames!().pop().unwrap();
-                    if !self.rs().held_locks.is_empty() {
-                        self.release_locks();
-                    }
-                    if frames!().len() == stop {
-                        return Ok(v);
-                    }
-                    unsafe { *self.stack.add(done.ret) = v };
-                    load_frame!();
+                Op::Return => {
+                    let v = r!(a);
+                    return_value!(v);
                 }
+                Op::ReturnNil => return_value!(Value::NIL),
 
                 // ---- calls ----
                 Op::Call => {

@@ -255,12 +255,14 @@ impl<'a> Codegen<'a> {
     }
 
     fn finish(&self, st: FnState, name: String, nparams: usize, captures: Vec<CapSrc>) -> FuncProto {
+        let mut code = st.code;
+        peephole(&mut code);
         FuncProto {
             name,
             file: st.file,
             nparams: nparams as u8,
             nregs: st.max.max(nparams).min(255) as u8,
-            code: st.code,
+            code,
             lines: st.lines,
             consts: st.consts,
             ics: st.ics,
@@ -2175,5 +2177,52 @@ fn bit_op(op: BinOp) -> Op {
         BinOp::BitXor => Op::BXor,
         BinOp::Shl => Op::Shl,
         _ => Op::Shr,
+    }
+}
+
+/// One-word rewrites that keep every instruction's position, so jump offsets and line tables
+/// stay valid:
+/// - a `Jmp` (possibly through more `Jmp`s) to a `Return`/`ReturnNil` becomes that return;
+/// - `Move a b` followed by `Return a` becomes `Return b` (the `Return a` stays for any jump
+///   that targets it).
+///
+/// Branches of an `if` or `match` at the end of a function body then return directly instead of
+/// moving their value and jumping to a shared return.
+fn peephole(code: &mut [u32]) {
+    let starts: Vec<usize> = {
+        let mut v = Vec::new();
+        let mut pc = 0;
+        while pc < code.len() {
+            v.push(pc);
+            pc += 1 + Op::from_u8(op_of(code[pc])).has_data() as usize;
+        }
+        v
+    };
+    let is_return = |w: u32| matches!(Op::from_u8(op_of(w)), Op::Return | Op::ReturnNil);
+    for &pc in &starts {
+        if Op::from_u8(op_of(code[pc])) != Op::Jmp {
+            continue;
+        }
+        let mut target = pc;
+        for _ in 0..8 {
+            let t = (target as isize + 1 + sax_of(code[target])) as usize;
+            if t >= code.len() || Op::from_u8(op_of(code[t])) != Op::Jmp {
+                target = t;
+                break;
+            }
+            target = t;
+        }
+        if target < code.len() && is_return(code[target]) {
+            code[pc] = code[target];
+        }
+    }
+    for &pc in &starts {
+        let w = code[pc];
+        if Op::from_u8(op_of(w)) == Op::Move && pc + 1 < code.len() {
+            let next = code[pc + 1];
+            if Op::from_u8(op_of(next)) == Op::Return && a_of(next) == a_of(w) {
+                code[pc] = encode(Op::Return, b_of(w) as u8, 0, 0);
+            }
+        }
     }
 }
