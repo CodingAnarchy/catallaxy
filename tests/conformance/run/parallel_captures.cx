@@ -1,0 +1,49 @@
+# Parallel blocks (`spawn`, `par_*`) receive copies of what they capture; the originals stay
+# usable by the thread that created them. (Found by tools/difffuzz.)
+enum Shape {
+  Circle(Int)
+  Label(String, Int)
+}
+
+# An immutable value that is still owned at runtime (an enum value) captured by `spawn`.
+s = Shape.Label("hi", 3)
+t = spawn { match s { .Circle(r) => r, .Label(_, n) => n } }
+puts(t.join().unwrap())
+puts(s)
+puts(match s { .Circle(r) => r, .Label(l, n) => l.length + n })
+
+# The same through `par_map`, and a tuple.
+pair = (Shape.Circle(2), "two")
+sizes = [1, 2, 3].par_map { |x| x + pair.1.length + (match pair.0 { .Circle(r) => r, .Label(_, n) => n }) }
+puts(sizes)
+puts(pair)
+
+# A captured variable that is reassigned elsewhere lives in a cell: the parallel block gets a
+# copy of its value at the time the block is created.
+name = "abc"
+lens = [1, 2, 3].par_map { |x| x + name.length }
+t2 = spawn { name.upcase }
+if lens.length > 0 {
+  name = "abcdef"
+}
+puts(lens)
+puts(t2.join().unwrap())
+puts(name)
+counter = 0
+bump = { || counter += 1 }
+bump()
+bump()
+total = [10, 20].par_map { |x| x + counter }
+puts(total)
+bump()
+puts(counter)
+
+# `spawn move` still transfers what it moves, and copies the rest.
+data = [1, 2, 3]
+tag = Shape.Circle(7)
+t3 = spawn move {
+  data.push(4)
+  data.sum() + (match tag { .Circle(r) => r, .Label(_, n) => n })
+}
+puts(t3.join().unwrap())
+puts(tag)

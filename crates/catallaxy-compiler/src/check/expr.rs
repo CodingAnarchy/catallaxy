@@ -571,6 +571,13 @@ impl Checker {
             }
             BinOp::Coalesce => {
                 let lt = self.check_expr(l, None);
+                if self.types.shallow_resolve(lt) == self.types.nil {
+                    // Always nil (a literal, or a variable narrowed to `Nil`): the result is the
+                    // right side.
+                    let rt = self.check_expr(r, expected);
+                    self.bins.insert(e.id, BinRes::Coalesce);
+                    return rt;
+                }
                 let inner = match self.types.strip_nil(lt) {
                     Some(i) => i,
                     None => {
@@ -2960,7 +2967,7 @@ impl Checker {
             f.state = CheckState::Done;
         }
         if let Some(is_move) = spawn_like {
-            self.check_spawn_captures(&captures, is_move, e.span);
+            self.check_spawn_captures(e.id, &captures, is_move, e.span);
             self.spawn_nodes.insert(e.id, is_move);
         }
         let n_params = if destructure { 1 } else { plocals.len() };
@@ -3004,7 +3011,7 @@ impl Checker {
     }
 
     /// Captured values of a parallel block must be safe to share or explicitly moved.
-    fn check_spawn_captures(&mut self, captures: &[LocalId], is_move: bool, span: Span) {
+    fn check_spawn_captures(&mut self, node: NodeId, captures: &[LocalId], is_move: bool, span: Span) {
         for &l in captures {
             let info = self.locals[l as usize].clone();
             if info.name == "$frame" {
@@ -3016,6 +3023,7 @@ impl Checker {
             }
             if is_move {
                 self.mark_moved(l, span);
+                self.moved_captures.insert((node, l));
                 continue;
             }
             let msg = format!(
