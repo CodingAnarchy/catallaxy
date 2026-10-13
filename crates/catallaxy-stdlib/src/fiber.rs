@@ -157,6 +157,7 @@ struct Waker {
 
 impl Waker {
     fn wake(&self) {
+        crate::net::tr!("wake f{}", self.id);
         self.flag.store(true, Ordering::Release);
         self.shared.wake(self.id);
     }
@@ -249,6 +250,10 @@ thread_local! {
 
 fn with_sched<R>(f: impl FnOnce(&mut Scheduler) -> R) -> R {
     SCHED.with(|s| f(s.borrow_mut().get_or_insert_with(Scheduler::new)))
+}
+
+pub fn current_id() -> u64 {
+    CURRENT.with(|c| c.get())
 }
 
 /// True while a fiber (not the thread's main context) is running.
@@ -372,6 +377,7 @@ fn resume(id: u64) {
     match r {
         CoroutineResult::Yield(()) => {
             let woken = fiber.flag.load(Ordering::Acquire);
+            crate::net::tr!("f{id} suspended woken={woken}");
             with_sched(|s| {
                 s.fibers.insert(id, fiber);
                 if woken {
@@ -380,6 +386,7 @@ fn resume(id: u64) {
             });
         }
         CoroutineResult::Return(()) => {
+            crate::net::tr!("f{id} finished");
             let vm = fiber.vm;
             drop(fiber);
             // SAFETY: the coroutine finished; nothing else references its VM.
@@ -394,6 +401,7 @@ fn absorb() {
     with_sched(|s| {
         let woken = std::mem::take(&mut *s.shared.woken.lock());
         for id in woken {
+            crate::net::tr!("absorb woken f{id} parked={} queued={}", s.fibers.contains_key(&id), s.queued.contains(&id));
             if id != ROOT && s.fibers.contains_key(&id) {
                 s.enqueue(id);
             }
@@ -452,8 +460,10 @@ fn run_until(vm: &mut Vm, mut done: impl FnMut() -> bool) {
 fn park() {
     let flag = RUNNING_FLAG.with(|f| f.borrow().clone()).expect("park outside a fiber");
     if flag.swap(false, Ordering::AcqRel) {
+        crate::net::tr!("park: already woken");
         return;
     }
+    crate::net::tr!("park");
     let y = YIELDER.with(|c| c.get());
     // SAFETY: set by the running fiber's body; valid while it runs.
     unsafe { suspend(y) };

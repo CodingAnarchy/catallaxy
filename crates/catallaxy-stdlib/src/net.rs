@@ -29,6 +29,10 @@ use crate::fiber::{blocking_io, wait_event_until};
 use crate::script::{handle_data, instance};
 use crate::*;
 
+pub(crate) static TRACE: LazyLock<bool> = LazyLock::new(|| std::env::var_os("CATX_NET_TRACE").is_some());
+macro_rules! tr { ($($a:tt)*) => { if *crate::net::TRACE { eprintln!("[{:?} f{}] {}", std::thread::current().name(), crate::fiber::current_id(), format!($($a)*)); } } }
+pub(crate) use tr;
+
 // ---- the reactor -------------------------------------------------------------------------------
 
 struct Reactor {
@@ -55,6 +59,7 @@ fn reactor_main(mut poll: Poll) {
         }
         for ev in events.iter() {
             let ws = REACTOR.waiters.lock().remove(&ev.token().0);
+            tr!("event t{} r={} w={} closed={} waiters={}", ev.token().0, ev.is_readable(), ev.is_writable(), ev.is_read_closed(), ws.as_ref().map_or(0, |w| w.len()));
             for w in ws.into_iter().flatten() {
                 w();
             }
@@ -89,15 +94,20 @@ fn io_wait<T>(
         let mut arm = |wake: Wake| {
             REACTOR.waiters.lock().entry(token.0).or_default().push(wake);
             match op() {
-                Err(e) if e.kind() == ErrorKind::WouldBlock => true,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    tr!("armed t{}", token.0);
+                    true
+                }
                 r => {
+                    tr!("arm-retry ready t{}", token.0);
                     early = Some(r);
                     false
                 }
             }
         };
+        tr!("io_wait t{} wouldblock", token.0);
         match wait_event_until(vm, deadline, &mut arm) {
-            Some(_) => {}
+            Some(_) => tr!("io_wait t{} resumed", token.0),
             None => {
                 // No fibers to run: block this thread until the reactor (or the deadline) wakes it.
                 let pair = Arc::new((Mutex::new(false), Condvar::new()));
@@ -163,6 +173,7 @@ fn deadline(c: &Conn) -> Option<Instant> {
 
 fn new_socket(vm: &mut Vm, mut stream: TcpStream) -> RtResult<Value> {
     let token = new_token();
+    tr!("socket t{} {:?}->{:?}", token.0, stream.local_addr(), stream.peer_addr());
     if let Err(e) = REACTOR.registry.register(&mut stream, token, Interest::READABLE | Interest::WRITABLE) {
         return Ok(err(vm, &format!("cannot watch socket: {e}")));
     }
@@ -207,8 +218,10 @@ fn connect(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
             }
         };
         let token = new_token();
+        tr!("connect t{}", token.0);
         match wait_connected(vm, &mut stream, token, deadline) {
             Ok(()) => {
+                tr!("connected t{}", token.0);
                 let _ = REACTOR.registry.deregister(&mut stream);
                 return new_socket(vm, stream);
             }
