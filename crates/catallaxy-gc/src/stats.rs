@@ -60,6 +60,22 @@ pub(crate) fn after_collection(live_bytes: usize, mutators: usize) {
     COLLECTIONS.fetch_add(1, Ordering::Relaxed);
 }
 
+/// The allocation budget until the next major collection.
+pub(crate) fn threshold() -> usize {
+    THRESHOLD.load(Ordering::Relaxed)
+}
+
+static RELEASED: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn note_released(bytes: usize) {
+    RELEASED.fetch_add(bytes, Ordering::Relaxed);
+}
+
+/// Heap bytes returned to the OS so far.
+pub fn released_bytes() -> usize {
+    RELEASED.load(Ordering::Relaxed)
+}
+
 /// Records one stop-the-world pause.
 pub(crate) fn note_pause(ns: usize) {
     PAUSE_TOTAL_NS.fetch_add(ns, Ordering::Relaxed);

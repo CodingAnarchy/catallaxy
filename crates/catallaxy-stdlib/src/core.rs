@@ -19,14 +19,23 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "assert_eq" => assert_eq,
         "inspect" => inspect,
         "compare_values" => compare_values,
-        "read_line" => read_line,
+        "read_line" | "Stdin.read_line" => read_line,
+        "Stdin.read_all" => |vm, _| {
+            let text = String::from_utf8_lossy(&read_stdin_to_end(vm)).into_owned();
+            Ok(new_str(vm, &text))
+        },
+        "Stdin.read_lines" => |vm, _| {
+            let text = String::from_utf8_lossy(&read_stdin_to_end(vm)).into_owned();
+            let items = text.lines().map(|l| vm.m.alloc_str(l)).collect();
+            Ok(new_list(vm, items))
+        },
         "args" => args_fn,
         "exit" => exit_fn,
         "sleep" => sleep_fn,
         "gc" => gc_fn,
 
         "Int.to_s" => int_to_s,
-        "Int.hash" | "Float.hash" | "Bool.hash" | "String.hash" => hash,
+        "Int.hash" | "Float.hash" | "Bool.hash" | "String.hash" | "__hash_of" => hash,
         "Int.to_f" => int_to_f,
         "Int.to_s_radix" => int_to_s_radix,
         "Int.chr" => int_chr,
@@ -62,8 +71,8 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "String.to_s" => |_, a| Ok(a[0]),
         "String.<=>" => |_, a| Ok(Value::small_int(s(a[0])?.cmp(s(a[1])?) as i64)),
         "String.+" => |vm, a| {
-            let r = format!("{}{}", s(a[0])?, s(a[1])?);
-            Ok(new_str(vm, &r))
+            let parts = [str_obj(a[0])?, str_obj(a[1])?];
+            Ok(vm.m.alloc_concat(2, |i| parts[i]))
         },
         "String.*" => |vm, a| {
             let n = int(a[1])?;
@@ -129,9 +138,9 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "String.contains" => |_, a| Ok(Value::bool(s(a[0])?.contains(s(a[1])?))),
         "String.index_of" => str_index_of,
         "String.rindex_of" => |_, a| {
-            let (h, n) = (s(a[0])?, s(a[1])?);
-            Ok(match h.rfind(n) {
-                Some(b) => Value::small_int(h[..b].chars().count() as i64),
+            let (o, n) = (str_obj(a[0])?, s(a[1])?);
+            Ok(match o.as_str().rfind(n) {
+                Some(b) => Value::small_int(o.char_offset(b) as i64),
                 None => Value::NIL,
             })
         },
@@ -149,15 +158,15 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             Ok(new_str(vm, &r))
         },
         "String.slice" => |vm, a| {
-            let x = s(a[0])?;
+            let x = str_obj(a[0])?;
             let (start, len) = (int(a[1])?, int(a[2])?);
             let r = char_slice(x, start, start.saturating_add(len.max(0)));
-            Ok(new_str(vm, &r))
+            Ok(new_str(vm, r))
         },
         "String.substring" => |vm, a| {
-            let x = s(a[0])?;
+            let x = str_obj(a[0])?;
             let r = char_slice(x, int(a[1])?, int(a[2])?);
-            Ok(new_str(vm, &r))
+            Ok(new_str(vm, r))
         },
         "String.count" => |_, a| {
             let (h, n) = (s(a[0])?, s(a[1])?);
@@ -194,6 +203,11 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "String.center" => |vm, a| pad(vm, a, 0),
         "String.ljust" => |vm, a| pad(vm, a, 1),
+        "String.format" => |vm, a| {
+            let args = crate::coll::list_read(vm, a[1])?.to_vec();
+            let r = catallaxy_runtime::fmtspec::format_template(vm, s(a[0])?, &args)?;
+            Ok(new_str(vm, &r))
+        },
         "String.rjust" => |vm, a| pad(vm, a, 2),
         "String.is_digit" => |_, a| str_all(a, |c| c.is_ascii_digit()),
         "String.is_alpha" => |_, a| str_all(a, |c| c.is_alphabetic()),
@@ -260,17 +274,10 @@ fn str_list(vm: &mut Vm, parts: Vec<String>) -> Value {
 }
 
 /// Substring by character positions [start, end), clamped; negative positions count from the end.
-fn char_slice(x: &str, start: i64, end: i64) -> String {
-    let n = if x.is_ascii() { x.len() as i64 } else { x.chars().count() as i64 };
+fn char_slice(x: &StrObj, start: i64, end: i64) -> &str {
+    let n = x.char_count() as i64;
     let norm = |i: i64| if i < 0 { (i + n).max(0) } else { i.min(n) };
-    let (s0, e0) = (norm(start), norm(end));
-    if e0 <= s0 {
-        return String::new();
-    }
-    if x.is_ascii() {
-        return x[s0 as usize..e0 as usize].to_string();
-    }
-    x.chars().skip(s0 as usize).take((e0 - s0) as usize).collect()
+    x.char_slice(norm(start) as usize, norm(end) as usize)
 }
 
 fn pad(vm: &mut Vm, a: &[Value], mode: u8) -> RtResult<Value> {
@@ -307,27 +314,23 @@ fn pad(vm: &mut Vm, a: &[Value], mode: u8) -> RtResult<Value> {
 }
 
 fn str_index(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    let x = s(a[0])?;
+    let x = str_obj(a[0])?;
     let i = int(a[1])?;
-    let n = unsafe { as_str_obj(a[0]) }.char_count() as i64;
+    let n = x.char_count() as i64;
     let idx = if i < 0 { i + n } else { i };
     if idx < 0 || idx >= n {
         return panic(format!("IndexError: index {i} out of range for string of length {n}"));
     }
-    let c = if x.is_ascii() {
-        x[idx as usize..idx as usize + 1].to_string()
-    } else {
-        x.chars().nth(idx as usize).unwrap().to_string()
-    };
-    Ok(new_str(vm, &c))
+    Ok(new_str(vm, x.char_at(idx as usize)))
 }
 
 fn str_index_of(_: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    let (h, n) = (s(a[0])?, s(a[1])?);
+    let (o, n) = (str_obj(a[0])?, s(a[1])?);
+    let h = o.as_str();
     let from = arg(a, 2).map(int).transpose()?.unwrap_or(0).max(0) as usize;
-    let start_byte = h.char_indices().nth(from).map(|(b, _)| b).unwrap_or(h.len());
+    let start_byte = o.byte_offset(from);
     Ok(match h[start_byte..].find(n) {
-        Some(b) => Value::small_int(h[..start_byte + b].chars().count() as i64),
+        Some(b) => Value::small_int(o.char_offset(start_byte + b) as i64),
         None => Value::NIL,
     })
 }
@@ -352,8 +355,13 @@ fn hash(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn int_to_s(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    let r = ops::format_int(a[0]);
-    Ok(new_str(vm, &r))
+    match arg(a, 1) {
+        Some(base) if base.is_small_int() && base.as_small_int() != 10 => int_to_s_radix(vm, a),
+        _ => {
+            let r = ops::format_int(a[0]);
+            Ok(new_str(vm, &r))
+        }
+    }
 }
 
 fn int_to_f(_: &mut Vm, a: &[Value]) -> RtResult<Value> {
@@ -485,7 +493,20 @@ fn compare_values(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     Ok(Value::small_int(o as i64))
 }
 
+/// The rest of standard input (as far as it could be read). Shares the buffer `read_line` uses.
+pub(crate) fn read_stdin_to_end(vm: &mut Vm) -> Vec<u8> {
+    crate::flush();
+    crate::fiber::blocking_io(vm, || {
+        use std::io::Read as _;
+        let mut buf = Vec::new();
+        let _ = std::io::stdin().lock().read_to_end(&mut buf);
+        buf
+    })
+}
+
 fn read_line(vm: &mut Vm, _: &[Value]) -> RtResult<Value> {
+    // Show any prompt before waiting (the I/O pool path does not flush on its own).
+    crate::flush();
     let line = crate::fiber::blocking_io(vm, || {
         let mut s = String::new();
         match std::io::stdin().read_line(&mut s) {

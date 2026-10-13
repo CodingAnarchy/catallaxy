@@ -112,17 +112,20 @@ dependencies = [
 name = "catallaxy-stdlib"
 version = "0.3.0"
 dependencies = [
+ "base64",
  "catallaxy-gc",
  "catallaxy-runtime",
  "catallaxy-vm",
  "corosensei",
  "crossbeam-deque",
+ "libc",
  "mio",
  "num-bigint",
  "num-integer",
  "num-traits",
  "parking_lot",
  "regex",
+ "ring",
  "rustc-hash",
  "serde_json",
  "ureq",

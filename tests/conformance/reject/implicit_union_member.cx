@@ -1,0 +1,6 @@
+# expect: E0342
+# Every member of a union argument must meet the requirement.
+class C { n: Int }
+class D { m: Int }
+fn get(x) { x.n }
+fn g(v: C | D) -> Int { get(v) }

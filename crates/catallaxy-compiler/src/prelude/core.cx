@@ -269,6 +269,125 @@ pub interface Enumerable[T] {
     self.each { |x| out.add(x) }
     out
   }
+  # A lazy view of the elements: `map`, `select` and the like on it build a pipeline instead of a
+  # list, and nothing runs until it is consumed. See `Lazy`.
+  fn lazy(self) -> Lazy[T] { Lazy.new({ |g: fn(T)| self.each(g) }) }
+}
+
+# A lazy sequence. `source` is called with a function to feed each element to; the adaptors
+# (`map`, `select`, `take`, ...) wrap it in another such function, so elements flow through the
+# whole pipeline one at a time, only when the sequence is consumed (`each`, `to_list`, `first`,
+# `find`, a `for` loop or any other `Enumerable` method). `take`, `take_while`, `first` and `find`
+# stop pulling from the source once they are done, so a pipeline over an infinite source
+# terminates:
+#
+#   Lazy.iterate(1) { |n| n + 1 }.map { |n| n * n }.select { |n| n.is_odd }.take(3).to_list()
+#   # [1, 9, 25]
+#
+# A Lazy may be consumed more than once: each consumption runs the source again.
+pub class Lazy[T] {
+  source: fn(fn(T))
+
+  # The infinite sequence `seed`, `f(seed)`, `f(f(seed))`, ...
+  fn iterate(seed: T, f: fn(T) -> T) -> Lazy[T] {
+    Lazy.new({ |g: fn(T)|
+      x = seed
+      loop {
+        g(x)
+        x = f(x)
+      }
+    })
+  }
+  # `value` forever.
+  fn repeat(value: T) -> Lazy[T] { Lazy.new({ |g: fn(T)| loop { g(value) } }) }
+
+  fn each(self, f: fn(T)) {
+    src = self.source
+    src(f)
+  }
+  fn lazy(self) -> Lazy[T] { self }
+  fn map[U](self, f: fn(T) -> U) -> Lazy[U] { Lazy.new({ |g: fn(U)| self.each { |x| g(f(x)) } }) }
+  fn flat_map[U](self, f: fn(T) -> List[U]) -> Lazy[U] {
+    Lazy.new({ |g: fn(U)| self.each { |x| for y in f(x) { g(y) } } })
+  }
+  fn select(self, f: fn(T) -> Bool) -> Lazy[T] {
+    Lazy.new({ |g: fn(T)| self.each { |x| if f(x) { g(x) } } })
+  }
+  fn filter(self, f: fn(T) -> Bool) -> Lazy[T] { self.select(f) }
+  fn reject(self, f: fn(T) -> Bool) -> Lazy[T] {
+    Lazy.new({ |g: fn(T)| self.each { |x| if not f(x) { g(x) } } })
+  }
+  # The first `n` elements; the source is not asked for an element past them.
+  fn take(self, n: Int) -> Lazy[T] {
+    Lazy.new({ |g: fn(T)|
+      if n > 0 {
+        i = 0
+        for x in self {
+          g(x)
+          i += 1
+          if i >= n { break }
+        }
+      }
+    })
+  }
+  fn take_while(self, f: fn(T) -> Bool) -> Lazy[T] {
+    Lazy.new({ |g: fn(T)|
+      for x in self {
+        if not f(x) { break }
+        g(x)
+      }
+    })
+  }
+  fn drop(self, n: Int) -> Lazy[T] {
+    Lazy.new({ |g: fn(T)|
+      i = 0
+      self.each { |x|
+        if i >= n { g(x) } else { i += 1 }
+      }
+    })
+  }
+  fn drop_while(self, f: fn(T) -> Bool) -> Lazy[T] {
+    Lazy.new({ |g: fn(T)|
+      dropping = true
+      self.each { |x|
+        if dropping and f(x) {
+        } else {
+          dropping = false
+          g(x)
+        }
+      }
+    })
+  }
+  # Each element paired with its position.
+  fn with_index(self) -> Lazy[(T, Int)] {
+    Lazy.new({ |g: fn((T, Int))|
+      i = 0
+      self.each { |x|
+        g((x, i))
+        i += 1
+      }
+    })
+  }
+  # Pairs of elements of this sequence and `other`, as long as the shorter.
+  fn zip[U](self, other: List[U]) -> Lazy[(T, U)] {
+    Lazy.new({ |g: fn((T, U))|
+      i = 0
+      for x in self {
+        if i >= other.length { break }
+        g((x, other[i]))
+        i += 1
+      }
+    })
+  }
+  # The elements without repeats (keeping first occurrences).
+  fn uniq(self) -> Lazy[T] {
+    Lazy.new({ |g: fn(T)|
+      seen: Set[T] = Set.new()
+      self.each { |x| if seen.add(x) { g(x) } }
+    })
+  }
+  # The elements as a list (like `to_list`).
+  fn force(self) -> List[T] { self.to_list() }
 }
 
 extend[T: Comparable] Enumerable[T] {

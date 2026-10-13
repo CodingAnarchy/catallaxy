@@ -1,0 +1,5 @@
+# expect: E0342
+# Requirements flow through an implicit-generic caller to its own call sites.
+fn len(x) { x.length }
+fn twice(y) { len(y) * 2 }
+twice(3)

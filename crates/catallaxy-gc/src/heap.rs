@@ -5,9 +5,10 @@
 //! atomics (bump allocation on fresh pages, a free list on swept pages). Only taking a new page
 //! touches the per-size-class global lists. Objects larger than the biggest size class get their own
 //! allocation. Pages are swept lazily: after a collection every page is "unswept", and a thread sweeps
-//! a page right before allocating from it.
+//! a page right before allocating from it. Segments are mapped from the OS directly, and a major
+//! collection returns wholly empty ones beyond a reserve for the next allocation budget.
 
-use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
 use std::cell::UnsafeCell;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
@@ -50,6 +51,8 @@ pub(crate) enum PageState {
 
 pub(crate) struct Page {
     pub base: *mut u8,
+    /// Base of the segment holding the page.
+    seg: *mut u8,
     slot_size: UnsafeCell<usize>,
     class: UnsafeCell<usize>,
     pub state: AtomicU8,
@@ -144,14 +147,94 @@ impl Page {
 }
 
 struct Segment {
-    /// Kept so segments can be returned to the OS once empty (not yet done in v1).
-    #[allow(dead_code)]
     base: *mut u8,
 }
 unsafe impl Send for Segment {}
 
-fn segment_layout() -> Layout {
-    Layout::from_size_align(SEGMENT_SIZE, SEGMENT_SIZE).unwrap()
+/// Segment memory comes straight from the OS, so that a segment can be handed back whole.
+mod os {
+    use super::SEGMENT_SIZE;
+
+    /// Maps a zeroed, read-write segment, or returns null.
+    #[cfg(all(unix, not(miri)))]
+    pub(super) fn map_segment() -> *mut u8 {
+        // SAFETY: an anonymous private mapping has no preconditions.
+        let p = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                SEGMENT_SIZE,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANON,
+                -1,
+                0,
+            )
+        };
+        if p == libc::MAP_FAILED {
+            std::ptr::null_mut()
+        } else {
+            p as *mut u8
+        }
+    }
+
+    /// # Safety
+    /// `p` must come from [`map_segment`] and nothing may use it afterwards.
+    #[cfg(all(unix, not(miri)))]
+    pub(super) unsafe fn unmap_segment(p: *mut u8) {
+        libc::munmap(p as *mut libc::c_void, SEGMENT_SIZE);
+    }
+
+    #[cfg(all(windows, not(miri)))]
+    mod win {
+        pub const MEM_COMMIT: u32 = 0x1000;
+        pub const MEM_RESERVE: u32 = 0x2000;
+        pub const MEM_RELEASE: u32 = 0x8000;
+        pub const PAGE_READWRITE: u32 = 0x04;
+        #[link(name = "kernel32")]
+        extern "system" {
+            pub fn VirtualAlloc(addr: *mut u8, size: usize, alloc_type: u32, protect: u32) -> *mut u8;
+            pub fn VirtualFree(addr: *mut u8, size: usize, free_type: u32) -> i32;
+        }
+    }
+
+    #[cfg(all(windows, not(miri)))]
+    pub(super) fn map_segment() -> *mut u8 {
+        // SAFETY: reserving and committing fresh pages has no preconditions; they read as zero.
+        unsafe {
+            win::VirtualAlloc(
+                std::ptr::null_mut(),
+                SEGMENT_SIZE,
+                win::MEM_RESERVE | win::MEM_COMMIT,
+                win::PAGE_READWRITE,
+            )
+        }
+    }
+
+    /// # Safety
+    /// `p` must come from [`map_segment`] and nothing may use it afterwards.
+    #[cfg(all(windows, not(miri)))]
+    pub(super) unsafe fn unmap_segment(p: *mut u8) {
+        win::VirtualFree(p, 0, win::MEM_RELEASE);
+    }
+
+    // Elsewhere (and under Miri, which models the global allocator but not every mapping
+    // call), segments come from the global allocator.
+    #[cfg(any(miri, not(any(unix, windows))))]
+    fn layout() -> std::alloc::Layout {
+        std::alloc::Layout::from_size_align(SEGMENT_SIZE, 4096).unwrap()
+    }
+
+    #[cfg(any(miri, not(any(unix, windows))))]
+    pub(super) fn map_segment() -> *mut u8 {
+        // SAFETY: the layout has nonzero size.
+        unsafe { std::alloc::alloc_zeroed(layout()) }
+    }
+
+    /// # Safety
+    /// `p` must come from [`map_segment`] and nothing may use it afterwards.
+    #[cfg(any(miri, not(any(unix, windows))))]
+    pub(super) unsafe fn unmap_segment(p: *mut u8) {
+        std::alloc::dealloc(p, layout());
+    }
 }
 
 /// Global page pools.
@@ -183,16 +266,16 @@ static TOTAL_PAGES: AtomicUsize = AtomicUsize::new(0);
 
 impl PagePool {
     fn new_segment(&self) {
-        // SAFETY: the layout has nonzero size.
-        let base = unsafe { alloc_zeroed(segment_layout()) };
+        let base = os::map_segment();
         if base.is_null() {
-            std::alloc::handle_alloc_error(segment_layout());
+            std::alloc::handle_alloc_error(Layout::from_size_align(SEGMENT_SIZE, 4096).unwrap());
         }
         self.segments.lock().push(Segment { base });
         let mut empty = self.empty.lock();
         for i in (0..PAGES_PER_SEGMENT).rev() {
             let page: &'static Page = Box::leak(Box::new(Page {
                 base: unsafe { base.add(i * PAGE_SIZE) },
+                seg: base,
                 slot_size: UnsafeCell::new(0),
                 class: UnsafeCell::new(0),
                 state: AtomicU8::new(PageState::Empty as u8),
@@ -250,6 +333,62 @@ impl PagePool {
         }
     }
 
+    /// Returns wholly empty segments to the OS, keeping about `keep` bytes of empty pages for
+    /// the allocation expected before the next collection (so a program in a steady state does
+    /// not map and unmap segments every cycle). Returns the bytes released. World stopped.
+    pub(crate) fn release_empty_segments(&self, keep: usize) -> usize {
+        let mut empty = self.empty.lock();
+        let empty_bytes = empty.len() * PAGE_SIZE;
+        if empty_bytes < keep + SEGMENT_SIZE {
+            return 0;
+        }
+        // Empty pages per segment, in order of first appearance: the bottom of the stack holds
+        // the pages unused the longest, so their segments go first.
+        let mut order: Vec<*mut u8> = Vec::new();
+        let mut counts: std::collections::HashMap<*mut u8, usize> = std::collections::HashMap::new();
+        for p in empty.iter() {
+            let n = counts.entry(p.seg).or_insert(0);
+            if *n == 0 {
+                order.push(p.seg);
+            }
+            *n += 1;
+        }
+        let mut excess = empty_bytes - keep;
+        let mut doomed: std::collections::HashSet<*mut u8> = std::collections::HashSet::new();
+        for seg in order {
+            if excess < SEGMENT_SIZE {
+                break;
+            }
+            if counts[&seg] == PAGES_PER_SEGMENT {
+                doomed.insert(seg);
+                excess -= SEGMENT_SIZE;
+            }
+        }
+        if doomed.is_empty() {
+            return 0;
+        }
+        empty.retain(|&p| {
+            if !doomed.contains(&p.seg) {
+                return true;
+            }
+            // SAFETY: the page was leaked by `new_segment`; an empty page is referenced only by
+            // this list, and no mutator runs.
+            drop(unsafe { Box::from_raw(p as *const Page as *mut Page) });
+            false
+        });
+        drop(empty);
+        self.segments.lock().retain(|s| {
+            if !doomed.contains(&s.base) {
+                return true;
+            }
+            // SAFETY: every page of the segment was empty and has just been forgotten.
+            unsafe { os::unmap_segment(s.base) };
+            false
+        });
+        TOTAL_PAGES.fetch_sub(doomed.len() * PAGES_PER_SEGMENT, Ordering::Relaxed);
+        doomed.len() * SEGMENT_SIZE
+    }
+
     /// Frees unmarked large objects. World stopped.
     pub(crate) fn sweep_large(&self, live_color: u8) {
         let mut large = self.large.lock();
@@ -293,6 +432,15 @@ fn nursery_bytes() -> usize {
         // CATX_GC_NURSERY (bytes) overrides the default; see docs/gc-minor-cost.md.
         std::env::var("CATX_GC_NURSERY").ok().and_then(|v| v.parse().ok()).unwrap_or(4 * 1024 * 1024)
     })
+}
+
+/// Empty pages to keep for `mutators` threads' nurseries when releasing segments.
+pub(crate) fn nursery_reserve(mutators: usize) -> usize {
+    if GENERATIONAL.load(Ordering::Relaxed) {
+        nursery_bytes() * mutators.max(1)
+    } else {
+        0
+    }
 }
 
 /// A thread's allocation state: one current page per size class, plus its young generation:
@@ -394,7 +542,7 @@ impl LocalHeap {
     pub fn alloc(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
         debug_assert!(size >= HEADER_SIZE);
         if size > MAX_SMALL {
-            return self.alloc_large(size, vtable);
+            return self.alloc_large(size, vtable, true);
         }
         let class = size_class_of(size);
         let slot_size = SIZE_CLASSES[class];
@@ -420,6 +568,21 @@ impl LocalHeap {
         let h = slot as *mut Header;
         unsafe { Header::init(h, vtable, self.owner, POOL.live_color.load(Ordering::Relaxed), self.young_alloc) };
         h
+    }
+
+    /// As [`LocalHeap::alloc`], but a large object's bytes after the header are left
+    /// uninitialized (small ones are still zeroed), saving a pass over memory the caller is about
+    /// to overwrite anyway.
+    ///
+    /// # Safety
+    /// The caller must initialize every byte of the object after the header before the thread's
+    /// next safepoint, and must not read any byte before writing it.
+    #[inline]
+    pub unsafe fn alloc_uninit(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
+        if size > MAX_SMALL {
+            return self.alloc_large(size, vtable, false);
+        }
+        self.alloc(size, vtable)
     }
 
     #[cold]
@@ -484,9 +647,17 @@ impl LocalHeap {
     }
 
     #[cold]
-    fn alloc_large(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
+    fn alloc_large(&mut self, size: usize, vtable: *const crate::GcVTable, zeroed: bool) -> *mut Header {
         let layout = Layout::from_size_align((size + 15) & !15, 16).unwrap();
-        let p = unsafe { alloc_zeroed(layout) };
+        // Uninitialized memory spares the system allocator from clearing reused memory (on
+        // macOS, an madvise call per allocation).
+        let p = unsafe {
+            if zeroed {
+                alloc_zeroed(layout)
+            } else {
+                alloc(layout)
+            }
+        };
         if p.is_null() {
             std::alloc::handle_alloc_error(layout);
         }
@@ -501,13 +672,33 @@ impl LocalHeap {
         h
     }
 
+    /// Addresses of the young large objects that are minor-marked, sorted. Called after a minor
+    /// collection has marked from the roots alone: these are the ones the roots reach directly.
+    pub(crate) fn marked_young_large(&self) -> Vec<usize> {
+        let mut v: Vec<usize> = self
+            .young_large
+            .iter()
+            .filter(|o| unsafe { &*(o.ptr as *const Header) }.meta_relaxed() & MINOR_MARK_BIT != 0)
+            .map(|o| o.ptr as usize)
+            .collect();
+        v.sort_unstable();
+        v
+    }
+
     /// Minor collection, part 2: with every young object reachable from the thread's roots and
     /// remembered set minor-marked, frees the rest and tenures the survivors. Returns (bytes
     /// freed, bytes promoted).
     ///
+    /// Large survivors in `keep_young` (sorted addresses) stay young instead: the collector found
+    /// them referenced only by roots, never by a heap object. A heap object that comes to
+    /// reference one later is either young or goes through the write barrier, so the next minor
+    /// collection finds that reference too. This way a large temporary that was live only in a
+    /// register when the collection ran (the previous string in `s = s + x`) is freed by the next
+    /// minor collection instead of being promoted to wait for a major one.
+    ///
     /// # Safety
     /// Called by the owning thread at a safepoint, after marking.
-    pub(crate) unsafe fn sweep_young(&mut self) -> (usize, usize) {
+    pub(crate) unsafe fn sweep_young(&mut self, keep_young: &[usize]) -> (usize, usize) {
         let tid = self.owner;
         let (mut freed, mut promoted) = (0, 0);
         // Pages filled since the last minor collection.
@@ -542,13 +733,19 @@ impl LocalHeap {
             }
         }
         // Large objects.
-        let mut large = POOL.large.lock();
+        let mut kept = Vec::new();
+        let mut tenured = Vec::new();
         for obj in std::mem::take(&mut self.young_large) {
             let h = &*(obj.ptr as *const Header);
             if h.meta_relaxed() & MINOR_MARK_BIT != 0 {
-                h.tenure();
-                promoted += obj.layout.size();
-                large.push(obj);
+                if keep_young.binary_search(&(obj.ptr as usize)).is_ok() {
+                    h.clear_minor_mark();
+                    kept.push(obj);
+                } else {
+                    h.tenure();
+                    promoted += obj.layout.size();
+                    tenured.push(obj);
+                }
             } else {
                 if let Some(fin) = (*h.vtable()).finalize {
                     fin(obj.ptr as *mut Header);
@@ -557,7 +754,10 @@ impl LocalHeap {
                 freed += obj.layout.size();
             }
         }
-        drop(large);
+        self.young_large = kept;
+        if !tenured.is_empty() {
+            POOL.large.lock().append(&mut tenured);
+        }
         for &o in &self.remset {
             (*o).clear_remembered();
         }

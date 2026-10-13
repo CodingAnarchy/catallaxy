@@ -1,0 +1,3 @@
+# expect: E0604
+d: Deque[Int] = Deque.new()
+t = spawn { d.length }

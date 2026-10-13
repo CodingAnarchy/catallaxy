@@ -451,7 +451,7 @@ impl Checker {
                 }
                 let mut d = Diag::error("E0213", format!("unknown type `{}`", name), span);
                 if let Some(s) = self.suggest_type(name) {
-                    d = d.fix(format!("did you mean `{s}`?"), path.last().unwrap().span, s);
+                    d = d.suggest(format!("did you mean `{s}`?"), path.last().unwrap().span, s);
                 }
                 self.emit(d);
                 return self.types.error;
