@@ -129,11 +129,24 @@ impl ListObj {
     /// # Safety
     /// `p` must point to freshly allocated, unpublished list memory.
     pub(crate) unsafe fn init(p: *mut ListObj, items: Vec<Value>) {
-        let buf = WordBuf::alloc(items.capacity(), Value::NIL.0);
-        for (s, v) in WordBuf::slots(buf).iter().zip(&items) {
-            s.store(v.0, Ordering::Relaxed);
-        }
-        std::ptr::addr_of_mut!((*p).len).write(AtomicUsize::new(items.len()));
+        let len = items.len();
+        // `Value` is a transparent `u64`, so the vector's allocation is reused as is.
+        let mut items = std::mem::ManuallyDrop::new(items);
+        let words = Vec::from_raw_parts(items.as_mut_ptr() as *mut u64, len, items.capacity());
+        Self::init_buf(p, WordBuf::from_vec(words, Value::NIL.0), len);
+    }
+
+    /// As [`ListObj::init`], copying `items` into a buffer of `cap` (at least `items.len()`).
+    ///
+    /// # Safety
+    /// As for [`ListObj::init`].
+    pub(crate) unsafe fn init_from_slice(p: *mut ListObj, items: &[Value], cap: usize) {
+        let buf = WordBuf::alloc_from(cap.max(items.len()), items.iter().map(|v| v.0), Value::NIL.0);
+        Self::init_buf(p, buf, items.len());
+    }
+
+    unsafe fn init_buf(p: *mut ListObj, buf: *mut WordBuf, len: usize) {
+        std::ptr::addr_of_mut!((*p).len).write(AtomicUsize::new(len));
         std::ptr::addr_of_mut!((*p).buf).write(AtomicPtr::new(buf));
     }
 
@@ -230,11 +243,7 @@ impl ListObj {
         let old_len = self.len.load(Ordering::Relaxed);
         let n = items.len();
         if n > self.capacity() {
-            let buf = WordBuf::alloc(n.max(4), Value::NIL.0);
-            let slots = WordBuf::slots(buf);
-            for (s, v) in slots.iter().zip(items) {
-                s.store(v.0, Ordering::Relaxed);
-            }
+            let buf = WordBuf::alloc_from(n.max(4), items.iter().map(|v| v.0), Value::NIL.0);
             self.swap_buf(buf, access);
             self.len.store(n, Ordering::Release);
             return;
@@ -268,11 +277,8 @@ impl ListObj {
     unsafe fn grow(&self, need: usize, access: Access) {
         let n = self.len.load(Ordering::Relaxed);
         let cap = need.max(self.capacity() * 2).max(4);
-        let buf = WordBuf::alloc(cap, Value::NIL.0);
-        let new = WordBuf::slots(buf);
-        for (d, s) in new.iter().zip(&self.slots()[..n]) {
-            d.store(s.load(Ordering::Relaxed), Ordering::Relaxed);
-        }
+        let old = &self.slots()[..n];
+        let buf = WordBuf::alloc_from(cap, old.iter().map(|s| s.load(Ordering::Relaxed)), Value::NIL.0);
         self.swap_buf(buf, access);
     }
 

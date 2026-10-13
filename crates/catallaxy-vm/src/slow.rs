@@ -282,7 +282,7 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
             ObjKind::List => {
                 let items = ownership::read_list(&vm.m, x)?.to_vec();
                 let (a, b) = range_bounds(i, items.len())?;
-                return Ok(vm.m.alloc_list(items[a..b].to_vec()));
+                return Ok(vm.m.alloc_list_from_slice(&items[a..b], b - a));
             }
             ObjKind::Str => {
                 let s = unsafe { as_str_obj(x) }.as_str();

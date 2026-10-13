@@ -1147,11 +1147,8 @@ impl Vm {
                 // ---- collections ----
                 Op::NewList => {
                     let (b, n) = (b_of(w), c_of(w));
-                    let mut items = Vec::with_capacity(n.max(4));
-                    for i in 0..n {
-                        items.push(r!(b + i));
-                    }
-                    let v = self.m.alloc_list(items);
+                    let items = unsafe { std::slice::from_raw_parts(regs.add(b), n) };
+                    let v = self.m.alloc_list_from_slice(items, n.max(4));
                     set!(a, v);
                 }
                 Op::NewDict => {

@@ -89,6 +89,57 @@ fn n(i: usize) -> usize {
 }
 
 #[test]
+fn lists_built_from_vecs_and_slices() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let strs: Vec<Value> = (0..5).map(|i| h.m.alloc_str(&format!("v{i}"))).collect();
+    // A vector with spare capacity: its allocation becomes the list's buffer.
+    let mut items = Vec::with_capacity(9);
+    items.extend_from_slice(&strs);
+    let a = h.m.alloc_list(items);
+    let ha = h.m.root(a);
+    // A vector with no spare capacity, an empty one with capacity, and one with none.
+    let b = h.m.alloc_list(strs.clone());
+    let hb = h.m.root(b);
+    let c = h.m.alloc_list(Vec::with_capacity(3));
+    let hc = h.m.root(c);
+    let d = h.m.alloc_list(Vec::new());
+    let hd = h.m.root(d);
+    // Copies of a slice, with and without room to spare.
+    let e = h.m.alloc_list_from_slice(&strs[1..4], 8);
+    let he = h.m.root(e);
+    let f = h.m.alloc_list_from_slice(&[], 0);
+    let hf = h.m.root(f);
+    h.gc();
+    h.gc();
+    let names = |v: Value| -> Vec<String> {
+        unsafe { as_list(v) }.to_vec().iter().map(|&s| str_of(s).unwrap().to_string()).collect()
+    };
+    let (a, b, c, d, e, f) = (h.m.get(ha), h.m.get(hb), h.m.get(hc), h.m.get(hd), h.m.get(he), h.m.get(hf));
+    assert_eq!(names(a), ["v0", "v1", "v2", "v3", "v4"]);
+    assert_eq!(unsafe { as_list(a) }.capacity(), 9);
+    assert_eq!(names(b), ["v0", "v1", "v2", "v3", "v4"]);
+    assert_eq!(unsafe { as_list(c) }.capacity(), 3);
+    assert!(unsafe { as_list(c) }.is_empty() && unsafe { as_list(d) }.is_empty());
+    assert_eq!(names(e), ["v1", "v2", "v3"]);
+    assert_eq!(unsafe { as_list(e) }.capacity(), 8);
+    assert!(unsafe { as_list(f) }.is_empty());
+    // Spare slots are initialized: pushing into them and growing past them works.
+    for l in [a, b, c, d, e, f] {
+        for i in 0..12 {
+            let s = h.m.alloc_str(&format!("p{i}"));
+            unsafe { as_list(l).push(s, Access::Local) };
+        }
+    }
+    h.gc();
+    let a = h.m.get(ha);
+    assert_eq!(names(a).len(), 17);
+    assert_eq!(names(a)[16], "p11");
+    assert_eq!(names(h.m.get(hc)).len(), 12);
+    h.finish();
+}
+
+#[test]
 fn containers_survive_collection() {
     let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut h = Host::new();
