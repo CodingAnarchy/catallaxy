@@ -117,6 +117,7 @@ dependencies = [
  "catallaxy-vm",
  "corosensei",
  "crossbeam-deque",
+ "libc",
  "mio",
  "num-bigint",
  "num-integer",

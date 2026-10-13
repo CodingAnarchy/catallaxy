@@ -111,7 +111,10 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             Ok(Value::from_f64(d.as_secs_f64()))
         },
         "Time.monotonic" => |_, _| Ok(Value::from_f64(START.elapsed().as_secs_f64())),
-        "Time.millis" => |_, _| Ok(Value::small_int(START.elapsed().as_millis() as i64)),
+        "Time.millis" => |vm, _| Ok(vm.m.int(wall_nanos().div_euclid(1_000_000))),
+        "__time_wall_nanos" => |vm, _| Ok(vm.m.int(wall_nanos())),
+        "__time_mono_nanos" => |vm, _| Ok(vm.m.int(START.elapsed().as_nanos() as i64)),
+        "__time_local_offset" => |_, a| Ok(Value::small_int(local_offset(int(a[0])?))),
 
         "Random.seed" => |_, a| {
             let n = int(a[0])?;
@@ -232,7 +235,70 @@ fn check_env_name(name: &str) -> RtResult<()> {
     Ok(())
 }
 
+/// The origin of `Time.monotonic` and `Instant`: the first use of the monotonic clock, which
+/// [`init_clock`] makes the start of the program.
 static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+/// Pins the monotonic clock's origin to now (called while the program loads).
+pub(crate) fn init_clock() {
+    LazyLock::force(&START);
+}
+
+/// Nanoseconds since the Unix epoch on the wall clock (negative before 1970).
+fn wall_nanos() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_nanos() as i64,
+        Err(e) => -(e.duration().as_nanos() as i64),
+    }
+}
+
+/// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's `days_from_civil`).
+#[cfg(any(unix, windows))]
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+/// The OS's local UTC offset in seconds east at `unix` seconds since the epoch (honoring `TZ`
+/// and daylight saving time), or 0 if the OS cannot say. Computed as the difference between the
+/// local civil time and `unix`, so it needs no `tm_gmtoff` (absent on Windows).
+#[cfg(any(unix, windows))]
+fn local_offset(unix: i64) -> i64 {
+    let t = unix as libc::time_t;
+    // SAFETY: `tm` is plain data that the libc calls only write into. `tzset` (which reads `TZ`)
+    // runs once; the runtime never modifies the environment.
+    let tm = unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        #[cfg(unix)]
+        let ok = {
+            extern "C" {
+                fn tzset();
+            }
+            static TZSET: std::sync::Once = std::sync::Once::new();
+            TZSET.call_once(|| tzset());
+            !libc::localtime_r(&t, &mut tm).is_null()
+        };
+        #[cfg(windows)]
+        let ok = libc::localtime_s(&mut tm, &t) == 0;
+        if !ok {
+            return 0;
+        }
+        tm
+    };
+    let days = days_from_civil(tm.tm_year as i64 + 1900, tm.tm_mon as i64 + 1, tm.tm_mday as i64);
+    days * 86400 + tm.tm_hour as i64 * 3600 + tm.tm_min as i64 * 60 + tm.tm_sec as i64 - unix
+}
+
+#[cfg(not(any(unix, windows)))]
+fn local_offset(_unix: i64) -> i64 {
+    0
+}
 
 thread_local! {
     static RNG: Cell<u64> = Cell::new({

@@ -54,6 +54,9 @@ pub fn register_native(name: &str, f: NativeFn) {
 
 /// Looks up a native implementation by name: the standard library, then extensions.
 pub fn lookup(name: &str) -> Option<NativeFn> {
+    // Natives are looked up while the program loads: start the monotonic clock there, so
+    // `Time.monotonic` and `Instant` count from the start of the program.
+    sys::init_clock();
     core::lookup(name)
         .or_else(|| coll::lookup(name))
         .or_else(|| conc::lookup(name))
