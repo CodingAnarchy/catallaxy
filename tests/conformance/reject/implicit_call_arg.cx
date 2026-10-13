@@ -1,0 +1,4 @@
+# expect: E0342
+# Calling an untyped parameter checks the argument types against the function passed.
+fn apply(f, x) { f(x) }
+apply({ |s: String| s.upcase }, 3)

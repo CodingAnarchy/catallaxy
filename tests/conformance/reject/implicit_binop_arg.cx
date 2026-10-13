@@ -1,0 +1,3 @@
+# expect: E0342
+fn inc(x) { x + 1 }
+inc("a")

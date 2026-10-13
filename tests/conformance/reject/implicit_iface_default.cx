@@ -1,0 +1,9 @@
+# expect: E0342
+# Interface default methods resolve statically; an untyped parameter calls by name.
+interface Named {
+  fn name(self) -> String
+  fn greet(self) -> String { "hi #{self.name}" }
+}
+class P { fn name(self) -> String { "p" } }
+fn f(x) { x.greet }
+f(P.new())
