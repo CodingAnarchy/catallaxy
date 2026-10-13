@@ -340,6 +340,17 @@ pages = fs.map { |f| f.join().unwrap() }
   joins is freed with the handle.
 - Keywords are valid method names after `.` and in method declarations (`obj.match(x)`).
 
+### 8.3 Networking
+
+`Net.connect(host, port)` and `Net.listen(host, port)` (port 0 picks a free one; see
+`listener.port`) give `Socket`s and `Listener`s with `read`, `read_line`, `write`, `accept`,
+`set_timeout` and `close`; failures, including timeouts, are `Err` values. A socket operation
+that would block parks the calling fiber, so one OS thread serves thousands of connections:
+sockets are non-blocking and a single reactor thread wakes waiting fibers (or, outside fibers,
+waiting threads). `catx` raises its open-file limit at startup so servers are not capped at the
+OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse` (`status`,
+`headers` with lowercase names, `body`); they run on the I/O pool.
+
 ## 9. Dyn
 
 `Dyn` values come from `Json.parse` and other dynamic sources. Any operation on `Dyn` (`d["k"]`, `d[0]`,

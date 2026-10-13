@@ -1,0 +1,39 @@
+# The HTTP client against a tiny HTTP/1.1 server written with sockets, in a fiber on this thread.
+server = Net.listen("127.0.0.1", 0).unwrap()
+base = "http://127.0.0.1:#{server.port}"
+srv = Fiber.start {
+  served = 0
+  for k in 0...3 {
+    conn = server.accept().unwrap()
+    request = conn.read_line().unwrap() ?? ""
+    length = 0
+    custom = ""
+    loop {
+      h = conn.read_line().unwrap() ?? ""
+      if h == "" { break }
+      parts = h.split(": ")
+      if parts[0].downcase() == "content-length" { length = parts[1].to_i() ?? 0 }
+      if parts[0].downcase() == "x-test" { custom = parts[1] }
+    }
+    body = if length > 0 { conn.read(length).unwrap() } else { "" }
+    words = request.split(" ")
+    status = if words[1] == "/missing" { "404 Not Found" } else { "200 OK" }
+    reply = "#{words[0]} #{words[1]} custom=#{custom} body=#{body}"
+    conn.write("HTTP/1.1 #{status}\r\nContent-Type: text/plain\r\nContent-Length: #{reply.length}\r\nConnection: close\r\n\r\n#{reply}").unwrap()
+    conn.close()
+    served += 1
+  }
+  served
+}
+r = Http.get("#{base}/hello", ["X-Test": "yes"]).unwrap()
+puts([r.status, r.ok(), r.body, r.headers["content-type"] ?? "?"])
+p = Http.post("#{base}/submit", "a=1&b=2").unwrap()
+puts([p.status, p.body])
+m = Http.get("#{base}/missing").unwrap()
+puts([m.status, m.ok()])
+puts(srv.join().unwrap())
+server.close()
+match Http.get("#{base}/gone") {
+  Ok(_) => puts("unexpected response")
+  Err(_) => puts("connection error is a value")
+}

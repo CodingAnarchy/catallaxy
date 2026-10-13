@@ -1,0 +1,78 @@
+# TCP on loopback: an echo server and clients as fibers on one thread.
+server = Net.listen("127.0.0.1", 0).unwrap()
+port = server.port
+handlers: List[Fiber[Int]] = []
+acceptor = Fiber.start {
+  for k in 0...20 {
+    conn = server.accept().unwrap()
+    handlers.push(Fiber.start {
+      lines = 0
+      loop {
+        match conn.read_line().unwrap() {
+          nil => break
+          line => {
+            conn.write("echo #{line}\n").unwrap()
+            lines += 1
+          }
+        }
+      }
+      conn.close()
+      lines
+    })
+  }
+  server.close()
+  20
+}
+clients = (0...20).map { |c|
+  Fiber.start {
+    sock = Net.connect("127.0.0.1", port).unwrap()
+    got: List[String] = []
+    for i in 0...3 {
+      sock.write("c#{c}-#{i}\n").unwrap()
+      got.push(sock.read_line().unwrap() ?? "eof")
+    }
+    sock.close()
+    got.join(",")
+  }
+}
+results = clients.map { |f| f.join().unwrap() }
+puts(results[0])
+puts(results[19])
+puts(results.all { |r| r.split(",").length == 3 })
+puts(acceptor.join().unwrap())
+total = 0
+for h in handlers { total += h.join().unwrap() }
+puts(total)
+
+# A blocking client on another OS thread talks to a fiber server here.
+srv2 = Net.listen("127.0.0.1", 0).unwrap()
+p2 = srv2.port
+t = spawn {
+  s = Net.connect("127.0.0.1", p2).unwrap()
+  s.write("ping\n").unwrap()
+  r = s.read_line().unwrap()
+  s.close()
+  r ?? "none"
+}
+c = srv2.accept().unwrap()
+puts(c.read_line().unwrap())
+c.write("pong\n").unwrap()
+puts(t.join().unwrap())
+
+# End of stream reads as nil; a silent peer runs into the timeout.
+puts(c.read_line().unwrap() == nil)
+c.close()
+silent = Net.connect("127.0.0.1", p2).unwrap()
+quiet = srv2.accept().unwrap()
+quiet.set_timeout(0.05)
+match quiet.read_line() {
+  Ok(v) => puts("unexpected #{v}")
+  Err(e) => puts("read: #{e}")
+}
+silent.close()
+quiet.close()
+srv2.close()
+match Net.connect("127.0.0.1", p2, 1.0) {
+  Ok(_) => puts("unexpected connection")
+  Err(_) => puts("connect refused")
+}

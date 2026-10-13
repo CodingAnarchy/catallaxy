@@ -1,0 +1,5 @@
+[200, true, "GET /hello custom=yes body=", "text/plain"]
+[200, "POST /submit custom= body=a=1&b=2"]
+[404, false]
+3
+connection error is a value

@@ -774,3 +774,51 @@ pub class Json {
   native fn stringify(value: Dyn) -> String
   native fn pretty(value: Dyn) -> String
 }
+
+# ---------------------------------------------------------------------------------------------
+# Networking. A socket operation that would block parks the calling fiber (so one thread can
+# serve thousands of connections) or, outside fibers, blocks the thread.
+
+pub class Net {
+  # Connects to `host:port`; `timeout` (seconds) bounds the connection attempt.
+  native fn connect(host: String, port: Int, timeout: Float? = nil) -> Result[Socket, String]
+  # Listens on `host:port`; port 0 picks a free port (see `Listener.port`).
+  native fn listen(host: String, port: Int) -> Result[Listener, String]
+}
+
+# A TCP connection. Closed by `close`, or when it is garbage.
+pub class Socket {
+  peer: String
+  handle: NativeHandle
+  # Up to `max` bytes as text (invalid UTF-8 is replaced); "" at end of stream.
+  native fn read(self, max: Int = 65536) -> Result[String, String]
+  # The next line without its line ending, or nil at end of stream.
+  native fn read_line(self) -> Result[String?, String]
+  # Writes all of `data`; returns the number of bytes written.
+  native fn write(self, data: String) -> Result[Int, String]
+  native fn close(self)
+  # Makes reads and writes fail with "timed out" after `seconds` (nil: wait forever).
+  native fn set_timeout(self, seconds: Float?)
+}
+
+pub class Listener {
+  port: Int
+  handle: NativeHandle
+  native fn accept(self) -> Result[Socket, String]
+  native fn close(self)
+}
+
+pub class HttpResponse {
+  status: Int
+  headers: Dict[String, String]
+  body: String
+  fn ok(self) -> Bool { self.status >= 200 and self.status < 300 }
+}
+
+# HTTP and HTTPS client requests. They run on the I/O pool, so a fiber waiting on one lets the
+# thread's other fibers run. Non-2xx statuses are responses, not errors.
+pub class Http {
+  native fn get(url: String, headers: Dict[String, String] = [:]) -> Result[HttpResponse, String]
+  native fn post(url: String, body: String, headers: Dict[String, String] = [:]) -> Result[HttpResponse, String]
+}
+

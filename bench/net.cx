@@ -1,0 +1,50 @@
+# N concurrent TCP connections (default 10,000) on loopback, server and clients as fibers on one
+# thread: each client connects, sends three lines and reads the echoes, and every connection is
+# held open until all are.
+n = (Env.get("N") ?? "10000").to_i ?? 10000
+server = Net.listen("127.0.0.1", 0).unwrap()
+port = server.port
+opened: Channel[Int] = Channel.new()
+release: Channel[Int] = Channel.new()
+handlers = (0...n).map { |k|
+  Fiber.start {
+    conn = server.accept().unwrap()
+    count = 0
+    loop {
+      match conn.read_line().unwrap() {
+        nil => break
+        line => {
+          conn.write("#{line}\n").unwrap()
+          count += 1
+        }
+      }
+    }
+    conn.close()
+    count
+  }
+}
+# Connect in waves of 100: a listen backlog is finite (macOS caps it at kern.ipc.somaxconn, 128
+# by default), and a real server never sees ten thousand handshakes in the same instant.
+clients = (0...n).map { |c|
+  if c % 100 == 0 { Fiber.yield() }
+  Fiber.start {
+    s = Net.connect("127.0.0.1", port).unwrap()
+    ok = 0
+    for i in 0...3 {
+      s.write("#{c}:#{i}\n").unwrap()
+      if s.read_line().unwrap() == "#{c}:#{i}" { ok += 1 }
+    }
+    opened.send(1)
+    release.recv()               # hold the connection until every client is connected
+    s.close()
+    ok
+  }
+}
+for k in 0...n { opened.recv() }
+puts("all #{n} connections open")
+for k in 0...n { release.send(1) }
+good = 0
+for f in clients { good += f.join().unwrap() }
+lines = 0
+for h in handlers { lines += h.join().unwrap() }
+puts(good == 3 * n and lines == 3 * n)
