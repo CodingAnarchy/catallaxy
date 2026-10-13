@@ -251,6 +251,13 @@ impl Vm {
         unsafe { *self.stack.add(i) = v }
     }
 
+    /// Sets stack slots `lo..hi` to nil, so values left by a popped frame are not roots.
+    fn clear_regs(&mut self, lo: usize, hi: usize) {
+        for i in lo..hi.min(self.stack_cap) {
+            self.set_reg(i, Value::NIL);
+        }
+    }
+
     /// A handle scope for native code: values rooted in it survive collections triggered by
     /// calls back into the VM, and are released when the scope is dropped.
     pub fn handle_scope(&mut self) -> catallaxy_runtime::HandleScope<'static> {
@@ -353,6 +360,7 @@ impl Vm {
                     self.unwind_to(idx + 1);
                     if kind == UNWIND_RETURN {
                         let f = self.rs().frames.pop().unwrap();
+                        self.clear_regs(f.base, f.base + f.func.nregs);
                         self.release_locks();
                         if idx == stop {
                             return Ok(value);
@@ -381,6 +389,12 @@ impl Vm {
 
     /// Pops frames down to `depth`, releasing locks they held.
     fn unwind_to(&mut self, depth: usize) {
+        if let Some(f) = self.rs().frames.get(depth) {
+            // The popped frames' registers would otherwise stay reachable from the scan of a
+            // lower frame's register window (see `return_value!`).
+            let (lo, hi) = (f.base, self.stack_top());
+            self.clear_regs(lo, hi);
+        }
         self.rs().frames.truncate(depth);
         self.release_locks();
     }
@@ -516,9 +530,17 @@ impl Vm {
             }};
         }
         // Pops the current frame (its return slot is already in `fr`) and resumes the caller.
+        //
+        // The caller's registers above the return slot are cleared: the callee and its callees
+        // left values there, and the collector scans the caller's whole register window, so
+        // they would otherwise keep dead objects alive. The compiler allocates registers like a
+        // stack and a call's register is the first free one, so none of them is live in the
+        // caller (a bytecode callee overwrites them on entry anyway). Slots above the caller's
+        // window are not scanned and are reset by the next frame that covers them.
         macro_rules! return_value {
             ($v:expr) => {{
                 let v: Value = $v;
+                let ret = fr.ret;
                 let frames = frames!();
                 frames.pop();
                 if unsafe { !(*rs).held_locks.is_empty() } {
@@ -527,8 +549,14 @@ impl Vm {
                 if frames!().len() == stop {
                     return Ok(v);
                 }
-                unsafe { *self.stack.add(fr.ret) = v };
                 load_frame!();
+                let end = fr.base + fr.func.nregs;
+                let mut i = ret + 1;
+                while i < end {
+                    unsafe { *self.stack.add(i) = Value::NIL };
+                    i += 1;
+                }
+                unsafe { *self.stack.add(ret) = v };
             }};
         }
         macro_rules! call_native {
