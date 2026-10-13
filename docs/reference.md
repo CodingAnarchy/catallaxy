@@ -30,11 +30,15 @@ program's main body; top-level statements in an imported module run once, when i
 ```
 import geometry                 # binds module `geometry`; use geometry.area(...)
 import geometry.{Point, area}   # binds selected public items directly
+import shapes.geometry as geo   # binds module `shapes.geometry` as `geo`
 import std.json                 # standard library modules live under `std`
 ```
 
 Module paths are resolved relative to the importing file's directory (`a.b` → `a/b.cx`), then the
-standard library. Only `pub` items are visible to importers. Cyclic imports are an error.
+standard library. Only `pub` items are visible to importers. Cyclic imports are an error. A module
+is bound to the last segment of its path unless renamed with `as`; two imports may not bind the
+same name to different modules or items (E0206), so `import a.util` and `import b.util` need an
+`as` on one of them.
 
 Locals assigned in a top-level statement are locals of the main body: functions cannot see them.
 Module-wide state uses:
