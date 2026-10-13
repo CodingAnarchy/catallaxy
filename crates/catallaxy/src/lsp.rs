@@ -4,7 +4,9 @@
 //! buffers see their current text. Each change re-checks the open documents (type checking only,
 //! no bytecode) and publishes their diagnostics. Hover, go to definition and completion compile
 //! the requested document on demand and query the checker's side tables (see
-//! `catallaxy_compiler::query`).
+//! `catallaxy_compiler::query`). References, rename, signature help, inlay hints and symbol lists
+//! use the symbol index and outlines of `catallaxy_compiler::symbols`; references and rename cover
+//! every module of the compilation (the document and the modules it imports).
 
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -13,6 +15,7 @@ use std::str::FromStr;
 use catallaxy_compiler::diag::{Severity, SourceFile};
 use catallaxy_compiler::driver::{compile_path, Compilation, Options, OverlayLoader, PRELUDE};
 use catallaxy_compiler::query::{self, CompletionKind as QK};
+use catallaxy_compiler::symbols::{self, Index, OutlineItem, OutlineKind, Symbol};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types as lt;
 use rustc_hash::FxHashMap;
@@ -47,6 +50,19 @@ fn capabilities() -> lt::ServerCapabilities {
             ..Default::default()
         }),
         document_formatting_provider: if formatting_available() { Some(lt::OneOf::Left(true)) } else { None },
+        references_provider: Some(lt::OneOf::Left(true)),
+        rename_provider: Some(lt::OneOf::Right(lt::RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: Default::default(),
+        })),
+        signature_help_provider: Some(lt::SignatureHelpOptions {
+            trigger_characters: Some(vec!["(".into(), ",".into()]),
+            retrigger_characters: None,
+            work_done_progress_options: Default::default(),
+        }),
+        inlay_hint_provider: Some(lt::OneOf::Left(true)),
+        document_symbol_provider: Some(lt::OneOf::Left(true)),
+        workspace_symbol_provider: Some(lt::OneOf::Left(true)),
         ..Default::default()
     }
 }
@@ -266,11 +282,18 @@ impl Server<'_> {
 
     fn request(&mut self, req: Request) -> Response {
         let id = req.id.clone();
-        let result: Result<Json, String> = match req.method.as_str() {
+        let result: Result<Json, (ErrorCode, String)> = match req.method.as_str() {
             "textDocument/hover" => parse(req.params).map(|p| to_json(self.hover(p))),
             "textDocument/definition" => parse(req.params).map(|p| to_json(self.definition(p))),
             "textDocument/completion" => parse(req.params).map(|p| to_json(self.completion(p))),
             "textDocument/formatting" => parse(req.params).map(|p| to_json(self.formatting(p))),
+            "textDocument/references" => parse(req.params).map(|p| to_json(self.references(p))),
+            "textDocument/prepareRename" => parse(req.params).and_then(|p| failed(self.prepare_rename(p))),
+            "textDocument/rename" => parse(req.params).and_then(|p| failed(self.rename(p))),
+            "textDocument/signatureHelp" => parse(req.params).map(|p| to_json(self.signature_help(p))),
+            "textDocument/inlayHint" => parse(req.params).map(|p| to_json(self.inlay_hints(p))),
+            "textDocument/documentSymbol" => parse(req.params).map(|p| to_json(self.document_symbols(p))),
+            "workspace/symbol" => parse(req.params).map(|p| to_json(self.workspace_symbols(p))),
             other => {
                 return Response::new_err(
                     id,
@@ -281,7 +304,7 @@ impl Server<'_> {
         };
         match result {
             Ok(v) => Response::new_ok(id, v),
-            Err(e) => Response::new_err(id, ErrorCode::InvalidParams as i32, e),
+            Err((code, e)) => Response::new_err(id, code as i32, e),
         }
     }
 
@@ -391,6 +414,296 @@ impl Server<'_> {
     }
 }
 
+// ---- navigation: references, rename, signature help, inlay hints, symbols ------------------
+
+/// The symbol under a cursor, with the checked compilation and its index.
+struct AtSymbol {
+    ck: Checked,
+    index: Index,
+    sym: Symbol,
+    /// The occurrence under the cursor.
+    span: catallaxy_compiler::diag::Span,
+}
+
+impl Server<'_> {
+    fn symbol_at(&self, pos: &lt::TextDocumentPositionParams) -> Option<AtSymbol> {
+        let (path, _, off) = self.locate(pos)?;
+        let ck = self.compile(&path, None);
+        let index = Index::build(&ck.comp.ck, &ck.comp.sm);
+        let occ = *index.at(ck.file, off)?;
+        Some(AtSymbol { ck, index, sym: occ.sym, span: occ.span })
+    }
+
+    fn references(&self, p: lt::ReferenceParams) -> Option<Vec<lt::Location>> {
+        let at = self.symbol_at(&p.text_document_position)?;
+        let with_decl = p.context.include_declaration;
+        Some(
+            at.index
+                .refs(at.sym)
+                .filter(|o| with_decl || !o.is_decl)
+                .filter_map(|o| Self::location(&at.ck.comp, o.span))
+                .collect(),
+        )
+    }
+
+    /// Why `at`'s symbol cannot be renamed, if it cannot.
+    fn rename_refusal(at: &AtSymbol) -> Option<String> {
+        let c = &at.ck.comp;
+        if at.index.renamable(&c.ck, at.sym) {
+            return None;
+        }
+        let name = symbols::symbol_name(&c.ck, &c.sm, at.sym).unwrap_or_default();
+        Some(format!("`{name}` is not declared in this program (it is built in or from the prelude)"))
+    }
+
+    fn prepare_rename(&self, p: lt::TextDocumentPositionParams) -> Result<Option<lt::PrepareRenameResponse>, String> {
+        let Some(at) = self.symbol_at(&p) else { return Ok(None) };
+        if let Some(why) = Self::rename_refusal(&at) {
+            return Err(why);
+        }
+        let sf = at.ck.comp.sm.file(at.ck.file);
+        Ok(Some(lt::PrepareRenameResponse::Range(Self::range(sf, at.span.start, at.span.end))))
+    }
+
+    // `WorkspaceEdit::changes` is keyed by `Uri`, whose lazily computed parts are cells.
+    #[allow(clippy::mutable_key_type)]
+    fn rename(&self, p: lt::RenameParams) -> Result<Option<lt::WorkspaceEdit>, String> {
+        let new_name = p.new_name.trim();
+        if !symbols::is_identifier(new_name) {
+            return Err(format!("`{new_name}` is not a valid name"));
+        }
+        let Some(at) = self.symbol_at(&p.text_document_position) else { return Ok(None) };
+        if let Some(why) = Self::rename_refusal(&at) {
+            return Err(why);
+        }
+        let mut changes: std::collections::HashMap<lt::Uri, Vec<lt::TextEdit>> = Default::default();
+        for o in at.index.refs(at.sym) {
+            if let Some(loc) = Self::location(&at.ck.comp, o.span) {
+                changes.entry(loc.uri).or_default().push(lt::TextEdit { range: loc.range, new_text: new_name.into() });
+            }
+        }
+        Ok(Some(lt::WorkspaceEdit { changes: Some(changes), ..Default::default() }))
+    }
+
+    fn signature_help(&self, p: lt::SignatureHelpParams) -> Option<lt::SignatureHelp> {
+        let (path, text, off) = self.locate(&p.text_document_position_params)?;
+        let call = open_call(&text, off as usize)?;
+        // The call as written, else with the argument list (and then every open bracket) closed:
+        // the user is still typing it.
+        let mut found = None;
+        let all = &call.closers;
+        for patch in ["", ")", "nil)", all, &format!("nil{all}")] {
+            let src = (!patch.is_empty()).then(|| format!("{}{patch}{}", &text[..off as usize], &text[off as usize..]));
+            let c = self.compile(&path, src);
+            let Some(m) = query::module_of_file(&c.comp.ck, c.file) else { continue };
+            if let Some(f) = symbols::call_at_paren(&c.comp.ck, m, call.paren as u32) {
+                found = Some(symbols::signature_info(&c.comp.ck, &c.comp.sm, f));
+                break;
+            }
+        }
+        let sig = found?;
+        let active = match &call.named {
+            Some(n) => sig.params.iter().position(|q| &q.name == n),
+            None => Some(call.commas as usize).filter(|&i| i < sig.params.len()),
+        };
+        let utf16 = |b: u32| sig.label[..b as usize].encode_utf16().count() as u32;
+        let parameters = sig
+            .params
+            .iter()
+            .map(|q| lt::ParameterInformation {
+                label: lt::ParameterLabel::LabelOffsets([utf16(q.range.0), utf16(q.range.1)]),
+                documentation: q
+                    .is_block
+                    .then(|| lt::Documentation::String("block parameter: pass a trailing `{ |…| … }`".into()))
+                    .or_else(|| q.has_default.then(|| lt::Documentation::String("optional".into()))),
+            })
+            .collect();
+        Some(lt::SignatureHelp {
+            signatures: vec![lt::SignatureInformation {
+                label: sig.label.clone(),
+                documentation: sig.doc.clone().map(|d| {
+                    lt::Documentation::MarkupContent(lt::MarkupContent { kind: lt::MarkupKind::Markdown, value: d })
+                }),
+                parameters: Some(parameters),
+                active_parameter: active.map(|a| a as u32),
+            }],
+            active_signature: Some(0),
+            active_parameter: active.map(|a| a as u32),
+        })
+    }
+
+    fn inlay_hints(&self, p: lt::InlayHintParams) -> Option<Vec<lt::InlayHint>> {
+        let path = uri_to_path(&p.text_document.uri)?;
+        let c = self.compile(&path, None);
+        let m = query::module_of_file(&c.comp.ck, c.file)?;
+        let sf = c.comp.sm.file(c.file);
+        let lo = sf.offset_of(p.range.start.line, p.range.start.character);
+        let hi = sf.offset_of(p.range.end.line, p.range.end.character);
+        Some(
+            symbols::inlay_hints(&c.comp.ck, m)
+                .into_iter()
+                .filter(|h| lo <= h.offset && h.offset <= hi)
+                .map(|h| {
+                    let (line, col) = sf.lsp_pos(h.offset);
+                    lt::InlayHint {
+                        position: lt::Position::new(line, col),
+                        label: lt::InlayHintLabel::String(h.label),
+                        kind: Some(lt::InlayHintKind::TYPE),
+                        text_edits: None,
+                        tooltip: None,
+                        padding_left: None,
+                        padding_right: None,
+                        data: None,
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    fn document_symbols(&self, p: lt::DocumentSymbolParams) -> Option<lt::DocumentSymbolResponse> {
+        let path = uri_to_path(&p.text_document.uri)?;
+        let c = self.compile(&path, None);
+        let m = query::module_of_file(&c.comp.ck, c.file)?;
+        let sf = c.comp.sm.file(c.file);
+        let items = symbols::outline(&c.comp.ck, &c.comp.sm, m);
+        Some(lt::DocumentSymbolResponse::Nested(items.into_iter().map(|i| document_symbol(sf, i)).collect()))
+    }
+
+    /// Declarations matching the query in the open documents and the modules they import.
+    fn workspace_symbols(&self, p: lt::WorkspaceSymbolParams) -> Option<lt::WorkspaceSymbolResponse> {
+        let q = p.query.to_lowercase();
+        let mut seen = rustc_hash::FxHashSet::default();
+        let mut out = Vec::new();
+        let paths: Vec<PathBuf> = self.docs.keys().cloned().collect();
+        for path in paths {
+            let c = self.compile(&path, None);
+            for (m, md) in c.comp.ck.mods.iter().enumerate() {
+                if md.is_prelude {
+                    continue;
+                }
+                let mut stack: Vec<(OutlineItem, Option<String>)> =
+                    symbols::outline(&c.comp.ck, &c.comp.sm, m as u32).into_iter().map(|i| (i, None)).collect();
+                while let Some((item, container)) = stack.pop() {
+                    stack.extend(item.children.iter().cloned().map(|ch| (ch, Some(item.name.clone()))));
+                    if !item.name.to_lowercase().contains(&q) {
+                        continue;
+                    }
+                    let Some(loc) = Self::location(&c.comp, item.name_span) else { continue };
+                    if !seen.insert((loc.uri.as_str().to_string(), loc.range.start)) {
+                        continue;
+                    }
+                    out.push(lt::WorkspaceSymbol {
+                        name: item.name,
+                        kind: symbol_kind(item.kind),
+                        tags: None,
+                        container_name: container,
+                        location: lt::OneOf::Left(loc),
+                        data: None,
+                    });
+                }
+            }
+        }
+        Some(lt::WorkspaceSymbolResponse::Nested(out))
+    }
+}
+
+/// An argument list being typed: the position of its `(`, the commas before the cursor, and the
+/// name of a named argument under the cursor (`name: ...`).
+struct OpenCall {
+    paren: usize,
+    commas: u32,
+    named: Option<String>,
+    /// Closing brackets for every bracket open at the cursor, innermost first.
+    closers: String,
+}
+
+/// Finds the innermost unclosed `(` before `off`, skipping strings and comments.
+fn open_call(text: &str, off: usize) -> Option<OpenCall> {
+    let b = text.as_bytes();
+    let off = off.min(b.len());
+    // (bracket, position, commas, start of the current argument)
+    let mut stack: Vec<(u8, usize, u32, usize)> = Vec::new();
+    let mut i = 0;
+    while i < off {
+        match b[i] {
+            q @ (b'"' | b'\'') => {
+                i += 1;
+                while i < off && b[i] != q {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'#' => {
+                while i < off && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            c @ (b'(' | b'[' | b'{') => stack.push((c, i, 0, i + 1)),
+            b')' | b']' | b'}' => {
+                stack.pop();
+            }
+            b',' => {
+                if let Some(top) = stack.last_mut() {
+                    top.2 += 1;
+                    top.3 = i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let &(c, paren, commas, arg_start) = stack.last()?;
+    if c != b'(' {
+        return None;
+    }
+    let arg = text.get(arg_start..off)?.trim_start();
+    let name_len = arg.find(|ch: char| !(ch.is_alphanumeric() || ch == '_')).unwrap_or(arg.len());
+    let rest = arg[name_len..].trim_start();
+    let named = (name_len > 0 && rest.starts_with(':') && !rest.starts_with("::")).then(|| arg[..name_len].to_string());
+    let closers = stack
+        .iter()
+        .rev()
+        .map(|&(c, ..)| match c {
+            b'(' => ')',
+            b'[' => ']',
+            _ => '}',
+        })
+        .collect();
+    Some(OpenCall { paren, commas, named, closers })
+}
+
+fn symbol_kind(k: OutlineKind) -> lt::SymbolKind {
+    match k {
+        OutlineKind::Function => lt::SymbolKind::FUNCTION,
+        OutlineKind::Method => lt::SymbolKind::METHOD,
+        OutlineKind::Class => lt::SymbolKind::CLASS,
+        OutlineKind::Interface => lt::SymbolKind::INTERFACE,
+        OutlineKind::Enum => lt::SymbolKind::ENUM,
+        OutlineKind::Variant => lt::SymbolKind::ENUM_MEMBER,
+        OutlineKind::Field => lt::SymbolKind::FIELD,
+        OutlineKind::Constant => lt::SymbolKind::CONSTANT,
+        OutlineKind::Variable => lt::SymbolKind::VARIABLE,
+        OutlineKind::Extension => lt::SymbolKind::NAMESPACE,
+    }
+}
+
+#[allow(deprecated)] // `DocumentSymbol::deprecated` must still be written.
+fn document_symbol(sf: &SourceFile, i: OutlineItem) -> lt::DocumentSymbol {
+    lt::DocumentSymbol {
+        name: i.name,
+        detail: i.detail,
+        kind: symbol_kind(i.kind),
+        tags: None,
+        deprecated: None,
+        range: Server::range(sf, i.span.start, i.span.end),
+        selection_range: Server::range(sf, i.name_span.start, i.name_span.end),
+        children: if i.children.is_empty() {
+            None
+        } else {
+            Some(i.children.into_iter().map(|c| document_symbol(sf, c)).collect())
+        },
+    }
+}
+
 // ---- formatting hook -----------------------------------------------------------------------
 //
 // FORMATTER HOOK: document formatting delegates to `catallaxy_compiler::fmt::format_source`,
@@ -420,8 +733,13 @@ fn format_document(_text: &str) -> Option<String> {
 
 // ---- helpers -------------------------------------------------------------------------------
 
-fn parse<T: serde::de::DeserializeOwned>(v: Json) -> Result<T, String> {
-    serde_json::from_value(v).map_err(|e| e.to_string())
+fn parse<T: serde::de::DeserializeOwned>(v: Json) -> Result<T, (ErrorCode, String)> {
+    serde_json::from_value(v).map_err(|e| (ErrorCode::InvalidParams, e.to_string()))
+}
+
+/// A handler's refusal (e.g. a symbol that cannot be renamed) as a failed request.
+fn failed<T: serde::Serialize>(r: Result<T, String>) -> Result<Json, (ErrorCode, String)> {
+    r.map(to_json).map_err(|e| (ErrorCode::RequestFailed, e))
 }
 
 fn to_json<T: serde::Serialize>(v: T) -> Json {

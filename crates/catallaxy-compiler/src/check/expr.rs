@@ -1475,7 +1475,23 @@ impl Checker {
                         };
                     }
                 }
-                match self.lookup_name(self.cur_module, name)? {
+                let item = self.lookup_name(self.cur_module, name)?;
+                // Record type and module names used as path prefixes for tooling (hover,
+                // references); values (functions, globals) are recorded where they are checked.
+                let res = match item {
+                    ScopeItem::Class(c) => Some(NameRes::Class(c)),
+                    ScopeItem::Enum(en) => Some(NameRes::Enum(en)),
+                    ScopeItem::Iface(i) => Some(NameRes::Iface(i)),
+                    ScopeItem::Module(m) => Some(NameRes::Module(m)),
+                    ScopeItem::Variant(en, t) => Some(NameRes::Variant(en, t)),
+                    ScopeItem::Fn(_) | ScopeItem::Global(_) => None,
+                };
+                if let Some(r) = res {
+                    if e.id < u32::MAX - 2 {
+                        self.names.insert(e.id, r);
+                    }
+                }
+                match item {
                     ScopeItem::Class(c) => Some(PathRes::Class(c, None)),
                     ScopeItem::Enum(en) => Some(PathRes::Enum(en, None)),
                     ScopeItem::Iface(i) => Some(PathRes::Iface(i)),

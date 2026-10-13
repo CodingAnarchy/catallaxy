@@ -319,7 +319,7 @@ fn with_doc(code: String, doc: &Option<String>) -> String {
 }
 
 /// The function a call or member expression resolves to, if any.
-fn called_fn(ck: &Checker, e: &Expr) -> Option<u32> {
+pub fn called_fn(ck: &Checker, e: &Expr) -> Option<u32> {
     match ck.calls.get(&e.id)? {
         CallRes::Fn { dispatch, .. } => match dispatch {
             Dispatch::Static(f) | Dispatch::Virtual(f, _) => Some(*f),

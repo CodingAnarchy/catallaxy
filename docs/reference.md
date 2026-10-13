@@ -350,6 +350,23 @@ program's line structure; it re-indents with two spaces, normalizes spacing betw
 `{ ... }` block across lines when its line would exceed 100 columns. `--check` lists the files that
 would change and exits with status 1 if there are any. Files with syntax errors are left untouched.
 
+`catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
+unsaved edits. It provides:
+
+- diagnostics (published on open, change and save), hover (types, signatures), go to definition,
+  completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
+- find references and rename (with prepare-rename) for locals, parameters (including named
+  arguments), functions, methods (an override and the method it overrides rename together), fields,
+  classes, enums, variants, interfaces and constants. They cover the document and every module it
+  imports; names from the prelude cannot be renamed;
+- signature help for function, method and constructor calls, showing default values and marking
+  the trailing-block parameter, with the active parameter following commas and named arguments;
+- inlay hints with the inferred types of unannotated variables, `for`/`let`/`if let` bindings and
+  block parameters, and the inferred requirement of each untyped parameter of an implicit-generic
+  function (`fn shout(x)` shows `x: { fn upcase(self) -> _ }`);
+- document symbols (an outline of items, members and top-level variables) and workspace symbols
+  (over the open documents and the modules they import).
+
 `check --json` prints `{"diagnostics": [...]}` where each diagnostic has `code`, `severity`, `message`,
 `file`, `span` (`start`/`end` as `{line, col, offset}`, 1-based lines and columns), `notes`, and `fixes`
 (each a list of `{span, replacement}` edits).
