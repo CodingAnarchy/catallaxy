@@ -1,0 +1,27 @@
+[package]
+name = "jit-experiment"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone: not part of the workspace.
+[workspace]
+
+[dependencies]
+catallaxy-compiler = { path = "../../crates/catallaxy-compiler" }
+catallaxy-vm = { path = "../../crates/catallaxy-vm" }
+catallaxy-runtime = { path = "../../crates/catallaxy-runtime" }
+catallaxy-gc = { path = "../../crates/catallaxy-gc" }
+catallaxy-stdlib = { path = "../../crates/catallaxy-stdlib" }
+cranelift-codegen = "0.136"
+cranelift-frontend = "0.136"
+cranelift-jit = "0.136"
+cranelift-module = "0.136"
+cranelift-native = "0.136"
+
+# Same settings as the workspace release profile, so the in-process interpreter is comparable.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "unwind"
+debug = 1

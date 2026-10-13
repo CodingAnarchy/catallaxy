@@ -1,0 +1,9 @@
+# Each function can leave the JIT's fast path (checked with `call`); on a bail-out the harness
+# reruns the call in the interpreter.
+fn grow(n: Int) -> Int {
+  x = 1
+  for _ in 0...n { x = x * 3 }
+  x
+}
+fn negmod(a: Int) -> Int { a % 7 - a / 7 }
+fn deep(n: Int) -> Int { if n == 0 { 0 } else { grow(n) - grow(n - 1) + deep(n - 1) } }
