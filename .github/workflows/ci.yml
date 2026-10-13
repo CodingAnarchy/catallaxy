@@ -109,7 +109,7 @@ jobs:
         run: |
           for f in tests/conformance/run/*.cx examples/*.cx; do
             start=$(date +%s)
-            timeout 120 $CATX run $f > /tmp/out 2> /tmp/err < /dev/null; code=$?
+            code=0; timeout 120 $CATX run $f > /tmp/out 2> /tmp/err < /dev/null || code=$?
             echo "== $f exit=$code $(( $(date +%s) - start ))s"
             if [ $code -ne 0 ]; then head -c 6000 /tmp/err; fi
           done
