@@ -2,7 +2,8 @@
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use catallaxy_compiler::diag::SourceMap;
 use catallaxy_compiler::driver::{compile_path, FsLoader, Options};
@@ -120,9 +121,14 @@ pub fn cmd_disasm(args: &[String]) -> i32 {
 /// Runs the conformance layout under `dir`:
 /// `run/*.cx` with `.out` files (expected stdout), and `reject/*.cx` whose first line is
 /// `# expect: CODE[, CODE...]`.
+///
+/// Each program gets `CATX_TEST_TIMEOUT` seconds (default 120); one that runs longer is killed
+/// and fails, so a hang names its test instead of stalling the whole suite.
 pub fn cmd_test(args: &[String]) -> i32 {
     let dir = PathBuf::from(args.first().map(|s| s.as_str()).unwrap_or("tests/conformance"));
     let exe = std::env::current_exe().expect("current exe");
+    let limit =
+        Duration::from_secs_f64(std::env::var("CATX_TEST_TIMEOUT").ok().and_then(|s| s.parse().ok()).unwrap_or(120.0));
     let mut files = Vec::new();
     collect(&dir, &mut files);
     files.sort();
@@ -130,36 +136,53 @@ pub fn cmd_test(args: &[String]) -> i32 {
     for f in &files {
         let src = std::fs::read_to_string(f).unwrap_or_default();
         let first = src.lines().next().unwrap_or("");
-        let result = if let Some(codes) = first.strip_prefix("# expect:") {
-            let want: Vec<String> = codes.split(',').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect();
-            let out = Command::new(&exe).args(["check", "--json"]).arg(f).output().expect("run catx");
-            let text = String::from_utf8_lossy(&out.stdout);
-            let missing: Vec<&String> = want.iter().filter(|c| !text.contains(&format!("\"code\":\"{c}\""))).collect();
-            if missing.is_empty() && !out.status.success() {
-                Ok(())
+        let result = 'case: {
+            if let Some(codes) = first.strip_prefix("# expect:") {
+                let want: Vec<String> =
+                    codes.split(',').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect();
+                let mut cmd = Command::new(&exe);
+                cmd.args(["check", "--json"]).arg(f);
+                let out = match output_within(&mut cmd, limit) {
+                    Ok(out) => out,
+                    Err(msg) => break 'case Err(msg),
+                };
+                let text = String::from_utf8_lossy(&out.stdout);
+                let missing: Vec<&String> =
+                    want.iter().filter(|c| !text.contains(&format!("\"code\":\"{c}\""))).collect();
+                if missing.is_empty() && !out.status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("expected {want:?}, got {}", text.trim()))
+                }
             } else {
-                Err(format!("expected {want:?}, got {}", text.trim()))
-            }
-        } else {
-            let expected_out = f.with_extension("out");
-            let want = std::fs::read_to_string(&expected_out).unwrap_or_default();
-            let want_code: i32 =
-                src.lines().find_map(|l| l.strip_prefix("# exit:").map(|c| c.trim().parse().unwrap_or(0))).unwrap_or(0);
-            let input = f.with_extension("in");
-            let mut cmd = Command::new(&exe);
-            cmd.arg("run").arg(f);
-            if input.exists() {
-                cmd.stdin(std::fs::File::open(&input).unwrap());
-            }
-            let out = cmd.output().expect("run catx");
-            let got = String::from_utf8_lossy(&out.stdout).to_string();
-            let code = out.status.code().unwrap_or(-1);
-            if got == want && code == want_code {
-                Ok(())
-            } else if code != want_code {
-                Err(format!("exit code {code} (want {want_code})\n{}", String::from_utf8_lossy(&out.stderr)))
-            } else {
-                Err(format!("output differs:\n--- want\n{want}--- got\n{got}{}", String::from_utf8_lossy(&out.stderr)))
+                let expected_out = f.with_extension("out");
+                let want = std::fs::read_to_string(&expected_out).unwrap_or_default();
+                let want_code: i32 = src
+                    .lines()
+                    .find_map(|l| l.strip_prefix("# exit:").map(|c| c.trim().parse().unwrap_or(0)))
+                    .unwrap_or(0);
+                let input = f.with_extension("in");
+                let mut cmd = Command::new(&exe);
+                cmd.arg("run").arg(f);
+                if input.exists() {
+                    cmd.stdin(std::fs::File::open(&input).unwrap());
+                }
+                let out = match output_within(&mut cmd, limit) {
+                    Ok(out) => out,
+                    Err(msg) => break 'case Err(msg),
+                };
+                let got = String::from_utf8_lossy(&out.stdout).to_string();
+                let code = out.status.code().unwrap_or(-1);
+                if got == want && code == want_code {
+                    Ok(())
+                } else if code != want_code {
+                    Err(format!("exit code {code} (want {want_code})\n{}", String::from_utf8_lossy(&out.stderr)))
+                } else {
+                    Err(format!(
+                        "output differs:\n--- want\n{want}--- got\n{got}{}",
+                        String::from_utf8_lossy(&out.stderr)
+                    ))
+                }
             }
         };
         match result {
@@ -175,6 +198,46 @@ pub fn cmd_test(args: &[String]) -> i32 {
         1
     } else {
         0
+    }
+}
+
+/// Runs `cmd` to completion like [`Command::output`], killing it after `limit`.
+fn output_within(cmd: &mut Command, limit: Duration) -> Result<Output, String> {
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("run catx");
+    // Drain both pipes on their own threads so a chatty child cannot block on a full pipe.
+    let mut stdout = child.stdout.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let out = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        std::io::Read::read_to_end(&mut stdout, &mut b).ok();
+        b
+    });
+    let err = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        std::io::Read::read_to_end(&mut stderr, &mut b).ok();
+        b
+    });
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("wait for catx") {
+            break Some(status);
+        }
+        if start.elapsed() >= limit {
+            child.kill().ok();
+            child.wait().ok();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let (stdout, stderr) = (out.join().unwrap(), err.join().unwrap());
+    match status {
+        Some(status) => Ok(Output { status, stdout, stderr }),
+        None => Err(format!(
+            "timed out after {:?}\n--- stdout\n{}--- stderr\n{}",
+            limit,
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr)
+        )),
     }
 }
 
