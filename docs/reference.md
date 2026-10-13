@@ -30,15 +30,21 @@ program's main body; top-level statements in an imported module run once, when i
 ```
 import geometry                 # binds module `geometry`; use geometry.area(...)
 import geometry.{Point, area}   # binds selected public items directly
-import shapes.geometry as geo   # binds module `shapes.geometry` as `geo`
-import std.json                 # standard library modules live under `std`
+import lib.shapes               # lib/shapes.cx, bound as `shapes`
+import shapes.geometry as geo   # shapes/geometry.cx, bound as `geo`
 ```
 
 Module paths are resolved relative to the importing file's directory (`a.b` → `a/b.cx`), then the
-standard library. Only `pub` items are visible to importers. Cyclic imports are an error. A module
-is bound to the last segment of its path unless renamed with `as`; two imports may not bind the
-same name to different modules or items (E0206), so `import a.util` and `import b.util` need an
-`as` on one of them.
+entry file's directory. A module that cannot be found is error E0204. Only `pub` items are visible to
+importers. Cyclic imports are an error. A module is bound to the last segment of its path unless
+renamed with `as`; two imports may not bind the same name to different modules or items (E0206), so
+`import a.util` and `import b.util` need an `as` on one of them.
+
+The standard library (`docs/stdlib.md`) needs no import: `Json`, `File`, `Regex`, `Time` and the rest
+are in scope in every module, and there are no `std.*` modules to import. `Time.now()` is wall-clock
+time in seconds since the Unix epoch. `Time.monotonic()` (seconds, `Float`) and `Time.millis()`
+(milliseconds, `Int`) count from the start of the program and never go backwards: use them to measure
+durations, not to tell the date.
 
 Locals assigned in a top-level statement are locals of the main body: functions cannot see them.
 Module-wide state uses:
@@ -132,6 +138,8 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
 | 14 | postfix: call `()`, index `[]`, `.field`, `?.field`, `!` (force unwrap), `?` (try), `as?` | left |
 
 - Integer `/` and `%` floor (like Ruby): `-7 / 2 == -4`, `-7 % 2 == 1`. Division by zero panics.
+- Unary minus binds looser than postfix operators, including method calls: `-5.abs + 1` is
+  `-(5.abs) + 1`, which is `-4`. Write `(-5).abs + 1` for `6`.
 - `==` is structural for `Int Float Bool Nil String`, tuples, lists, dicts, sets and enums; identity for
   class instances unless the class defines `==`.
 - `<=>` returns `-1`, `0` or `1`.
@@ -154,7 +162,7 @@ if let Ok(v) = res { ... }                 # pattern form
 while c { ... }
 loop { ... break }                         # `break value` makes `loop` an expression
 for x in xs { ... }                        # any Enumerable, Range, Dict ((k, v) tuples), String (chars)
-for (i, x) in xs.each_with_index() { ... }
+for (x, i) in xs.with_index() { ... }      # element and its position
 break; continue; return expr
 match v { pattern => expr, ... }           # exhaustive
 with lock(shared_obj) { ... }              # lock one shared object for the block
@@ -195,8 +203,20 @@ xs.each { puts(it) }                          # `it` is the sole parameter of a 
 ```
 
 Calls always use parentheses, except that a zero-argument method may be called as `obj.name`
-(`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. `return` inside a
-block or anonymous function returns from that block. Closures capture variables by reference.
+(`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. Closures capture
+variables by reference.
+
+`return` inside a closure block (`{ |x| ... }`, `{ ... }` passed to a call) or an anonymous function
+returns from that block only, like `next` in Ruby, not from the enclosing function. Bodies of `if`,
+`while`, `for`, `loop` and `match` are not closures, so `return` there leaves the function:
+
+```
+fn first_big(xs: List[Int]) -> Int? {
+  xs.each { |x| if x > 10 { return } }    # ends this call of the block; the loop goes on
+  for x in xs { if x > 10 { return x } }  # returns from first_big
+  nil
+}
+```
 
 ### 4.6 Collection literals
 
@@ -206,6 +226,11 @@ block or anonymous function returns from that block. Closures capture variables 
   computed key: `[(host): 1]`.
 - `(1, "a")` is a tuple; `(x,)` a one-element tuple.
 - Dicts and sets iterate in insertion order.
+
+Indexing a `List` or `String` with a range slices it: `xs[1..2]` and `xs[1...3]` are new lists of the
+elements at those positions, `"hello"[1..3]` is `"ell"` (positions count characters). Negative positions
+count from the end (`xs[-2..-1]` is the last two elements), and a range reaching past either end is
+clipped, so a slice never panics: `[1, 2][5..6]` is `[]`.
 
 ## 5. Classes, interfaces, enums, extensions
 
@@ -404,11 +429,22 @@ unsaved edits. It provides:
   block parameters, and the inferred requirement of each untyped parameter of an implicit-generic
   function (`fn shout(x)` shows `x: { fn upcase(self) -> _ }`);
 - document symbols (an outline of items, members and top-level variables) and workspace symbols
-  (over the open documents and the modules they import).
+  (over the open documents and the modules they import);
+- code actions: every fix attached to a diagnostic is offered as a quick fix, and the first
+  applicable one (see `catx fix`) is marked preferred.
+
+`catx fix [--dry-run] paths...` applies the checker's fixes. For each file (directories are walked as
+for `catx fmt`, skipping `reject/`) it applies the first applicable fix of every diagnostic, checks
+again, and repeats until nothing more applies (at most 10 rounds). Fixes that guess (`did you mean`)
+or leave a placeholder (`: Int`, `?? <default>`) are suggestions only and are never applied. Only the
+named files are edited, not the modules they import. A file that was formatted before is formatted
+again afterwards. It prints each fix it applies; `--dry-run` prints them without writing. The exit
+status is 1 if errors remain, 2 if a file could not be read or written.
 
 `check --json` prints `{"diagnostics": [...]}` where each diagnostic has `code`, `severity`, `message`,
 `file`, `span` (`start`/`end` as `{line, col, offset}`, 1-based lines and columns), `notes`, and `fixes`
-(each a list of `{span, replacement}` edits).
+(each with a `message`, `applicable` (false for a suggestion a person must check), and a list of
+`{span, replacement}` `edits`).
 
 ## 11. Embedding and native extensions
 

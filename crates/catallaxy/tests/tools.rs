@@ -485,6 +485,49 @@ fn lsp_signature_help() {
 }
 
 #[test]
+fn lsp_code_actions() {
+    let (mut lsp, caps) = Lsp::init();
+    assert_eq!(caps["codeActionProvider"]["codeActionKinds"], json!(["quickfix"]), "{caps}");
+    let text = "class Point {\n  x: Int\n}\np = Point(1)\nlenght = 3\nputs(lengt)\n";
+    let uri = lsp.open("actions.cx", text);
+    let all = json!({"start": {"line": 0, "character": 0}, "end": {"line": 6, "character": 0}});
+    let r = lsp.request(
+        40,
+        "textDocument/codeAction",
+        json!({"textDocument": {"uri": uri}, "range": all, "context": {"diagnostics": []}}),
+    );
+    let actions = r["result"].as_array().unwrap_or_else(|| panic!("{r}"));
+    let titles: Vec<&str> = actions.iter().map(|a| a["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["call `new`", "did you mean `lenght`?"], "{r}");
+    let new = &actions[0];
+    assert_eq!(new["kind"], "quickfix");
+    assert_eq!(new["isPreferred"], true);
+    assert_eq!(new["diagnostics"][0]["code"], "E0331");
+    let edit = &new["edit"]["changes"][uri.as_str()][0];
+    assert_eq!(edit["newText"], ".new", "{r}");
+    assert_eq!(edit["range"]["start"], json!({"line": 3, "character": 9}), "{r}");
+    // A guess is offered but not preferred.
+    assert!(actions[1]["isPreferred"].is_null(), "{r}");
+    assert_eq!(actions[1]["edit"]["changes"][uri.as_str()][0]["newText"], "lenght", "{r}");
+
+    // Only diagnostics touching the requested range.
+    let line3 = json!({"start": {"line": 3, "character": 0}, "end": {"line": 3, "character": 3}});
+    let r = lsp.request(
+        41,
+        "textDocument/codeAction",
+        json!({"textDocument": {"uri": uri}, "range": line3, "context": {"diagnostics": []}}),
+    );
+    assert_eq!(r["result"].as_array().map(|a| a.len()), Some(0), "{r}");
+    let r = lsp.request(
+        42,
+        "textDocument/codeAction",
+        json!({"textDocument": {"uri": uri}, "range": all, "context": {"diagnostics": [], "only": ["refactor"]}}),
+    );
+    assert_eq!(r["result"].as_array().map(|a| a.len()), Some(0), "{r}");
+    lsp.finish();
+}
+
+#[test]
 fn lsp_inlay_hints() {
     let (mut lsp, caps) = Lsp::init();
     assert_eq!(caps["inlayHintProvider"], true, "{caps}");
@@ -635,5 +678,33 @@ fn fmt_and_check_walk_directories() {
     let (code, _, err) = catx(&["check".as_ref(), dir.as_os_str()]);
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("E0300"), "{err}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn fix_applies_checker_fixes() {
+    let dir = scratch_dir("fix");
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    let fixable = "class P {\n  x: Int\n}\np = P(1)\nputs(p.x)\n";
+    std::fs::write(dir.join("a.cx"), fixable).unwrap();
+    // A type error with no applicable fix stays, and keeps the exit status at 1.
+    std::fs::write(dir.join("sub/b.cx"), "x: Int = \"s\"\n").unwrap();
+
+    let (code, out, err) = catx(&["fix".as_ref(), "--dry-run".as_ref(), dir.as_os_str()]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(out.contains("/a.cx:4:5: call `new` [E0331]"), "{out}");
+    assert!(err.contains("would fix 1 file") && err.contains("1 error is left"), "{err}");
+    assert_eq!(std::fs::read_to_string(dir.join("a.cx")).unwrap(), fixable);
+
+    let (code, out, err) = catx(&["fix".as_ref(), dir.as_os_str()]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert_eq!(std::fs::read_to_string(dir.join("a.cx")).unwrap(), fixable.replace("P(1)", "P.new(1)"));
+    assert_eq!(std::fs::read_to_string(dir.join("sub/b.cx")).unwrap(), "x: Int = \"s\"\n");
+
+    // Nothing left to fix in `a.cx`; once `b.cx` is gone the run is clean.
+    std::fs::remove_file(dir.join("sub/b.cx")).unwrap();
+    let (code, out, err) = catx(&["fix".as_ref(), dir.as_os_str()]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.is_empty() && err.contains("fixed 0 files"), "{out}{err}");
     std::fs::remove_dir_all(&dir).ok();
 }

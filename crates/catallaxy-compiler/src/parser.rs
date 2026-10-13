@@ -105,7 +105,7 @@ impl<'a> Parser<'a> {
             let span = self.span();
             let mut d = Diagnostic::error("E0101", format!("expected `{s}`, found {what}"), span);
             if s == ")" || s == "]" || s == "}" {
-                d = d.fix(format!("insert `{s}`"), span.empty_at(), s);
+                d = d.suggest(format!("insert `{s}`"), span.empty_at(), s);
             }
             self.diags.push(d);
             Err(())
@@ -256,7 +256,7 @@ impl<'a> Parser<'a> {
                 if !self.is_sym(":") {
                     let span = name.span.after();
                     self.diags.push(
-                        Diagnostic::error("E0104", "module variables need a type annotation", name.span).fix(
+                        Diagnostic::error("E0104", "module variables need a type annotation", name.span).suggest(
                             "add a type",
                             span,
                             ": Int",
