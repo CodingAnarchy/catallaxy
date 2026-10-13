@@ -40,6 +40,9 @@ jobs:
         run: CATX_GC_STRESS=1 ./target/release/catx test tests/conformance/run
       - name: Examples
         run: ./target/release/catx test examples
+      - name: Catallaxy formatting
+        if: runner.os == 'Linux'
+        run: ./target/release/catx fmt --check examples tests/conformance
       - name: C ABI example
         if: runner.os != 'Windows'
         run: |

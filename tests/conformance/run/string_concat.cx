@@ -1,0 +1,42 @@
+# Growing strings by concatenation: large intermediate strings live only in locals, some are kept
+# in containers (old and young), and their lengths, characters and contents stay right.
+
+class Holder {
+  last: String = ""
+}
+
+snaps: List[String] = []
+by_len: Dict[Int, String] = [:]
+holder = Holder.new()
+s = ""
+t = ""
+i = 0
+while i < 3000 {
+  s = s + "ab"
+  t += if i % 3 == 0 { "é" } else { "z" }
+  if i % 250 == 0 {
+    snaps.push(s)
+    by_len[t.length] = t
+    holder.last = t
+  }
+  i += 1
+}
+puts("#{s.length} #{s.byte_length} #{t.length} #{t.byte_length}")
+puts("#{s[5999]} #{t[0]} #{t[2999]} #{t[2997]} #{t.slice(2990, 6)}")
+ok = true
+for (snap, k) in snaps.with_index() {
+  if snap.length != 2 * (250 * k + 1) or snap != s.slice(0, snap.length) { ok = false }
+}
+for (n, x) in by_len {
+  if x != t.slice(0, n) { ok = false }
+}
+puts("#{snaps.length} #{by_len.length} #{ok} #{holder.last.length}")
+puts("#{t.index_of("zzé", 2900)!} #{t.rindex_of("é")!}")
+words = ["α", "β", "γ"]
+u = ""
+j = 0
+while j < 1200 {
+  u = "#{u}#{words[j % 3]}-"
+  j += 1
+}
+puts("#{u.length} #{u[2398]} #{u[-2]}")

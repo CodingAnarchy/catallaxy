@@ -40,6 +40,9 @@ pub struct Edit {
 pub struct Fix {
     pub message: String,
     pub edits: Vec<Edit>,
+    /// Whether the edits can be applied without a human looking (`catx fix` applies these). A
+    /// suggestion that guesses (`did you mean`) or leaves a placeholder (`: Int`) is not.
+    pub applicable: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -81,12 +84,20 @@ impl Diagnostic {
         self.notes.push((msg.into(), Some(span)));
         self
     }
+    /// A fix that is safe to apply mechanically.
     pub fn fix(mut self, message: impl Into<String>, span: Span, replacement: impl Into<String>) -> Self {
-        self.fixes.push(Fix { message: message.into(), edits: vec![Edit { span, replacement: replacement.into() }] });
+        let edits = vec![Edit { span, replacement: replacement.into() }];
+        self.fixes.push(Fix { message: message.into(), edits, applicable: true });
         self
     }
     pub fn fix_edits(mut self, message: impl Into<String>, edits: Vec<Edit>) -> Self {
-        self.fixes.push(Fix { message: message.into(), edits });
+        self.fixes.push(Fix { message: message.into(), edits, applicable: true });
+        self
+    }
+    /// A fix for a human to choose: it guesses, or leaves a placeholder to fill in.
+    pub fn suggest(mut self, message: impl Into<String>, span: Span, replacement: impl Into<String>) -> Self {
+        let edits = vec![Edit { span, replacement: replacement.into() }];
+        self.fixes.push(Fix { message: message.into(), edits, applicable: false });
         self
     }
     pub fn is_error(&self) -> bool {
@@ -269,7 +280,8 @@ impl SourceMap {
                 if j > 0 {
                     out.push(',');
                 }
-                let _ = write!(out, "{{\"message\":{},\"edits\":[", json_str(&f.message));
+                let _ =
+                    write!(out, "{{\"message\":{},\"applicable\":{},\"edits\":[", json_str(&f.message), f.applicable);
                 for (k, e) in f.edits.iter().enumerate() {
                     if k > 0 {
                         out.push(',');

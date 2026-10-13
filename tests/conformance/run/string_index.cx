@@ -1,0 +1,49 @@
+# Character indexing and slicing agree with the character list for ASCII strings, short and long
+# non-ASCII strings (long ones use a sparse char index), and strings built by concatenation.
+
+fn check(s: String) -> Int {
+  cs = s.chars
+  n = cs.length
+  assert_eq(s.length, n)
+  bad = 0
+  i = 0
+  while i < n {
+    if s[i] != cs[i] { bad += 1 }
+    if s[i - n] != cs[i] { bad += 1 }
+    i += 1
+  }
+  # Slices at assorted offsets, including ones straddling index strides.
+  for start in [0, 1, 63, 64, 65, 127, 200, n - 1, n] {
+    for len in [0, 1, 2, 64, 130, n] {
+      want = cs.slice(start, len).join()
+      if s.slice(start, len) != want { bad += 1 }
+      if start <= n and s.substring(start, start + len) != want { bad += 1 }
+      if len > 0 and start < n and s[start..(start + len - 1)] != want { bad += 1 }
+    }
+  }
+  bad
+}
+
+ascii = "abcdefghij" * 50
+mixed = "aé€😀" * 120
+cjk = "日本語のテキスト" * 40
+built = ""
+k = 0
+while k < 300 {
+  built = built + (if k % 7 == 0 { "ü" } else { "x" })
+  k += 1
+}
+for s in [ascii, mixed, cjk, built, "héllo", "", "😀"] {
+  puts("#{s.length} #{s.byte_length} bad=#{check(s)}")
+}
+
+# Searching returns character positions.
+puts(mixed.index_of("😀"))
+puts(mixed.index_of("😀", 100))
+puts(mixed.rindex_of("é"))
+puts(cjk.index_of("テ", 250))
+puts(("é" * 300 + "needle").index_of("needle"))
+puts(("é" * 300 + "needle" + "é" * 10).rindex_of("needle"))
+puts(mixed[-1])
+puts(mixed[479])
+puts(mixed[480] == nil)
