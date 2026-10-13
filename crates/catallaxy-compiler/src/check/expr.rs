@@ -105,10 +105,12 @@ impl Checker {
             }
             ExprKind::Str(parts) => {
                 for p in parts {
-                    if let StrPart::Expr(x) = p {
+                    if let StrPart::Expr(x) | StrPart::Fmt(x, ..) = p {
                         let t = self.check_expr(x, None);
                         if self.is_never(t) {
                             self.err("E0304", "this interpolation never produces a value", x.span);
+                        } else if let StrPart::Fmt(_, spec, span) = p {
+                            self.check_format_spec(t, spec, *span);
                         }
                     }
                 }
@@ -274,6 +276,28 @@ impl Checker {
                 self.check_block(body, expected)
             }
             ExprKind::Error => self.types.error,
+        }
+    }
+
+    /// Checks a `#{x:spec}` spec against `x`'s static type. `Dyn`, generic, union and not yet
+    /// inferred types are checked at run time instead.
+    fn check_format_spec(&mut self, t: TyId, spec: &crate::ast::FormatSpec, span: Span) {
+        use catallaxy_vm::fmtspec::ValueKind;
+        let mut r = self.types.shallow_resolve(t);
+        while let Ty::Frozen(inner) = self.types.get(r) {
+            r = self.types.shallow_resolve(*inner);
+        }
+        let kind = if r == self.types.int {
+            ValueKind::Int
+        } else if r == self.types.float {
+            ValueKind::Float
+        } else if matches!(self.types.get(r), Ty::Class(..) | Ty::Enum(..) | Ty::Tuple(_) | Ty::Fn(..)) {
+            ValueKind::Text
+        } else {
+            return;
+        };
+        if let Err(msg) = spec.check(kind, &self.show(t)) {
+            self.err("E0380", format!("format spec does not apply: {msg}"), span);
         }
     }
 

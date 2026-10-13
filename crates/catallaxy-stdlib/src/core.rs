@@ -190,6 +190,11 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "String.center" => |vm, a| pad(vm, a, 0),
         "String.ljust" => |vm, a| pad(vm, a, 1),
+        "String.format" => |vm, a| {
+            let args = crate::coll::list_read(vm, a[1])?.to_vec();
+            let r = catallaxy_runtime::fmtspec::format_template(vm, s(a[0])?, &args)?;
+            Ok(new_str(vm, &r))
+        },
         "String.rjust" => |vm, a| pad(vm, a, 2),
         "String.is_digit" => |_, a| str_all(a, |c| c.is_ascii_digit()),
         "String.is_alpha" => |_, a| str_all(a, |c| c.is_alphabetic()),
@@ -336,8 +341,13 @@ fn hash(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn int_to_s(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    let r = ops::format_int(a[0]);
-    Ok(new_str(vm, &r))
+    match arg(a, 1) {
+        Some(base) if base.is_small_int() && base.as_small_int() != 10 => int_to_s_radix(vm, a),
+        _ => {
+            let r = ops::format_int(a[0]);
+            Ok(new_str(vm, &r))
+        }
+    }
 }
 
 fn int_to_f(_: &mut Vm, a: &[Value]) -> RtResult<Value> {

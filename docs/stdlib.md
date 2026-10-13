@@ -125,7 +125,7 @@ Everything here is available in every module without an import.
 
 ## Int
 
-- `fn to_s(self) -> String`
+- `fn to_s(self, base: Int = 10) -> String`
 - `fn hash(self) -> Int`
 - `fn <=>(self, other: Int) -> Int`
 - `fn to_f(self) -> Float`
@@ -237,6 +237,7 @@ Everything here is available in every module without an import.
 - `fn center(self, width: Int, pad: String = " ") -> String`
 - `fn ljust(self, width: Int, pad: String = " ") -> String`
 - `fn rjust(self, width: Int, pad: String = " ") -> String`
+- `fn format(self, args: List[Dyn]) -> String`
 - `fn is_digit(self) -> Bool`
 - `fn is_alpha(self) -> Bool`
 - `fn is_alnum(self) -> Bool`
