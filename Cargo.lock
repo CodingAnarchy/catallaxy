@@ -90,6 +90,7 @@ name = "catallaxy-gc"
 version = "0.3.0"
 dependencies = [
  "crossbeam-deque",
+ "libc",
  "loom",
  "parking_lot",
  "parking_lot_core",
@@ -111,17 +112,20 @@ dependencies = [
 name = "catallaxy-stdlib"
 version = "0.3.0"
 dependencies = [
+ "base64",
  "catallaxy-gc",
  "catallaxy-runtime",
  "catallaxy-vm",
  "corosensei",
  "crossbeam-deque",
+ "libc",
  "mio",
  "num-bigint",
  "num-integer",
  "num-traits",
  "parking_lot",
  "regex",
+ "ring",
  "rustc-hash",
  "serde_json",
  "ureq",

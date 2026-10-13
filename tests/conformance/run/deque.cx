@@ -1,0 +1,88 @@
+# Deque: a ring buffer with O(1) operations at both ends.
+
+d: Deque[Int] = Deque.new()
+puts(d)
+puts(d.is_empty())
+puts(d.shift() == nil)
+puts(d.pop() == nil)
+d.push(2)
+d.push(3)
+d.unshift(1)
+d.unshift(0)
+puts(d)
+puts("#{d.length} #{d.first()!} #{d.last()!} #{d[0]} #{d[-1]} #{d[2]}")
+puts(d.get(10) == nil)
+puts(d.get(-4)!)
+d[1] = 10
+d[-1] = 30
+puts(d.to_list())
+
+# Wraps around and grows while wrapped; agrees with a List model throughout.
+model: List[Int] = []
+q: Deque[Int] = Deque.new()
+seed = 7
+ok = true
+i = 0
+while i < 5000 {
+  seed = (seed * 1103515245 + 12345) % 2147483648
+  op = seed % 5
+  if op == 0 or op == 1 {
+    q.push(i)
+    model.push(i)
+  } else if op == 2 {
+    q.unshift(i)
+    model.unshift(i)
+  } else if op == 3 {
+    if q.shift() != model.shift() { ok = false }
+  } else {
+    if q.pop() != model.pop() { ok = false }
+  }
+  if q.length != model.length { ok = false }
+  if q.length > 0 and (q[0] != model[0] or q[-1] != model[-1] or q[q.length / 2] != model[model.length / 2]) {
+    ok = false
+  }
+  i += 1
+}
+puts(ok and q.to_list() == model)
+
+# Enumerable, iteration, equality, hashing, dup, from.
+e = Deque.from([3, 1, 2])
+puts(e.map { |x| x * 10 })
+puts(e.select { |x| x > 1 })
+puts(e.sort())
+puts(e.sum())
+puts(e.contains(2))
+total = 0
+for x in e { total += x }
+puts(total)
+f = e.dup()
+f.push(4)
+puts("#{e} #{f} #{e == Deque.from([3, 1, 2])} #{e == f}")
+seen: Set[Deque[Int]] = Set.new()
+seen.add(Deque.from([1, 2]))
+puts(seen.contains(Deque.from([1, 2])))
+puts(Deque.from(1..3))
+e.clear()
+puts("#{e} #{e.length}")
+
+# Popped items are released, so a long-running queue does not retain them.
+w: Deque[String] = Deque.new()
+i = 0
+while i < 20000 {
+  w.push("item #{i}")
+  if w.length > 3 { w.shift() }
+  i += 1
+}
+puts(w)
+
+# Freezing makes it immutable and shareable; JSON writes an array; inspect shows the items.
+s: Deque[String] = Deque.from(["a", "b"])
+fs = freeze(s)
+t = spawn { fs.length + fs[0].length }
+puts(t.join().unwrap())
+puts(Json.stringify(fs))
+puts(inspect([Deque.from(["x"])]))
+r = Deque.from(["a"])
+m = Mutex.new(move r)
+m.lock { |q| q.push("b") }
+puts(m.lock { |q| q.length })

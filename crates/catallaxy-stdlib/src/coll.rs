@@ -86,6 +86,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             })
         },
         "List.[]" => |vm, a| slow::list_get(vm, a[0], a[1]),
+        "__vacant" => |_, _| Ok(Value::NIL),
         "List.[]=" => |vm, a| {
             slow::list_set(vm, a[0], a[1], a[2])?;
             Ok(Value::NIL)

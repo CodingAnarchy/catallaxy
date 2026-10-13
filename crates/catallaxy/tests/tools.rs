@@ -1,4 +1,5 @@
-//! End-to-end tests of `catx lsp`, `catx repl`, `catx fmt` and `catx check`.
+//! End-to-end tests of `catx lsp`, `catx repl`, `catx fmt` and `catx check`, and of `catx run`
+//! under a fixed `TZ`.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -483,6 +484,49 @@ fn lsp_signature_help() {
 }
 
 #[test]
+fn lsp_code_actions() {
+    let (mut lsp, caps) = Lsp::init();
+    assert_eq!(caps["codeActionProvider"]["codeActionKinds"], json!(["quickfix"]), "{caps}");
+    let text = "class Point {\n  x: Int\n}\np = Point(1)\nlenght = 3\nputs(lengt)\n";
+    let uri = lsp.open("actions.cx", text);
+    let all = json!({"start": {"line": 0, "character": 0}, "end": {"line": 6, "character": 0}});
+    let r = lsp.request(
+        40,
+        "textDocument/codeAction",
+        json!({"textDocument": {"uri": uri}, "range": all, "context": {"diagnostics": []}}),
+    );
+    let actions = r["result"].as_array().unwrap_or_else(|| panic!("{r}"));
+    let titles: Vec<&str> = actions.iter().map(|a| a["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["call `new`", "did you mean `lenght`?"], "{r}");
+    let new = &actions[0];
+    assert_eq!(new["kind"], "quickfix");
+    assert_eq!(new["isPreferred"], true);
+    assert_eq!(new["diagnostics"][0]["code"], "E0331");
+    let edit = &new["edit"]["changes"][uri.as_str()][0];
+    assert_eq!(edit["newText"], ".new", "{r}");
+    assert_eq!(edit["range"]["start"], json!({"line": 3, "character": 9}), "{r}");
+    // A guess is offered but not preferred.
+    assert!(actions[1]["isPreferred"].is_null(), "{r}");
+    assert_eq!(actions[1]["edit"]["changes"][uri.as_str()][0]["newText"], "lenght", "{r}");
+
+    // Only diagnostics touching the requested range.
+    let line3 = json!({"start": {"line": 3, "character": 0}, "end": {"line": 3, "character": 3}});
+    let r = lsp.request(
+        41,
+        "textDocument/codeAction",
+        json!({"textDocument": {"uri": uri}, "range": line3, "context": {"diagnostics": []}}),
+    );
+    assert_eq!(r["result"].as_array().map(|a| a.len()), Some(0), "{r}");
+    let r = lsp.request(
+        42,
+        "textDocument/codeAction",
+        json!({"textDocument": {"uri": uri}, "range": all, "context": {"diagnostics": [], "only": ["refactor"]}}),
+    );
+    assert_eq!(r["result"].as_array().map(|a| a.len()), Some(0), "{r}");
+    lsp.finish();
+}
+
+#[test]
 fn lsp_inlay_hints() {
     let (mut lsp, caps) = Lsp::init();
     assert_eq!(caps["inlayHintProvider"], true, "{caps}");
@@ -523,6 +567,38 @@ fn lsp_inlay_hints() {
         json!({"textDocument": {"uri": uri}, "range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 6}}}),
     );
     assert_eq!(r["result"].as_array().map(|a| a.len()), Some(1), "{r}");
+    lsp.finish();
+}
+
+#[test]
+fn lsp_format_spec_interpolation() {
+    let (mut lsp, _) = Lsp::init();
+    let text =
+        "price = 2.5\nputs(\"#{price:>8.2f}\")\nputs(\"#{[1].map { |v| v * 2 }.length:03}\")\nputs(\"#{\"s\":.2f}\")\n";
+    let (uri, _) = file_uri("fmt_spec.cx");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+        "textDocument": {"uri": uri, "languageId": "catallaxy", "version": 1, "text": text}
+    }}));
+    let diags = lsp.wait("publishDiagnostics", |v| v["method"] == "textDocument/publishDiagnostics");
+    let list = diags["params"]["diagnostics"].as_array().unwrap();
+    assert!(list.iter().any(|d| d["code"] == "E0380" && d["range"]["start"]["line"] == 3), "{diags}");
+    assert_eq!(list.len(), 1, "{diags}");
+    // Hover over `price` inside the formatted interpolation.
+    let h = lsp.request(
+        2,
+        "textDocument/hover",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 1, "character": 10}}),
+    );
+    let value = h["result"]["contents"]["value"].as_str().unwrap_or_default();
+    assert!(value.contains("price: Float"), "{h}");
+    // Block parameters inside a formatted interpolation still get inlay hints.
+    let r = lsp.request(
+        3,
+        "textDocument/inlayHint",
+        json!({"textDocument": {"uri": uri}, "range": {"start": {"line": 2, "character": 0}, "end": {"line": 3, "character": 0}}}),
+    );
+    let labels: Vec<&str> = r["result"].as_array().unwrap().iter().filter_map(|h| h["label"].as_str()).collect();
+    assert!(labels.contains(&": Int"), "{r}");
     lsp.finish();
 }
 
@@ -633,5 +709,49 @@ fn fmt_and_check_walk_directories() {
     let (code, _, err) = catx(&["check".as_ref(), dir.as_os_str()]);
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("E0300"), "{err}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn local_offset_follows_tz() {
+    // `TZ=XYZ-5:30` (POSIX and the Windows CRT agree) is a fixed zone 5h30m east of UTC.
+    let dir = scratch_dir("tz");
+    let prog = dir.join("tz.cx");
+    std::fs::write(&prog, "t = DateTime.of(2024, 7, 1, 12)\nputs(t.to_local())\nputs(DateTime.now().offset)\n")
+        .unwrap();
+    let cases = [("XYZ-5:30", "2024-07-01T17:30:00+05:30\n19800\n"), ("XYZ+3", "2024-07-01T09:00:00-03:00\n-10800\n")];
+    for (tz, want) in cases {
+        let out = Command::new(CATX).arg("run").arg(&prog).env("TZ", tz).output().expect("run catx");
+        let got = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+        assert_eq!(got, want, "TZ={tz}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn fix_applies_checker_fixes() {
+    let dir = scratch_dir("fix");
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    let fixable = "class P {\n  x: Int\n}\np = P(1)\nputs(p.x)\n";
+    std::fs::write(dir.join("a.cx"), fixable).unwrap();
+    // A type error with no applicable fix stays, and keeps the exit status at 1.
+    std::fs::write(dir.join("sub/b.cx"), "x: Int = \"s\"\n").unwrap();
+
+    let (code, out, err) = catx(&["fix".as_ref(), "--dry-run".as_ref(), dir.as_os_str()]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(out.contains("/a.cx:4:5: call `new` [E0331]"), "{out}");
+    assert!(err.contains("would fix 1 file") && err.contains("1 error is left"), "{err}");
+    assert_eq!(std::fs::read_to_string(dir.join("a.cx")).unwrap(), fixable);
+
+    let (code, out, err) = catx(&["fix".as_ref(), dir.as_os_str()]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert_eq!(std::fs::read_to_string(dir.join("a.cx")).unwrap(), fixable.replace("P(1)", "P.new(1)"));
+    assert_eq!(std::fs::read_to_string(dir.join("sub/b.cx")).unwrap(), "x: Int = \"s\"\n");
+
+    // Nothing left to fix in `a.cx`; once `b.cx` is gone the run is clean.
+    std::fs::remove_file(dir.join("sub/b.cx")).unwrap();
+    let (code, out, err) = catx(&["fix".as_ref(), dir.as_os_str()]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.is_empty() && err.contains("fixed 0 files"), "{out}{err}");
     std::fs::remove_dir_all(&dir).ok();
 }

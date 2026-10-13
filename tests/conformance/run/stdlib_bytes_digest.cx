@@ -1,0 +1,52 @@
+# Bytes, hex/base64, binary files and digests.
+
+b = Bytes.new([104, 105, 0, 255])
+puts(b)
+puts(b.length)
+puts(b[0])
+puts(b[-1])
+puts(b.get(9))
+puts(b.to_list())
+puts(b.to_hex)
+puts(b.to_base64)
+puts(Bytes.from_hex("68690Aff").unwrap().to_list())
+puts(Bytes.from_hex("abc"))
+puts(Bytes.from_hex("zz"))
+puts(Bytes.from_base64("aGkA/w==").unwrap() == b)
+puts(Bytes.from_base64("!!").is_err())
+puts(b.slice(1, 2).to_list())
+puts((b + "!".to_bytes()).to_hex)
+puts(b.reduce(0) { |acc, x| acc + x })
+puts(b.map { |x| x * 2 })
+
+# Bytes are frozen: they work as dict keys and cross threads.
+seen = [(b): 1]
+puts(seen[Bytes.new([104, 105, 0, 255])])
+t = spawn { b.length + 1 }
+puts(t.join().unwrap())
+
+# Text conversions.
+utf8 = "héllo".to_bytes()
+puts(utf8.length)
+puts(String.from_bytes(utf8).unwrap())
+puts(String.from_bytes(Bytes.new([0xff, 0x41])).is_err())
+puts(String.from_bytes_lossy(Bytes.new([0x41, 0xff, 0x42])) == "A\u{FFFD}B")
+
+# Binary files.
+tmp = Env.get("TMPDIR") ?? Env.get("TEMP") ?? Env.get("TMP") ?? "/tmp"
+path = Path.join(tmp, "catx_bytes_#{Time.millis()}_#{Random.int(0, 1000000)}.bin")
+all = Bytes.new((0...256).to_list())
+File.write_bytes(path, all).unwrap()
+back = File.read_bytes(path).unwrap()
+puts(back == all)
+puts(back.length)
+File.delete(path).unwrap()
+puts(File.read_bytes(path).is_err())
+
+# Digests of text and bytes.
+puts(Digest.md5(""))
+puts(Digest.md5("abc"))
+puts(Digest.sha1("abc"))
+puts(Digest.sha256("abc"))
+puts(Digest.sha256("abc".to_bytes()))
+puts(Digest.sha512(""))

@@ -52,6 +52,21 @@ instead of a global lock.
 
 ## Install
 
+Prebuilt binaries (Linux and macOS, x86_64 and arm64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/CodingAnarchy/catallaxy/main/install.sh | sh
+```
+
+This installs `catx` into `~/.local/bin` after checking the archive's SHA-256. Pass options after
+`sh -s --`: `--version 0.4.0` for a given release (default: the latest), `--prefix /usr/local` to
+install into `/usr/local/bin`, `--with-capi` to also install the C ABI library and `catallaxy.h`
+into `<prefix>/lib` and `<prefix>/include`. For Windows, download the `.zip` from the
+[releases page](https://github.com/CodingAnarchy/catallaxy/releases); every archive there has a
+`.sha256` file, and `SHA256SUMS` lists them all.
+
+With a Rust toolchain:
+
 ```sh
 cargo install catallaxy        # installs the `catx` binary
 ```
@@ -71,6 +86,7 @@ cargo build --release
 catx run file.cx [args...]      run a program
 catx check [--json] paths...    type-check without running (files or directories)
 catx fmt [--check] paths...     format source in place (files or directories)
+catx fix [--dry-run] paths...   apply the checker's fixes (files or directories)
 catx test [dir]                 run a conformance-style test directory (see the reference, §10)
 catx repl                       interactive session
 catx lsp                        language server (stdio)
@@ -81,6 +97,8 @@ For VS Code, [`editors/vscode`](editors/vscode) has an extension with syntax hig
 
 ## Documentation
 
+- [Getting started](docs/getting-started.md) — install, a first program, a two-file project, tests and
+  editor setup.
 - [Language reference](docs/reference.md) — syntax, types and semantics.
 - [Standard library](docs/stdlib.md) — every builtin type, method and function.
 - [Design](docs/design.md) — why the language and runtime look the way they do.

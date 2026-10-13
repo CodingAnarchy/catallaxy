@@ -155,6 +155,7 @@ v1 uses a non-moving, parallel, stop-the-world mark-sweep collector with thread-
 2. All parked threads become mark workers, sharing a work-stealing deque (crossbeam). Roots are split per thread.
 3. Marking flips the mark bit with an atomic `fetch_or`; whoever sets it pushes the object.
 4. Threads resume immediately. Sweeping happens lazily: a page is swept the next time a thread wants to allocate from it.
+5. Any page still unswept is swept at the start of the next collection. At that point every wholly empty segment is known, and the collector returns them to the OS (`munmap`, or `VirtualFree` on Windows). It keeps enough empty pages for the allocation budget until the following collection, so a program in a steady state does not unmap segments only to map them again.
 
 **Key insight for later: thread-local young collection.** The ownership rules guarantee that frozen and shared objects never point to owned objects (freezing is deep, and promotion walks the graph). So a thread's owned young objects are reachable only from that thread. That thread can collect its own nursery without stopping anyone, much like OCaml 5's per-domain minor heaps. This should be the first major GC upgrade after v1, and it makes most garbage free to collect.
 

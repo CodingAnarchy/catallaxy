@@ -144,7 +144,7 @@ impl Checker {
                 let (name, span) = (f.name.clone(), f.span);
                 self.emit(
                     Diag::error("E0230", format!("recursive function `{name}` needs a return type annotation"), span)
-                        .fix("annotate the return type", span.after(), " -> T"),
+                        .suggest("annotate the return type", span.after(), " -> T"),
                 );
                 let err = self.types.error;
                 let r = self.fns[fid as usize].ret;
@@ -188,7 +188,12 @@ impl Checker {
         for (i, p) in f.params.iter().enumerate() {
             let ty = if f.has_untyped_params && decl.params[i].ty.is_none() {
                 let o = self.opens.len() as OpenId;
-                self.opens.push(OpenInfo { param_name: p.name.clone(), reqs: Vec::new(), uppers: Vec::new() });
+                self.opens.push(OpenInfo {
+                    param_name: p.name.clone(),
+                    label: None,
+                    reqs: Vec::new(),
+                    uppers: Vec::new(),
+                });
                 self.types.intern(Ty::Open(o))
             } else {
                 p.ty
