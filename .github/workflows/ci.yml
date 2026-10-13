@@ -105,6 +105,14 @@ jobs:
       - run: sudo sysctl vm.mmap_rnd_bits=28
       - name: Build catx with ThreadSanitizer
         run: cargo build --release --locked -p catallaxy --bin catx --target x86_64-unknown-linux-gnu -Zbuild-std
+      - name: Diagnose (temporary)
+        run: |
+          for f in tests/conformance/run/*.cx examples/*.cx; do
+            start=$(date +%s)
+            timeout 120 $CATX run $f > /tmp/out 2> /tmp/err < /dev/null; code=$?
+            echo "== $f exit=$code $(( $(date +%s) - start ))s"
+            if [ $code -ne 0 ]; then head -c 6000 /tmp/err; fi
+          done
       - name: Conformance suite
         run: $CATX test tests/conformance
       - name: Conformance suite under GC stress
