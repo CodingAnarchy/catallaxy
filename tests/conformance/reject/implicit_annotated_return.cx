@@ -1,0 +1,4 @@
+# expect: E0341
+# The body is checked before the call even when the result type is annotated.
+fn f(x) -> Int { x }
+f("s")

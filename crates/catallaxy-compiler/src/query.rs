@@ -44,7 +44,7 @@ pub fn children(e: &Expr) -> Vec<&Expr> {
         | ExprKind::Error => {}
         ExprKind::Str(parts) => {
             for p in parts {
-                if let StrPart::Expr(x) = p {
+                if let StrPart::Expr(x) | StrPart::Fmt(x, ..) = p {
                     out.push(x);
                 }
             }

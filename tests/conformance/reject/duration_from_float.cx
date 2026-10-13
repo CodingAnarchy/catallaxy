@@ -1,0 +1,3 @@
+# expect: E0300
+# Fractional seconds go through Duration.from_secs_f.
+d = Duration.from_secs(1.5)

@@ -300,7 +300,9 @@ impl Analysis {
             {
                 return false;
             }
-            if matches!(self.tok(a), Tok::Ident(_)) && a > 0 && matches!(self.tok(a - 1), Tok::Kw(Kw::Fn)) {
+            // A method name, including a keyword one: `fn loop(self)`.
+            if matches!(self.tok(a), Tok::Ident(_) | Tok::Kw(_)) && a > 0 && matches!(self.tok(a - 1), Tok::Kw(Kw::Fn))
+            {
                 return false;
             }
             if self.operand_end(a) {
@@ -728,6 +730,12 @@ mod tests {
     fn spacing_and_indentation() {
         let src = "fn add( a:Int,b :Int )->Int{\n      a+b\n}\nx=add(1,2)*-3\n";
         assert_eq!(fmt(src), "fn add(a: Int, b: Int) -> Int {\n  a + b\n}\nx = add(1, 2) * -3\n");
+    }
+
+    #[test]
+    fn keyword_method_names() {
+        let src = "class J {\n  n: Int\n  fn loop(self) -> Int { self.n }\n  fn match(self, k: Int) -> Bool { self.n == k }\n}\n";
+        assert_eq!(fmt(src), src);
     }
 
     #[test]

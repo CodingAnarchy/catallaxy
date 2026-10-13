@@ -1,6 +1,7 @@
 //! Files, time, randomness, environment, JSON, math, and dynamic member access.
 
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 use std::time::Instant;
 
@@ -11,6 +12,7 @@ use catallaxy_runtime::ops;
 use catallaxy_runtime::{intern, panic, ObjKind, RtResult, Value};
 use catallaxy_vm::slow;
 use catallaxy_vm::{NativeFn, Vm};
+use parking_lot::RwLock;
 
 use crate::coll::list_read;
 use crate::*;
@@ -109,7 +111,10 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             Ok(Value::from_f64(d.as_secs_f64()))
         },
         "Time.monotonic" => |_, _| Ok(Value::from_f64(START.elapsed().as_secs_f64())),
-        "Time.millis" => |_, _| Ok(Value::small_int(START.elapsed().as_millis() as i64)),
+        "Time.millis" => |vm, _| Ok(vm.m.int(wall_nanos().div_euclid(1_000_000))),
+        "__time_wall_nanos" => |vm, _| Ok(vm.m.int(wall_nanos())),
+        "__time_mono_nanos" => |vm, _| Ok(vm.m.int(START.elapsed().as_nanos() as i64)),
+        "__time_local_offset" => |_, a| Ok(Value::small_int(local_offset(int(a[0])?))),
 
         "Random.seed" => |_, a| {
             let n = int(a[0])?;
@@ -142,10 +147,42 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
 
         "Env.get" => |vm, a| {
-            Ok(match std::env::var(s(a[0])?) {
-                Ok(v) => new_str(vm, &v),
-                Err(_) => Value::NIL,
+            Ok(match env_get(s(a[0])?) {
+                Some(v) => new_str(vm, &v),
+                None => Value::NIL,
             })
+        },
+        "Env.set" => |_, a| {
+            let (name, value) = (s(a[0])?, s(a[1])?);
+            check_env_name(name)?;
+            if value.contains('\0') {
+                return panic("ArgumentError: environment values cannot contain NUL");
+            }
+            ENV_OVERLAY.write().insert(name.to_string(), Some(value.to_string()));
+            Ok(Value::NIL)
+        },
+        "Env.remove" => |_, a| {
+            let name = s(a[0])?;
+            check_env_name(name)?;
+            ENV_OVERLAY.write().insert(name.to_string(), None);
+            Ok(Value::NIL)
+        },
+        "Env.all" => |vm, _| {
+            let mut all: BTreeMap<String, String> = std::env::vars_os()
+                .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+                .collect();
+            for (k, v) in ENV_OVERLAY.read().iter() {
+                match v {
+                    Some(v) => all.insert(k.clone(), v.clone()),
+                    None => all.remove(k),
+                };
+            }
+            let d = vm.m.alloc_dict(DictTable::new());
+            for (k, v) in all {
+                let (kv, vv) = (new_str(vm, &k), new_str(vm, &v));
+                slow::dict_set(vm, d, kv, vv)?;
+            }
+            Ok(d)
         },
         "Env.cpu_count" => {
             |_, _| Ok(Value::small_int(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as i64))
@@ -154,12 +191,14 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "Json.parse" => json_parse,
         "Json.stringify" => |vm, a| {
             let v = to_json(vm, a[0], 0)?;
-            let text = serde_json::to_string(&v).unwrap_or_default();
+            let mut text = String::new();
+            v.write(&mut text, None);
             Ok(new_str(vm, &text))
         },
         "Json.pretty" => |vm, a| {
             let v = to_json(vm, a[0], 0)?;
-            let text = serde_json::to_string_pretty(&v).unwrap_or_default();
+            let mut text = String::new();
+            v.write(&mut text, Some(0));
             Ok(new_str(vm, &text))
         },
 
@@ -168,7 +207,98 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
     })
 }
 
+/// Variables set or removed by `Env.set` / `Env.remove` (`None`: removed). The process
+/// environment itself is never modified: `std::env::set_var` is unsound while other threads may
+/// read the environment (program threads, the I/O pool, the network reactor, libc's resolver),
+/// and a Catallaxy program cannot rule that out. So the program's environment is this overlay on
+/// top of the inherited one: `Env.get` and `Env.all` read through it and `Process` applies it to
+/// every child. Native code that calls `getenv` itself does not see it.
+static ENV_OVERLAY: LazyLock<RwLock<BTreeMap<String, Option<String>>>> = LazyLock::new(Default::default);
+
+/// A variable as the program sees it (see [`ENV_OVERLAY`]).
+pub(crate) fn env_get(name: &str) -> Option<String> {
+    if let Some(v) = ENV_OVERLAY.read().get(name) {
+        return v.clone();
+    }
+    std::env::var(name).ok()
+}
+
+/// The program's changes to the inherited environment, to apply to a child process.
+pub(crate) fn env_overlay() -> Vec<(String, Option<String>)> {
+    ENV_OVERLAY.read().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+fn check_env_name(name: &str) -> RtResult<()> {
+    if name.is_empty() || name.contains(['=', '\0']) {
+        return panic(format!("ArgumentError: invalid environment variable name {name:?}"));
+    }
+    Ok(())
+}
+
+/// The origin of `Time.monotonic` and `Instant`: the first use of the monotonic clock, which
+/// [`init_clock`] makes the start of the program.
 static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+/// Pins the monotonic clock's origin to now (called while the program loads).
+pub(crate) fn init_clock() {
+    LazyLock::force(&START);
+}
+
+/// Nanoseconds since the Unix epoch on the wall clock (negative before 1970).
+fn wall_nanos() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_nanos() as i64,
+        Err(e) => -(e.duration().as_nanos() as i64),
+    }
+}
+
+/// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's `days_from_civil`).
+#[cfg(any(unix, windows))]
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+/// The OS's local UTC offset in seconds east at `unix` seconds since the epoch (honoring `TZ`
+/// and daylight saving time), or 0 if the OS cannot say. Computed as the difference between the
+/// local civil time and `unix`, so it needs no `tm_gmtoff` (absent on Windows).
+#[cfg(any(unix, windows))]
+fn local_offset(unix: i64) -> i64 {
+    let t = unix as libc::time_t;
+    // SAFETY: `tm` is plain data that the libc calls only write into. `tzset` (which reads `TZ`)
+    // runs once; the runtime never modifies the environment.
+    let tm = unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        #[cfg(unix)]
+        let ok = {
+            extern "C" {
+                fn tzset();
+            }
+            static TZSET: std::sync::Once = std::sync::Once::new();
+            TZSET.call_once(|| tzset());
+            !libc::localtime_r(&t, &mut tm).is_null()
+        };
+        #[cfg(windows)]
+        let ok = libc::localtime_s(&mut tm, &t) == 0;
+        if !ok {
+            return 0;
+        }
+        tm
+    };
+    let days = days_from_civil(tm.tm_year as i64 + 1900, tm.tm_mon as i64 + 1, tm.tm_mday as i64);
+    days * 86400 + tm.tm_hour as i64 * 3600 + tm.tm_min as i64 * 60 + tm.tm_sec as i64 - unix
+}
+
+#[cfg(not(any(unix, windows)))]
+fn local_offset(_unix: i64) -> i64 {
+    0
+}
 
 thread_local! {
     static RNG: Cell<u64> = Cell::new({
@@ -258,27 +388,97 @@ fn from_json(vm: &mut Vm, j: &serde_json::Value) -> RtResult<Value> {
     })
 }
 
-fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<serde_json::Value> {
-    use serde_json::Value as J;
+/// A JSON tree ready to print. Scalars are pre-rendered, so integers of any
+/// size are written as JSON numbers (serde_json's `Value` cannot hold a number
+/// wider than 64 bits without its `arbitrary_precision` feature, which would
+/// also change how the language server's untagged LSP types deserialize).
+/// Object keys are sorted, as serde_json's default map does.
+enum Jv {
+    Scalar(String),
+    Arr(Vec<Jv>),
+    Obj(std::collections::BTreeMap<String, Jv>),
+}
+
+impl Jv {
+    fn string(s: &str) -> Jv {
+        Jv::Scalar(serde_json::to_string(s).unwrap_or_default())
+    }
+
+    /// Writes compact JSON when `indent` is `None`, else pretty JSON in
+    /// serde_json's style (two-space indent, `"key": value`).
+    fn write(&self, out: &mut String, indent: Option<usize>) {
+        fn newline(out: &mut String, level: usize) {
+            out.push('\n');
+            for _ in 0..level {
+                out.push_str("  ");
+            }
+        }
+        let (open, close, len) = match self {
+            Jv::Scalar(t) => {
+                out.push_str(t);
+                return;
+            }
+            Jv::Arr(items) => ('[', ']', items.len()),
+            Jv::Obj(map) => ('{', '}', map.len()),
+        };
+        out.push(open);
+        if len == 0 {
+            out.push(close);
+            return;
+        }
+        let inner = indent.map(|l| l + 1);
+        let item = |out: &mut String, i: usize| {
+            if i > 0 {
+                out.push(',');
+            }
+            if let Some(l) = inner {
+                newline(out, l);
+            }
+        };
+        match self {
+            Jv::Arr(items) => {
+                for (i, x) in items.iter().enumerate() {
+                    item(out, i);
+                    x.write(out, inner);
+                }
+            }
+            Jv::Obj(map) => {
+                for (i, (k, x)) in map.iter().enumerate() {
+                    item(out, i);
+                    out.push_str(&serde_json::to_string(k).unwrap_or_default());
+                    out.push_str(if indent.is_some() { ": " } else { ":" });
+                    x.write(out, inner);
+                }
+            }
+            Jv::Scalar(_) => unreachable!(),
+        }
+        if let Some(l) = indent {
+            newline(out, l);
+        }
+        out.push(close);
+    }
+}
+
+fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
     if depth > 200 {
         return panic("JSON nesting too deep");
     }
     if v.is_nil() {
-        return Ok(J::Null);
+        return Ok(Jv::Scalar("null".into()));
     }
     if v.is_bool() {
-        return Ok(J::Bool(v.is_true()));
+        return Ok(Jv::Scalar(if v.is_true() { "true" } else { "false" }.into()));
     }
     if v.is_small_int() {
-        return Ok(J::from(v.as_small_int()));
+        return Ok(Jv::Scalar(v.as_small_int().to_string()));
     }
     if v.is_float() {
-        let f = v.as_f64();
-        return Ok(serde_json::Number::from_f64(f).map(J::Number).unwrap_or(J::Null));
+        let text = serde_json::Number::from_f64(v.as_f64()).map_or_else(|| "null".into(), |n| n.to_string());
+        return Ok(Jv::Scalar(text));
     }
     match kind_of(v) {
-        ObjKind::BigInt => Ok(J::String(ops::format_int(v))),
-        ObjKind::Str => Ok(J::String(s(v)?.to_string())),
+        ObjKind::BigInt => Ok(Jv::Scalar(ops::format_int(v))),
+        ObjKind::Str => Ok(Jv::string(s(v)?)),
         ObjKind::List | ObjKind::Tuple => {
             let items: Vec<Value> = if kind_of(v) == ObjKind::Tuple {
                 unsafe { as_tuple(v) }.elems().to_vec()
@@ -289,31 +489,38 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<serde_json::Value> {
             for x in items {
                 out.push(to_json(vm, x, depth + 1)?);
             }
-            Ok(J::Array(out))
+            Ok(Jv::Arr(out))
         }
         ObjKind::Dict => {
             let pairs: Vec<(Value, Value)> =
                 catallaxy_runtime::ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| (e.key, e.value)).collect())?;
-            let mut map = serde_json::Map::new();
+            let mut map = std::collections::BTreeMap::new();
             for (k, x) in pairs {
                 let key = to_s(vm, k)?;
                 map.insert(key, to_json(vm, x, depth + 1)?);
             }
-            Ok(J::Object(map))
+            Ok(Jv::Obj(map))
         }
         _ => {
-            // Objects: their fields as an object, or to_s.
+            // Objects: what their `to_json` returns, their fields as an object, or to_s.
             let cls = class_of(v);
-            if cls.kind == ObjKind::Instance && cls.lookup(intern("to_json")).is_none() && cls.variant_tag.is_none() {
+            if cls.kind == ObjKind::Instance && cls.lookup(intern("to_json")).is_some() {
+                let r = vm.call_method_named(v, intern("to_json"), &[])?;
+                vm.extra_roots().push(r);
+                let j = to_json(vm, r, depth + 1);
+                vm.extra_roots().pop();
+                return j;
+            }
+            if cls.kind == ObjKind::Instance && cls.variant_tag.is_none() {
                 let o = unsafe { as_instance(v) };
-                let mut map = serde_json::Map::new();
+                let mut map = std::collections::BTreeMap::new();
                 for i in 0..cls.nfields() {
                     let fv = o.get(i);
                     map.insert(cls.field_names[i].to_string(), to_json(vm, fv, depth + 1)?);
                 }
-                return Ok(J::Object(map));
+                return Ok(Jv::Obj(map));
             }
-            Ok(J::String(to_s(vm, v)?))
+            Ok(Jv::string(&to_s(vm, v)?))
         }
     }
 }

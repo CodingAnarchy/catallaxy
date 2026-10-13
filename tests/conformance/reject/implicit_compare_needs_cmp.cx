@@ -1,0 +1,8 @@
+# expect: E0342
+# Comparisons through an untyped parameter use `<=>`, so a lone `<` method is not enough.
+class V {
+  n: Int
+  fn <(self, o: V) -> Bool { self.n < o.n }
+}
+fn less(a, b) { a < b }
+less(V.new(1), V.new(2))

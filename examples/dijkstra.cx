@@ -80,7 +80,6 @@ class Graph {
   }
 }
 
-
 fn path_to(prev: Dict[String, String], target: String) -> List[String] {
   path = [target]
   cur = target

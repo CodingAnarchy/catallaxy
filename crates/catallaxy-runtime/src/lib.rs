@@ -6,6 +6,7 @@
 pub mod buf;
 pub mod class;
 pub mod dict;
+pub mod fmtspec;
 pub mod mutator;
 pub mod object;
 pub mod ops;

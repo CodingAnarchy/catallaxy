@@ -16,7 +16,8 @@ Source files use the `.cx` extension and are UTF-8. The CLI is `catx`.
 - Integer literals: `42`, `1_000_000`, `0xff`, `0b1010`, `0o17`. Arbitrary precision.
 - Float literals: `3.14`, `1e10`, `2.5e-3`, `1_000.5`. A float literal always contains `.` or an exponent.
 - Strings: `"..."` with escapes `\n \t \r \0 \\ \" \# \u{1F600}` and interpolation `#{expr}`.
-  `'...'` strings are raw except for `\'` and `\\`, and never interpolate.
+  `'...'` strings are raw except for `\'` and `\\`, and never interpolate. `#{expr:spec}` formats
+  the value with a format spec (section 4.7).
 - Statement termination: a newline ends a statement unless (a) the line ends with a binary operator, `,`,
   `=` or `->`, (b) a `(` or `[` is unclosed, or (c) the next non-blank line starts with `.` or `?.`
   (method chains). `;` also separates statements. Newlines are significant inside `{ }`.
@@ -30,11 +31,18 @@ program's main body; top-level statements in an imported module run once, when i
 ```
 import geometry                 # binds module `geometry`; use geometry.area(...)
 import geometry.{Point, area}   # binds selected public items directly
-import std.json                 # standard library modules live under `std`
+import lib.shapes               # lib/shapes.cx, bound as `shapes`
 ```
 
 Module paths are resolved relative to the importing file's directory (`a.b` → `a/b.cx`), then the
-standard library. Only `pub` items are visible to importers. Cyclic imports are an error.
+entry file's directory. A module that cannot be found is error E0204. Only `pub` items are visible to
+importers. Cyclic imports are an error.
+
+The standard library (`docs/stdlib.md`) needs no import: `Json`, `File`, `Regex`, `Time` and the rest
+are in scope in every module, and there are no `std.*` modules to import. `Time.now()` (seconds,
+`Float`) and `Time.millis()` (milliseconds, `Int`) are wall-clock time since the Unix epoch.
+`Time.monotonic()` (seconds, `Float`) and `Instant` count from the start of the program and never go
+backwards: use them to measure durations, not to tell the date (§3.3).
 
 Locals assigned in a top-level statement are locals of the main body: functions cannot see them.
 Module-wide state uses:
@@ -51,9 +59,9 @@ Module-wide state uses:
 | `Int` | arbitrary-precision integer |
 | `Float` | IEEE 754 double |
 | `Bool` | `true` / `false` |
-| `String` | immutable UTF-8 text (always frozen) |
+| `String` | immutable UTF-8 text (always frozen); `s[i]` and slices index characters, in O(1) for ASCII text |
 | `Nil` | the type of `nil` |
-| `List[T]`, `Dict[K, V]`, `Set[T]` | mutable, owned collections |
+| `List[T]`, `Dict[K, V]`, `Set[T]`, `Deque[T]` | mutable, owned collections (`Deque` is a ring buffer: O(1) at both ends) |
 | `(A, B, ...)` | tuples (immutable); `()` is not a type, use `Nil` |
 | `fn(A, B) -> R` | function / closure; `fn(A)` returns `Nil` |
 | `T?` | `T` or `nil` |
@@ -67,7 +75,9 @@ Module-wide state uses:
 | `Mutex[T]`, `Atomic[T]`, `Channel[T]`, `Thread[T]` | concurrency types |
 | `Result[T, E]` | `Ok(T)` or `Err(E)` |
 | `StringBuilder` | mutable string buffer |
+| `Bytes` | immutable byte string (always frozen); build from `List[Int]`, text, hex, base64 or a file |
 | `NativeHandle` | opaque frozen native data (inside `Regex`, `Subprocess`; see §11) |
+| `Duration`, `Instant`, `DateTime` | time spans, monotonic clock readings, dates (frozen; §3.3) |
 
 Generic type arguments use square brackets. Plain types never hold `nil`.
 
@@ -91,6 +101,25 @@ Local variables, block parameters and generic arguments are inferred. Annotation
 Non-`pub` functions may omit result types (inferred from the body; a recursive function needs one) and
 may omit parameter types entirely (implicit generics, §6.3). An empty literal (`[]`, `[:]`, `nil`) takes
 its type from later uses within the same function, or from an annotation: `xs: List[Int] = []`.
+
+### 3.3 Time
+
+The prelude's time types are frozen classes, so they cross threads freely:
+
+- `Duration`: a signed span in nanoseconds. `Duration.from_secs(90)` (also `from_nanos`,
+  `from_micros`, `from_millis`, `from_mins`, `from_hours`, `from_days`, `from_secs_f(1.5)`);
+  `+`, `-`, `* Int`, `/ Int`, comparisons; `as_secs`, `as_millis`, `as_secs_f`, ...; `to_s` gives
+  `1h2m3.5s`, `250ms`.
+- `Instant`: a reading of the monotonic clock. `start = Instant.now()`, `start.elapsed()`,
+  `b.since(a)`, `+`/`-` a `Duration`.
+- `DateTime`: an instant with a fixed UTC offset (seconds east), on the proleptic Gregorian
+  calendar. `DateTime.now()` (at the OS's local offset), `DateTime.now_utc()`,
+  `DateTime.of(2024, 2, 29, 13, 5, offset: 3600)`, `DateTime.from_unix(secs)`,
+  `DateTime.parse("2024-02-29T13:05:00+01:00")` (ISO 8601 / RFC 3339; a `Result`). Fields
+  `year month day hour minute second nanosecond weekday` (0 = Sunday) `yday offset unix`;
+  `+`/`-` a `Duration`, `b.since(a)`; `==` and `<=>` compare instants, whatever the offsets;
+  `to_utc`, `to_local`, `with_offset`; `format("%Y-%m-%d %H:%M")` (`strftime` directives);
+  `to_s` is RFC 3339.
 
 ## 4. Expressions and statements
 
@@ -128,6 +157,8 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
 | 14 | postfix: call `()`, index `[]`, `.field`, `?.field`, `!` (force unwrap), `?` (try), `as?` | left |
 
 - Integer `/` and `%` floor (like Ruby): `-7 / 2 == -4`, `-7 % 2 == 1`. Division by zero panics.
+- Unary minus binds looser than postfix operators, including method calls: `-5.abs + 1` is
+  `-(5.abs) + 1`, which is `-4`. Write `(-5).abs + 1` for `6`.
 - `==` is structural for `Int Float Bool Nil String`, tuples, lists, dicts, sets and enums; identity for
   class instances unless the class defines `==`.
 - `<=>` returns `-1`, `0` or `1`.
@@ -150,7 +181,7 @@ if let Ok(v) = res { ... }                 # pattern form
 while c { ... }
 loop { ... break }                         # `break value` makes `loop` an expression
 for x in xs { ... }                        # any Enumerable, Range, Dict ((k, v) tuples), String (chars)
-for (i, x) in xs.each_with_index() { ... }
+for (x, i) in xs.with_index() { ... }      # element and its position
 break; continue; return expr
 match v { pattern => expr, ... }           # exhaustive
 with lock(shared_obj) { ... }              # lock one shared object for the block
@@ -191,8 +222,20 @@ xs.each { puts(it) }                          # `it` is the sole parameter of a 
 ```
 
 Calls always use parentheses, except that a zero-argument method may be called as `obj.name`
-(`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. `return` inside a
-block or anonymous function returns from that block. Closures capture variables by reference.
+(`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. Closures capture
+variables by reference.
+
+`return` inside a closure block (`{ |x| ... }`, `{ ... }` passed to a call) or an anonymous function
+returns from that block only, like `next` in Ruby, not from the enclosing function. Bodies of `if`,
+`while`, `for`, `loop` and `match` are not closures, so `return` there leaves the function:
+
+```
+fn first_big(xs: List[Int]) -> Int? {
+  xs.each { |x| if x > 10 { return } }    # ends this call of the block; the loop goes on
+  for x in xs { if x > 10 { return x } }  # returns from first_big
+  nil
+}
+```
 
 ### 4.6 Collection literals
 
@@ -202,6 +245,51 @@ block or anonymous function returns from that block. Closures capture variables 
   computed key: `[(host): 1]`.
 - `(1, "a")` is a tuple; `(x,)` a one-element tuple.
 - Dicts and sets iterate in insertion order.
+
+Indexing a `List` or `String` with a range slices it: `xs[1..2]` and `xs[1...3]` are new lists of the
+elements at those positions, `"hello"[1..3]` is `"ell"` (positions count characters). Negative positions
+count from the end (`xs[-2..-1]` is the last two elements), and a range reaching past either end is
+clipped, so a slice never panics: `[1, 2][5..6]` is `[]`.
+
+### 4.7 String formatting
+
+An interpolation may end with `:` and a format spec: `"#{price:>10,.2f}"`. The spec runs to the
+closing `}`; the expression ends at the first `:` outside brackets (no expression continues with a
+top-level `:`, so named arguments, dict literals and typed block parameters are unaffected).
+
+```
+spec      := [[fill] align] [sign] ["#"] ["0"] [width] [grouping] ["." precision] [type]
+align     := "<" left | ">" right | "^" center | "=" pad after the sign
+sign      := "+" always | "-" negatives only (default) | " " space for non-negatives
+grouping  := "," every 3 digits | "_" every 3 decimal or 4 hex/octal/binary digits
+type      := s d x X o b e E f F %
+```
+
+| Type | Applies to | Output |
+|---|---|---|
+| none | anything | `Int` as `d`; `Float` as its `to_s`, or as `f` when a precision is given; others via `to_s` |
+| `s` | anything | `to_s` |
+| `d` | `Int` | decimal |
+| `x` `X` `o` `b` | `Int` | hex (lower/upper), octal, binary; `#` adds `0x`/`0X`/`0o`/`0b` |
+| `f` `F` | `Int`, `Float` | fixed point, precision 6 by default |
+| `e` `E` | `Int`, `Float` | scientific, `1.234500e+03` |
+| `%` | `Int`, `Float` | times 100, fixed point, then `%` |
+
+Numbers align right and text left by default. `0` before the width pads with zeros after the sign
+(`"#{-42:06}"` is `-00042`). For text, the precision is a maximum length in characters. Fill may be
+any character except `{`, `}` and `"`. Examples: `"#{3.14159:.2f}"` is `3.14`, `"#{1234567:,}"` is
+`1,234,567`, `"#{255:#06x}"` is `0x00ff`, `"#{"ab":*^6}"` is `**ab**`, `"#{0.25:.0%}"` is `25%`.
+
+The spec is checked against the expression's static type at compile time: a malformed spec is error
+`E0110`, a spec that does not apply to the type (`.2f` on a `String`, `x` on a `Float`, a precision
+or `+` on an `Int` or `String` respectively) is `E0380`. For `Dyn`, generic and union values the same
+check runs when the string is built, and a mismatch panics with `FormatError`. The spec is parsed
+once by the compiler; at run time formatting is a single instruction.
+
+`template.format(args)` does the same at run time: `"{} is {:>6.1f}".format([name, x])`. `{}` takes
+the next argument's `to_s`, `{:spec}` formats it, `{{` and `}}` are literal braces; a bad spec or an
+argument count mismatch panics with `FormatError`. `Int.to_s(base)` writes an integer in base 2 to
+36.
 
 ## 5. Classes, interfaces, enums, extensions
 
@@ -240,6 +328,14 @@ Any type that has all required methods satisfies an interface and gains its defa
 called directly on the concrete type. If two in-scope interfaces provide the same default method to one
 type, the call is ambiguous and must be resolved by defining the method.
 
+`Enumerable`'s `map`, `select` and the like are eager and return lists. `xs.lazy()` returns a
+`Lazy[T]`, whose adaptors (`map`, `flat_map`, `select`/`filter`, `reject`, `take`, `take_while`,
+`drop`, `drop_while`, `with_index`, `zip`, `uniq`) build a pipeline that runs only when consumed
+(`to_list`, `each`, `first`, `find`, `for`, ...), one element at a time. `take`, `take_while`,
+`first` and `find` stop the source early, so pipelines over infinite sources such as
+`Lazy.iterate(0) { |n| n + 1 }` terminate. `Lazy.new { |emit| ... }` makes a sequence from any
+function that feeds elements to `emit`; each consumption calls it again.
+
 ```
 enum Shape {
   Circle(r: Float)
@@ -269,13 +365,35 @@ A member reached through a bound `T: I` (or `T: I & J`) is seen with `Self` repl
 ### 6.3 Implicit generics
 
 A non-`pub` function may leave parameter types off. The checker infers a structural requirement for each
-such parameter from how the body uses it, and checks every call site against it.
+such parameter from how the body uses it, and checks every call site against it with the rules typed code
+follows. A requirement records the types it is used at: the members the body reads or calls (with the
+argument types), operators on either side, indexing and element assignment, iteration, calls of the
+parameter as a function, and typed places the value flows into (an annotated variable, an argument, the
+declared result). Values derived from a parameter carry requirements too, so `x.name` must have an
+`upcase` below, and passing a value whose `name` is an `Int` is an error at the call.
 
 ```
 fn shout(x) { x.name.upcase }      # x: { fn name(self) -> { fn upcase(self) -> R } }
+fn greet(p) { "hi " + p.name }     # p.name must be a String
 ```
 
-Generics are erased: one compiled body serves every instantiation.
+An argument that does not meet a requirement is E0342 (E0341 when the value flows into a typed place),
+reported at the call with a note at the use in the body. A union argument must meet each requirement with
+every member, and the result is the union of what each member produces. Requirements on a parameter that
+is passed to another implicit-generic function become requirements of the caller's own parameter.
+
+Generics are erased: one compiled body serves every instantiation, and it reaches members by name at
+runtime. So, through an untyped parameter:
+
+- a method must be the argument type's own method or field, or the only extension method of that name
+  for its class; interface default methods and extensions of interfaces (such as `max` and `sort` on
+  lists) need an annotated parameter;
+- arguments are passed by position, so named arguments must follow the parameter order, and an `Int` is
+  not accepted where a `Float` is expected (typed calls convert it; this one cannot);
+- comparisons (`<`, `>`, ...) use the type's `<=>`, and bitwise operators apply to `Int` only;
+- assigning a field (`x.n = v`), `?`, and members of `freeze(x)` are not supported (E0369).
+
+Annotate the parameter to use any of these.
 
 ## 7. Errors
 
@@ -291,7 +409,7 @@ Every type has a capability:
 
 | Capability | Types | Crosses threads |
 | --- | --- | --- |
-| frozen | `Int Float Bool Nil String Range NativeHandle`, `frozen T`, `frozen class` (e.g. `Regex`), enums/tuples of frozen | freely |
+| frozen | `Int Float Bool Nil String Range NativeHandle`, `frozen T`, `frozen class` (e.g. `Regex`, `Bytes`, `DateTime`), enums/tuples of frozen | freely |
 | shareable | `Mutex[T] Atomic[T] Channel[T] Thread[T]`, `shared class` | by reference |
 | owned | everything else (`List`, `Dict`, ordinary classes, closures) | only by `move` |
 
@@ -362,12 +480,13 @@ OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse`
 
 `Dyn` values come from `Json.parse` and other dynamic sources. Any operation on `Dyn` (`d["k"]`, `d[0]`,
 `d.method(...)`, arithmetic) is checked at runtime and yields `Dyn`. Convert with `as?`:
-`name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. JSON objects parse to records that behave exactly like `Dict[String, Dyn]` (`as? Dict[String, Dyn]` succeeds); records parsed with the same keys share a hidden class, so `d.name` is served from a per-site cache. `Json.stringify` writes object keys in sorted order.
+`name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. JSON objects parse to records that behave exactly like `Dict[String, Dyn]` (`as? Dict[String, Dyn]` succeeds); records parsed with the same keys share a hidden class, so `d.name` is served from a per-site cache. `Json.stringify` writes object keys in sorted order and integers of any size (including big integers) as JSON numbers; it writes a class instance as an object of its fields, or as whatever its `to_json` method returns (`Deque` writes an array).
 
 ## 10. Tooling
 
-`catx run file.cx [args]`, `catx check [--json] files...`, `catx fmt [--check] files...`, `catx repl`,
-`catx lsp`, `catx test dir`.
+`catx run file.cx [args]`, `catx check [--json] paths...`, `catx fmt [--check] paths...`, `catx repl`,
+`catx lsp`, `catx test dir`. `check` and `fmt` take files and directories; a directory stands for
+every `*.cx` file under it, skipping hidden directories and `target/`.
 
 `catx test dir` runs every `*.cx` file under `dir` (except those in `lib/` directories, which hold
 modules for tests to import) in its own process. A file whose first line is `# expect: CODE[, CODE...]`
@@ -380,7 +499,9 @@ failed.
 `catx fmt` rewrites files in place (`catx fmt -` filters stdin to stdout). It keeps comments and the
 program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
 `{ ... }` block across lines when its line would exceed 100 columns. `--check` lists the files that
-would change and exits with status 1 if there are any. Files with syntax errors are left untouched.
+would change and exits with status 1 if there are any. Files with syntax errors are left untouched and
+reported (exit status 2). When walking a directory, `fmt` skips `reject/` directories, whose
+conformance programs are meant to be wrong; a file named on the command line is always formatted.
 
 `catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
 unsaved edits. It provides:
@@ -397,11 +518,22 @@ unsaved edits. It provides:
   block parameters, and the inferred requirement of each untyped parameter of an implicit-generic
   function (`fn shout(x)` shows `x: { fn upcase(self) -> _ }`);
 - document symbols (an outline of items, members and top-level variables) and workspace symbols
-  (over the open documents and the modules they import).
+  (over the open documents and the modules they import);
+- code actions: every fix attached to a diagnostic is offered as a quick fix, and the first
+  applicable one (see `catx fix`) is marked preferred.
+
+`catx fix [--dry-run] paths...` applies the checker's fixes. For each file (directories are walked as
+for `catx fmt`, skipping `reject/`) it applies the first applicable fix of every diagnostic, checks
+again, and repeats until nothing more applies (at most 10 rounds). Fixes that guess (`did you mean`)
+or leave a placeholder (`: Int`, `?? <default>`) are suggestions only and are never applied. Only the
+named files are edited, not the modules they import. A file that was formatted before is formatted
+again afterwards. It prints each fix it applies; `--dry-run` prints them without writing. The exit
+status is 1 if errors remain, 2 if a file could not be read or written.
 
 `check --json` prints `{"diagnostics": [...]}` where each diagnostic has `code`, `severity`, `message`,
 `file`, `span` (`start`/`end` as `{line, col, offset}`, 1-based lines and columns), `notes`, and `fixes`
-(each a list of `{span, replacement}` edits).
+(each with a `message`, `applicable` (false for a suggestion a person must check), and a list of
+`{span, replacement}` `edits`).
 
 ## 11. Embedding and native extensions
 
