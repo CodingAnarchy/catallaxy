@@ -388,7 +388,7 @@ OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse`
 
 `Dyn` values come from `Json.parse` and other dynamic sources. Any operation on `Dyn` (`d["k"]`, `d[0]`,
 `d.method(...)`, arithmetic) is checked at runtime and yields `Dyn`. Convert with `as?`:
-`name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. JSON objects parse to records that behave exactly like `Dict[String, Dyn]` (`as? Dict[String, Dyn]` succeeds); records parsed with the same keys share a hidden class, so `d.name` is served from a per-site cache. `Json.stringify` writes object keys in sorted order; it writes a class instance as an object of its fields, or as whatever its `to_json` method returns (`Deque` writes an array).
+`name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. JSON objects parse to records that behave exactly like `Dict[String, Dyn]` (`as? Dict[String, Dyn]` succeeds); records parsed with the same keys share a hidden class, so `d.name` is served from a per-site cache. `Json.stringify` writes object keys in sorted order and integers of any size (including big integers) as JSON numbers; it writes a class instance as an object of its fields, or as whatever its `to_json` method returns (`Deque` writes an array).
 
 ## 10. Tooling
 
