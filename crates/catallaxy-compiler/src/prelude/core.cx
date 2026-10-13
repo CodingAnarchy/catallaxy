@@ -204,12 +204,12 @@ pub interface Enumerable[T] {
     }
     out
   }
-  fn sort_by[K](self, f: fn(T) -> K) -> List[T] {
+  fn sort_by[K: Comparable](self, f: fn(T) -> K) -> List[T] {
     items = self.to_list()
     keys = items.map(f)
     items.sort_by_keys(keys)
   }
-  fn min_by[K](self, f: fn(T) -> K) -> T? {
+  fn min_by[K: Comparable](self, f: fn(T) -> K) -> T? {
     best: T? = nil
     best_key: K? = nil
     self.each { |x|
@@ -221,7 +221,7 @@ pub interface Enumerable[T] {
     }
     best
   }
-  fn max_by[K](self, f: fn(T) -> K) -> T? {
+  fn max_by[K: Comparable](self, f: fn(T) -> K) -> T? {
     best: T? = nil
     best_key: K? = nil
     self.each { |x|

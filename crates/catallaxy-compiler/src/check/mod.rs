@@ -160,6 +160,9 @@ pub struct WellKnown {
     pub enumerable: Option<IfaceId>,
     pub comparable: Option<IfaceId>,
     pub display: Option<IfaceId>,
+    /// The prelude's `compare_values`: the runtime `<=>` of builtin comparable values (tuples
+    /// and lists), the fallback when `<=>` is dispatched dynamically on one of them.
+    pub compare_values: Option<FnId>,
 }
 
 impl Checker {
