@@ -89,6 +89,57 @@ fn n(i: usize) -> usize {
 }
 
 #[test]
+fn lists_built_from_vecs_and_slices() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let strs: Vec<Value> = (0..5).map(|i| h.m.alloc_str(&format!("v{i}"))).collect();
+    // A vector with spare capacity: its allocation becomes the list's buffer.
+    let mut items = Vec::with_capacity(9);
+    items.extend_from_slice(&strs);
+    let a = h.m.alloc_list(items);
+    let ha = h.m.root(a);
+    // A vector with no spare capacity, an empty one with capacity, and one with none.
+    let b = h.m.alloc_list(strs.clone());
+    let hb = h.m.root(b);
+    let c = h.m.alloc_list(Vec::with_capacity(3));
+    let hc = h.m.root(c);
+    let d = h.m.alloc_list(Vec::new());
+    let hd = h.m.root(d);
+    // Copies of a slice, with and without room to spare.
+    let e = h.m.alloc_list_from_slice(&strs[1..4], 8);
+    let he = h.m.root(e);
+    let f = h.m.alloc_list_from_slice(&[], 0);
+    let hf = h.m.root(f);
+    h.gc();
+    h.gc();
+    let names = |v: Value| -> Vec<String> {
+        unsafe { as_list(v) }.to_vec().iter().map(|&s| str_of(s).unwrap().to_string()).collect()
+    };
+    let (a, b, c, d, e, f) = (h.m.get(ha), h.m.get(hb), h.m.get(hc), h.m.get(hd), h.m.get(he), h.m.get(hf));
+    assert_eq!(names(a), ["v0", "v1", "v2", "v3", "v4"]);
+    assert_eq!(unsafe { as_list(a) }.capacity(), 9);
+    assert_eq!(names(b), ["v0", "v1", "v2", "v3", "v4"]);
+    assert_eq!(unsafe { as_list(c) }.capacity(), 3);
+    assert!(unsafe { as_list(c) }.is_empty() && unsafe { as_list(d) }.is_empty());
+    assert_eq!(names(e), ["v1", "v2", "v3"]);
+    assert_eq!(unsafe { as_list(e) }.capacity(), 8);
+    assert!(unsafe { as_list(f) }.is_empty());
+    // Spare slots are initialized: pushing into them and growing past them works.
+    for l in [a, b, c, d, e, f] {
+        for i in 0..12 {
+            let s = h.m.alloc_str(&format!("p{i}"));
+            unsafe { as_list(l).push(s, Access::Local) };
+        }
+    }
+    h.gc();
+    let a = h.m.get(ha);
+    assert_eq!(names(a).len(), 17);
+    assert_eq!(names(a)[16], "p11");
+    assert_eq!(names(h.m.get(hc)).len(), 12);
+    h.finish();
+}
+
+#[test]
 fn containers_survive_collection() {
     let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut h = Host::new();
@@ -124,6 +175,51 @@ fn containers_survive_collection() {
         let idx = ops::dict_lookup(&mut h, d, k).unwrap().expect("key present");
         assert_eq!(unsafe { as_dict(d).table() }.entry(idx).value, Value::small_int(i as i64));
     }
+    h.finish();
+}
+
+#[test]
+fn string_char_positions_use_the_index() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let texts = [
+        "a".repeat(300),
+        "aé€😀".repeat(90),
+        "日本語".repeat(100) + "tail",
+        "héllo".to_string(),
+        String::new(),
+        "x".repeat(StrObj::INDEX_MIN - 1) + "é",
+    ];
+    for text in &texts {
+        let v = h.m.alloc_str(text);
+        let hv = h.m.root(v);
+        // Strings with an index carry it through a collection.
+        h.gc();
+        let v = h.m.get(hv);
+        let o = unsafe { as_str_obj(v) };
+        let chars: Vec<(usize, char)> = text.char_indices().collect();
+        assert_eq!(o.char_count(), chars.len());
+        assert_eq!(o.is_ascii(), text.is_ascii());
+        let step = if cfg!(miri) { 7 } else { 1 };
+        for (i, &(b, c)) in chars.iter().enumerate().step_by(step) {
+            assert_eq!(o.byte_offset(i), b);
+            assert_eq!(o.char_offset(b), i);
+            assert_eq!(o.char_at(i), c.to_string());
+        }
+        assert_eq!(o.byte_offset(chars.len()), text.len());
+        assert_eq!(o.char_offset(text.len()), chars.len());
+        let (a, z) = (chars.len() / 3, chars.len() * 2 / 3 + 1);
+        let want: String = text.chars().skip(a).take(z.min(chars.len()).saturating_sub(a)).collect();
+        assert_eq!(o.char_slice(a, z), want);
+        assert_eq!(o.char_slice(z, a), "");
+        assert!(o.alloc_size() >= StrObj::BASE + text.len());
+    }
+    // Concatenated parts with a known character count.
+    let v = h.m.alloc_str_parts(&[&"é".repeat(200), &"z".repeat(100)]);
+    let o = unsafe { as_str_obj(v) };
+    assert_eq!(o.char_count(), 300);
+    assert_eq!(o.char_at(250), "z");
+    assert_eq!(o.char_at(199), "é");
     h.finish();
 }
 
@@ -460,6 +556,55 @@ fn minor_collection_frees_young_garbage_and_keeps_roots() {
     let keep = h.m.get(hk);
     assert_eq!(str_of(keep), Some("kept"));
     assert!(!young(keep), "survivors are promoted");
+    h.finish();
+}
+
+#[test]
+fn root_only_large_objects_stay_young_until_the_heap_references_them() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let text = "x".repeat(4096);
+    let list = h.m.alloc_list(Vec::new());
+    let hl = h.m.root(list);
+    h.gc(); // the list is old now
+    assert!(!young(h.m.get(hl)));
+
+    // Reachable only from a root: it survives a minor collection without being promoted.
+    let s = h.m.alloc_str(&text);
+    let hs = h.m.root(s);
+    h.minor();
+    let s = h.m.get(hs);
+    assert!(young(s), "a root-only large object stays young");
+    assert_eq!(str_of(s), Some(text.as_str()));
+
+    // Stored into an old list (through the write barrier) and dropped from the roots: the next
+    // minor collection finds it through the remembered set, and promotes it.
+    ownership::write_list(h.m, h.m.get(hl), |l, access| unsafe { l.push(s, access) }).unwrap();
+    h.m.set(hs, Value::NIL);
+    let _ = h.m.alloc_str(&"garbage ".repeat(600));
+    h.minor();
+    let s = ownership::read_list(h.m, h.m.get(hl)).unwrap().get(0).unwrap();
+    assert!(!young(s), "a heap-referenced large object is promoted");
+    assert_eq!(str_of(s), Some(text.as_str()));
+
+    // Referenced by a young object as well as a root: promoted with it.
+    let s2 = h.m.alloc_str(&text);
+    let pair = h.m.alloc_tuple(&[s2]);
+    let hp = h.m.root(pair);
+    h.m.root(s2);
+    h.minor();
+    let pair = h.m.get(hp);
+    assert!(!young(pair) && !young(unsafe { as_tuple(pair) }.elems()[0]));
+
+    // A root-only large object freed once the root lets go.
+    let s3 = h.m.alloc_str(&text);
+    let h3 = h.m.root(s3);
+    h.minor();
+    assert!(young(h.m.get(h3)));
+    h.m.set(h3, Value::NIL);
+    let before = catallaxy_gc::stats::minors().3;
+    h.minor();
+    assert!(catallaxy_gc::stats::minors().3 >= before + text.len(), "freed by the next minor collection");
     h.finish();
 }
 

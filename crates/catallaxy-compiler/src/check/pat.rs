@@ -201,7 +201,7 @@ impl Checker {
         if let Some((en, _)) = self.enum_in(ty) {
             let names: Vec<String> = self.enums[en as usize].variants.iter().map(|v| v.name.clone()).collect();
             if let Some(s) = crate::util::suggest(name, names.iter().map(|s| s.as_str())) {
-                d = d.fix(format!("did you mean `.{s}`?"), path.last().unwrap().span, s);
+                d = d.suggest(format!("did you mean `.{s}`?"), path.last().unwrap().span, s);
             }
         }
         self.emit(d);

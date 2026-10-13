@@ -1,0 +1,65 @@
+# Lazy sequences: adaptors build a pipeline that runs only when consumed, so `take`, `first` and
+# `find` terminate on infinite sources.
+
+nat = Lazy.iterate(0) { |n| n + 1 }
+puts(nat.map { |n| n * n }.select { |n| n.is_odd }.take(3).to_list())
+puts(nat.reject { |n| n % 3 == 0 }.take(4).to_list())
+puts(nat.drop(5).first())
+puts(nat.find { |n| n * n > 50 })
+puts(nat.take_while { |n| n < 4 }.to_list())
+puts(nat.drop_while { |n| n < 7 }.take(2).to_list())
+puts(nat.with_index().map { |p| p.0 * p.1 }.take(4).to_list())
+puts(nat.zip(["a", "b", "c"]).to_list())
+puts(nat.flat_map { |n| [n, -n] }.take(5).to_list())
+puts(nat.map { |n| n % 3 }.uniq().take(3).to_list())
+puts(Lazy.repeat("x").take(3).force())
+puts(nat.take(0).to_list())
+puts(nat.any { |n| n > 1000 })
+
+# Elements flow through one at a time and nothing is computed past what is needed.
+log: List[String] = []
+firsts = (1..10).lazy().map { |n|
+  log.push("map #{n}")
+  n * 10
+}.select { |n|
+  log.push("select #{n}")
+  n > 20
+}.take(2)
+puts(log.length)
+puts(firsts.to_list())
+puts(log)
+
+# A Lazy can be consumed again; each consumption reruns the source.
+evens = [1, 2, 3, 4, 5, 6].lazy().select { |n| n.is_even }
+puts(evens.to_list())
+puts(evens.map { |n| n.to_s }.to_list())
+puts(evens.size())
+for n in evens.take(2) { puts("for #{n}") }
+evens.each_with_index { |n, i| puts("#{i}: #{n}") }
+
+# Any `each` can be the source, including one that never ends.
+class Fib {
+  fn each(self, f: fn(Int)) {
+    a = 0
+    b = 1
+    loop {
+      f(a)
+      let (x, y) = (b, a + b)
+      a = x
+      b = y
+    }
+  }
+}
+puts(Fib.new().lazy().select { |n| n.is_even }.take(5).to_list())
+countdown = Lazy.new({ |g: fn(Int)|
+  i = 3
+  while i > 0 {
+    g(i)
+    i -= 1
+  }
+})
+puts(countdown.map { |n| "#{n}!" }.to_list().join(" "))
+words: Lazy[String] = ["b", "a", "b"].lazy()
+puts(words.uniq().to_list())
+pairs = Lazy.new { |emit| emit(1); emit(2) }
+puts(pairs.map { |n| n + 1 }.to_list())

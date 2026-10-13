@@ -83,7 +83,9 @@ puts()
 
 pals = (1..200).to_list().select { |n| n > 100 and is_palindromic_number(n) }
 puts("palindromes in 101..200: #{pals}")
-both = (1..600).to_list().select { |n| n > 9 and is_palindromic_number(n) and is_palindromic_number(n, 2) }
+both = (1..600).to_list().select { |n|
+  n > 9 and is_palindromic_number(n) and is_palindromic_number(n, 2)
+}
 puts("palindromic in base 10 and 2: #{both}")
 puts("585 in binary: #{585.to_s_radix(2)}")
 puts()

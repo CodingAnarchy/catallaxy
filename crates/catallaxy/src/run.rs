@@ -58,15 +58,16 @@ pub use catallaxy::execute;
 
 pub fn cmd_check(args: &[String]) -> i32 {
     let json = args.iter().any(|a| a == "--json");
-    let files: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    let files: Vec<&str> = args.iter().filter(|a| !a.starts_with("--")).map(|a| a.as_str()).collect();
     if files.is_empty() {
-        eprintln!("usage: catx check [--json] <file.cx>...");
+        eprintln!("usage: catx check [--json] <file.cx|dir>...");
         return 2;
     }
+    let files = crate::files::expand(&files, &[]);
     let mut any_error = false;
     let mut all_json = Vec::new();
     for f in files {
-        let comp = compile_path(Path::new(f), &FsLoader, &Options { check_only: true });
+        let comp = compile_path(&f, &FsLoader, &Options { check_only: true });
         any_error |= comp.has_errors();
         if json {
             all_json.push(comp.sm.to_json(&comp.diags));

@@ -5,7 +5,9 @@ class Matrix {
   rows: List[List[Int]]
 
   fn identity(n: Int) -> Matrix {
-    Matrix.new((0...n).to_list().map { |i| (0...n).to_list().map { |j| if i == j { 1 } else { 0 } } })
+    Matrix.new((0...n).to_list().map { |i|
+      (0...n).to_list().map { |j| if i == j { 1 } else { 0 } }
+    })
   }
 
   fn height(self) -> Int { self.rows.length }

@@ -275,6 +275,11 @@ fn minor_collect(rec: &ThreadRecord) {
     let Some(roots) = (unsafe { *rec.roots.get() }) else { return };
     let mut tracer = Tracer::minor(rec.tid);
     unsafe { (*roots).trace_roots(&mut tracer) };
+    // Large objects the roots reach directly. Marking from the heap below removes the ones a
+    // heap object also references; the rest may stay young (see `LocalHeap::sweep_young`).
+    if let Some(m) = tracer.minor.as_mut() {
+        m.root_large = heap.marked_young_large();
+    }
     for &o in heap.remembered() {
         unsafe { ((*(*o).vtable()).trace)(o, &mut tracer) };
     }
@@ -284,7 +289,8 @@ fn minor_collect(rec: &ThreadRecord) {
     }
     let marked = start.elapsed();
     let remembered = heap.remembered().len();
-    let (freed, promoted) = unsafe { heap.sweep_young() };
+    let keep_young = tracer.minor.take().map(|m| m.root_large).unwrap_or_default();
+    let (freed, promoted) = unsafe { heap.sweep_young(&keep_young) };
     stats::note_minor(start.elapsed().as_nanos() as usize, freed, promoted);
     if trace_enabled() {
         let total = start.elapsed();
@@ -572,6 +578,9 @@ pub struct Tracer {
 struct MinorMark {
     tid: u16,
     stack: Vec<usize>,
+    /// Sorted addresses of young large objects marked from the roots and not (yet) found
+    /// referenced by a heap object.
+    root_large: Vec<usize>,
 }
 
 impl Tracer {
@@ -580,7 +589,7 @@ impl Tracer {
     }
 
     fn minor(tid: u16) -> Self {
-        Tracer { color: 0, local: None, minor: Some(MinorMark { tid, stack: Vec::new() }) }
+        Tracer { color: 0, local: None, minor: Some(MinorMark { tid, stack: Vec::new(), root_large: Vec::new() }) }
     }
 
     /// Marks `obj` reachable. Null pointers are ignored. Tracers are only handed to root sources
@@ -597,8 +606,15 @@ impl Tracer {
             // Old objects are not traced: their young referents are found through the
             // remembered set.
             let meta = h.meta_relaxed();
-            if meta & crate::header::YOUNG_BIT != 0 && Header::owner_of(meta) == m.tid && h.try_minor_mark() {
-                m.stack.push(obj as usize);
+            if meta & crate::header::YOUNG_BIT != 0 && Header::owner_of(meta) == m.tid {
+                if h.try_minor_mark() {
+                    m.stack.push(obj as usize);
+                } else if !m.root_large.is_empty() {
+                    // A heap reference to a large object the roots also reach.
+                    if let Ok(i) = m.root_large.binary_search(&(obj as usize)) {
+                        m.root_large.remove(i);
+                    }
+                }
             }
             return;
         }
