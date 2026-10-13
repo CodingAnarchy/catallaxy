@@ -157,12 +157,14 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "Json.parse" => json_parse,
         "Json.stringify" => |vm, a| {
             let v = to_json(vm, a[0], 0)?;
-            let text = serde_json::to_string(&v).unwrap_or_default();
+            let mut text = String::new();
+            v.write(&mut text, None);
             Ok(new_str(vm, &text))
         },
         "Json.pretty" => |vm, a| {
             let v = to_json(vm, a[0], 0)?;
-            let text = serde_json::to_string_pretty(&v).unwrap_or_default();
+            let mut text = String::new();
+            v.write(&mut text, Some(0));
             Ok(new_str(vm, &text))
         },
 
@@ -324,27 +326,97 @@ fn from_json(vm: &mut Vm, j: &serde_json::Value) -> RtResult<Value> {
     })
 }
 
-fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<serde_json::Value> {
-    use serde_json::Value as J;
+/// A JSON tree ready to print. Scalars are pre-rendered, so integers of any
+/// size are written as JSON numbers (serde_json's `Value` cannot hold a number
+/// wider than 64 bits without its `arbitrary_precision` feature, which would
+/// also change how the language server's untagged LSP types deserialize).
+/// Object keys are sorted, as serde_json's default map does.
+enum Jv {
+    Scalar(String),
+    Arr(Vec<Jv>),
+    Obj(std::collections::BTreeMap<String, Jv>),
+}
+
+impl Jv {
+    fn string(s: &str) -> Jv {
+        Jv::Scalar(serde_json::to_string(s).unwrap_or_default())
+    }
+
+    /// Writes compact JSON when `indent` is `None`, else pretty JSON in
+    /// serde_json's style (two-space indent, `"key": value`).
+    fn write(&self, out: &mut String, indent: Option<usize>) {
+        fn newline(out: &mut String, level: usize) {
+            out.push('\n');
+            for _ in 0..level {
+                out.push_str("  ");
+            }
+        }
+        let (open, close, len) = match self {
+            Jv::Scalar(t) => {
+                out.push_str(t);
+                return;
+            }
+            Jv::Arr(items) => ('[', ']', items.len()),
+            Jv::Obj(map) => ('{', '}', map.len()),
+        };
+        out.push(open);
+        if len == 0 {
+            out.push(close);
+            return;
+        }
+        let inner = indent.map(|l| l + 1);
+        let item = |out: &mut String, i: usize| {
+            if i > 0 {
+                out.push(',');
+            }
+            if let Some(l) = inner {
+                newline(out, l);
+            }
+        };
+        match self {
+            Jv::Arr(items) => {
+                for (i, x) in items.iter().enumerate() {
+                    item(out, i);
+                    x.write(out, inner);
+                }
+            }
+            Jv::Obj(map) => {
+                for (i, (k, x)) in map.iter().enumerate() {
+                    item(out, i);
+                    out.push_str(&serde_json::to_string(k).unwrap_or_default());
+                    out.push_str(if indent.is_some() { ": " } else { ":" });
+                    x.write(out, inner);
+                }
+            }
+            Jv::Scalar(_) => unreachable!(),
+        }
+        if let Some(l) = indent {
+            newline(out, l);
+        }
+        out.push(close);
+    }
+}
+
+fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
     if depth > 200 {
         return panic("JSON nesting too deep");
     }
     if v.is_nil() {
-        return Ok(J::Null);
+        return Ok(Jv::Scalar("null".into()));
     }
     if v.is_bool() {
-        return Ok(J::Bool(v.is_true()));
+        return Ok(Jv::Scalar(if v.is_true() { "true" } else { "false" }.into()));
     }
     if v.is_small_int() {
-        return Ok(J::from(v.as_small_int()));
+        return Ok(Jv::Scalar(v.as_small_int().to_string()));
     }
     if v.is_float() {
-        let f = v.as_f64();
-        return Ok(serde_json::Number::from_f64(f).map(J::Number).unwrap_or(J::Null));
+        let text = serde_json::Number::from_f64(v.as_f64()).map_or_else(|| "null".into(), |n| n.to_string());
+        return Ok(Jv::Scalar(text));
     }
     match kind_of(v) {
-        ObjKind::BigInt => Ok(J::String(ops::format_int(v))),
-        ObjKind::Str => Ok(J::String(s(v)?.to_string())),
+        ObjKind::BigInt => Ok(Jv::Scalar(ops::format_int(v))),
+        ObjKind::Str => Ok(Jv::string(s(v)?)),
         ObjKind::List | ObjKind::Tuple => {
             let items: Vec<Value> = if kind_of(v) == ObjKind::Tuple {
                 unsafe { as_tuple(v) }.elems().to_vec()
@@ -355,31 +427,38 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<serde_json::Value> {
             for x in items {
                 out.push(to_json(vm, x, depth + 1)?);
             }
-            Ok(J::Array(out))
+            Ok(Jv::Arr(out))
         }
         ObjKind::Dict => {
             let pairs: Vec<(Value, Value)> =
                 catallaxy_runtime::ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| (e.key, e.value)).collect())?;
-            let mut map = serde_json::Map::new();
+            let mut map = std::collections::BTreeMap::new();
             for (k, x) in pairs {
                 let key = to_s(vm, k)?;
                 map.insert(key, to_json(vm, x, depth + 1)?);
             }
-            Ok(J::Object(map))
+            Ok(Jv::Obj(map))
         }
         _ => {
-            // Objects: their fields as an object, or to_s.
+            // Objects: what their `to_json` returns, their fields as an object, or to_s.
             let cls = class_of(v);
-            if cls.kind == ObjKind::Instance && cls.lookup(intern("to_json")).is_none() && cls.variant_tag.is_none() {
+            if cls.kind == ObjKind::Instance && cls.lookup(intern("to_json")).is_some() {
+                let r = vm.call_method_named(v, intern("to_json"), &[])?;
+                vm.extra_roots().push(r);
+                let j = to_json(vm, r, depth + 1);
+                vm.extra_roots().pop();
+                return j;
+            }
+            if cls.kind == ObjKind::Instance && cls.variant_tag.is_none() {
                 let o = unsafe { as_instance(v) };
-                let mut map = serde_json::Map::new();
+                let mut map = std::collections::BTreeMap::new();
                 for i in 0..cls.nfields() {
                     let fv = o.get(i);
                     map.insert(cls.field_names[i].to_string(), to_json(vm, fv, depth + 1)?);
                 }
-                return Ok(J::Object(map));
+                return Ok(Jv::Obj(map));
             }
-            Ok(J::String(to_s(vm, v)?))
+            Ok(Jv::string(&to_s(vm, v)?))
         }
     }
 }

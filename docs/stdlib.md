@@ -125,7 +125,7 @@ Everything here is available in every module without an import.
 
 ## Int
 
-- `fn to_s(self) -> String`
+- `fn to_s(self, base: Int = 10) -> String`
 - `fn hash(self) -> Int`
 - `fn <=>(self, other: Int) -> Int`
 - `fn to_f(self) -> Float`
@@ -237,6 +237,7 @@ Everything here is available in every module without an import.
 - `fn center(self, width: Int, pad: String = " ") -> String`
 - `fn ljust(self, width: Int, pad: String = " ") -> String`
 - `fn rjust(self, width: Int, pad: String = " ") -> String`
+- `fn format(self, args: List[Dyn]) -> String`
 - `fn is_digit(self) -> Bool`
 - `fn is_alpha(self) -> Bool`
 - `fn is_alnum(self) -> Bool`
@@ -310,6 +311,32 @@ Everything here is available in every module without an import.
 ## List[List[U]]
 
 - `fn flatten(self) -> List[U]`
+
+## Deque[T]
+
+- `fn init(self)`
+- `fn from(items: Enumerable[T]) -> Deque[T]`
+- `fn length(self) -> Int`
+- `fn size(self) -> Int`
+- `fn is_empty(self) -> Bool`
+- `fn push(self, item: T)`
+- `fn pop(self) -> T?`
+- `fn unshift(self, item: T)`
+- `fn shift(self) -> T?`
+- `fn first(self) -> T?`
+- `fn last(self) -> T?`
+- `fn [](self, index: Int) -> T`
+- `fn []=(self, index: Int, value: T)`
+- `fn get(self, index: Int) -> T?`
+- `fn clear(self)`
+- `fn each(self, f: fn(T))`
+- `fn to_list(self) -> List[T]`
+- `fn dup(self) -> Deque[T]`
+- `fn ==(self, other: Deque[T]) -> Bool`
+- `fn hash(self) -> Int`
+- `fn to_s(self) -> String`
+- `fn inspect(self) -> String`
+- `fn to_json(self) -> Dyn`
 
 ## Dict[K, V]
 

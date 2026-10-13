@@ -34,7 +34,8 @@ pub enum Result[T, E] {
 }
 
 extend Int {
-  native fn to_s(self) -> String
+  # Digits in `base` (2 to 36, lowercase letters above 9), with a leading `-` if negative.
+  native fn to_s(self, base: Int = 10) -> String
   native fn hash(self) -> Int
   fn <=>(self, other: Int) -> Int { if self < other { -1 } else if self > other { 1 } else { 0 } }
   native fn to_f(self) -> Float
@@ -185,6 +186,10 @@ extend String {
   native fn center(self, width: Int, pad: String = " ") -> String
   native fn ljust(self, width: Int, pad: String = " ") -> String
   native fn rjust(self, width: Int, pad: String = " ") -> String
+  # Fills a runtime template: `{}` takes the next argument's `to_s`, `{:spec}` formats it with a
+  # spec as in `"#{x:spec}"`, `{{` and `}}` are literal braces. Panics with a `FormatError` on a bad
+  # spec or when the placeholders and arguments do not match in number.
+  native fn format(self, args: List[Dyn]) -> String
   native fn is_digit(self) -> Bool
   native fn is_alpha(self) -> Bool
   native fn is_alnum(self) -> Bool
@@ -395,6 +400,144 @@ extend List[List[U]] {
     out
   }
 }
+
+# A double-ended queue: a growable ring buffer with O(1) amortized `push`/`pop` at the back,
+# `unshift`/`shift` at the front, and O(1) indexing (negative indices count from the end). Use it
+# instead of `List.shift`/`unshift`, which move every item. Ownership is as for `List`: a deque is
+# owned by one thread, `freeze` makes it (and its items) immutable and shareable, and `Mutex`
+# shares a mutable one. It is `Enumerable`; `==` compares items in order and `Json.stringify`
+# writes it as an array.
+pub class Deque[T] {
+  # Internal: the ring (its length is the capacity; vacant slots hold nil), the index of the
+  # first item and the item count.
+  _buf: List[T]
+  _head: Int
+  _len: Int
+  fn init(self) {
+    self._buf = []
+    self._head = 0
+    self._len = 0
+  }
+  fn from(items: Enumerable[T]) -> Deque[T] {
+    d: Deque[T] = Deque.new()
+    items.each { |x| d.push(x) }
+    d
+  }
+  fn length(self) -> Int { self._len }
+  fn size(self) -> Int { self._len }
+  fn is_empty(self) -> Bool { self._len == 0 }
+  # Appends at the back.
+  fn push(self, item: T) {
+    if self._len == self._buf.length { self._grow() }
+    j = self._head + self._len
+    if j >= self._buf.length { j -= self._buf.length }
+    self._buf[j] = item
+    self._len += 1
+  }
+  # Removes and returns the last item.
+  fn pop(self) -> T? {
+    if self._len == 0 { return nil }
+    j = self._head + self._len - 1
+    if j >= self._buf.length { j -= self._buf.length }
+    x = self._buf[j]
+    self._buf[j] = __vacant(self._buf)
+    self._len -= 1
+    x
+  }
+  # Prepends at the front.
+  fn unshift(self, item: T) {
+    if self._len == self._buf.length { self._grow() }
+    h = self._head - 1
+    if h < 0 { h += self._buf.length }
+    self._buf[h] = item
+    self._head = h
+    self._len += 1
+  }
+  # Removes and returns the first item.
+  fn shift(self) -> T? {
+    if self._len == 0 { return nil }
+    h = self._head
+    x = self._buf[h]
+    self._buf[h] = __vacant(self._buf)
+    h += 1
+    self._head = if h == self._buf.length { 0 } else { h }
+    self._len -= 1
+    x
+  }
+  fn first(self) -> T? { self.get(0) }
+  fn last(self) -> T? { self.get(-1) }
+  fn [](self, index: Int) -> T {
+    i = if index < 0 { index + self._len } else { index }
+    if i < 0 or i >= self._len { panic("IndexError: index #{index} out of range for length #{self._len}") }
+    j = self._head + i
+    if j >= self._buf.length { j -= self._buf.length }
+    self._buf[j]
+  }
+  fn []=(self, index: Int, value: T) {
+    i = if index < 0 { index + self._len } else { index }
+    if i < 0 or i >= self._len { panic("IndexError: index #{index} out of range for length #{self._len}") }
+    j = self._head + i
+    if j >= self._buf.length { j -= self._buf.length }
+    self._buf[j] = value
+  }
+  fn get(self, index: Int) -> T? {
+    i = if index < 0 { index + self._len } else { index }
+    if i < 0 or i >= self._len { return nil }
+    j = self._head + i
+    if j >= self._buf.length { j -= self._buf.length }
+    self._buf[j]
+  }
+  fn clear(self) {
+    self._buf = []
+    self._head = 0
+    self._len = 0
+  }
+  fn each(self, f: fn(T)) {
+    i = 0
+    while i < self._len {
+      j = self._head + i
+      if j >= self._buf.length { j -= self._buf.length }
+      f(self._buf[j])
+      i += 1
+    }
+  }
+  fn to_list(self) -> List[T] {
+    out: List[T] = List.with_capacity(self._len)
+    self.each { |x| out.push(x) }
+    out
+  }
+  fn dup(self) -> Deque[T] { Deque.from(self) }
+  fn ==(self, other: Deque[T]) -> Bool { self.to_list() == other.to_list() }
+  fn hash(self) -> Int { __hash_of(self.to_list()) }
+  fn to_s(self) -> String { "Deque#{inspect(self.to_list())}" }
+  fn inspect(self) -> String { self.to_s }
+  fn to_json(self) -> Dyn { self.to_list() }
+  # Doubles the capacity, moving the items to the start of a new ring.
+  fn _grow(self) {
+    cap = self._buf.length
+    ncap = if cap < 8 { 8 } else { cap * 2 }
+    nb: List[T] = List.with_capacity(ncap)
+    i = 0
+    while i < self._len {
+      j = self._head + i
+      if j >= cap { j -= cap }
+      nb.push(self._buf[j])
+      i += 1
+    }
+    hole = __vacant(nb)
+    while i < ncap {
+      nb.push(hole)
+      i += 1
+    }
+    self._buf = nb
+    self._head = 0
+  }
+}
+
+# Internal: the filler for vacant ring slots (nil, whatever the element type).
+native fn __vacant[T](witness: List[T]) -> T
+# Internal: the structural hash `Dict` and `Set` use for any value.
+native fn __hash_of(value: Dyn) -> Int
 
 extend Dict[K, V] {
   native fn new() -> Dict[K, V]

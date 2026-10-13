@@ -525,6 +525,38 @@ fn lsp_inlay_hints() {
 }
 
 #[test]
+fn lsp_format_spec_interpolation() {
+    let (mut lsp, _) = Lsp::init();
+    let text =
+        "price = 2.5\nputs(\"#{price:>8.2f}\")\nputs(\"#{[1].map { |v| v * 2 }.length:03}\")\nputs(\"#{\"s\":.2f}\")\n";
+    let (uri, _) = file_uri("fmt_spec.cx");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+        "textDocument": {"uri": uri, "languageId": "catallaxy", "version": 1, "text": text}
+    }}));
+    let diags = lsp.wait("publishDiagnostics", |v| v["method"] == "textDocument/publishDiagnostics");
+    let list = diags["params"]["diagnostics"].as_array().unwrap();
+    assert!(list.iter().any(|d| d["code"] == "E0380" && d["range"]["start"]["line"] == 3), "{diags}");
+    assert_eq!(list.len(), 1, "{diags}");
+    // Hover over `price` inside the formatted interpolation.
+    let h = lsp.request(
+        2,
+        "textDocument/hover",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 1, "character": 10}}),
+    );
+    let value = h["result"]["contents"]["value"].as_str().unwrap_or_default();
+    assert!(value.contains("price: Float"), "{h}");
+    // Block parameters inside a formatted interpolation still get inlay hints.
+    let r = lsp.request(
+        3,
+        "textDocument/inlayHint",
+        json!({"textDocument": {"uri": uri}, "range": {"start": {"line": 2, "character": 0}, "end": {"line": 3, "character": 0}}}),
+    );
+    let labels: Vec<&str> = r["result"].as_array().unwrap().iter().filter_map(|h| h["label"].as_str()).collect();
+    assert!(labels.contains(&": Int"), "{r}");
+    lsp.finish();
+}
+
+#[test]
 fn lsp_document_and_workspace_symbols() {
     let (mut lsp, caps) = Lsp::init();
     assert_eq!(caps["documentSymbolProvider"], true, "{caps}");

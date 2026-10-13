@@ -1,0 +1,4 @@
+# expect: E0380
+# A float format on a String is caught at compile time.
+name = "Ada"
+puts("#{name:.2f}")
