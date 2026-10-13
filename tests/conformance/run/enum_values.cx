@@ -1,0 +1,42 @@
+# `E.values()` lists the variants of an enum without payloads, in declaration order.
+import lib.geometry
+
+enum Color {
+  Red
+  Green
+  Blue
+
+  fn hex(self) -> String { match self { .Red => "#f00", .Green => "#0f0", .Blue => "#00f" } }
+}
+
+puts(Color.values())
+for c in Color.values() { puts("#{c} #{c.hex}") }
+puts(Color.values().length)
+puts(Color.values().index_of(Color.Blue))
+puts(Color.values.map { |c| c.hex })
+
+# An enum's own static `values` wins.
+enum Size {
+  Small, Large
+
+  fn values() -> List[String] { ["S", "L"] }
+}
+puts(Size.values())
+
+# Generic enums with payload-less variants infer their type arguments.
+enum Tag[T] { A, B }
+tags: List[Tag[Int]] = Tag.values()
+puts(tags)
+
+# Int is arbitrary-precision, so it has no MAX or MIN; for a running extreme, start from nil or
+# from the first element, or use the collection methods.
+xs = [7, -3, 12]
+puts(xs.max())
+puts(xs.min())
+best: Int? = nil
+for x in xs { if best == nil or x > best { best = x } }
+puts(best)
+puts(2 ** 64)
+
+# Through a module path too.
+puts(geometry.Dir.values())

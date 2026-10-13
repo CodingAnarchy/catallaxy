@@ -48,7 +48,7 @@ Module-wide state uses:
 
 | Type | Meaning |
 | --- | --- |
-| `Int` | arbitrary-precision integer |
+| `Int` | arbitrary-precision integer (so there is no `Int.MAX` or `Int.MIN`: start a running extreme from `nil` or the first element, or use `min`/`max`/`min_by`/`max_by`) |
 | `Float` | IEEE 754 double |
 | `Bool` | `true` / `false` |
 | `String` | immutable UTF-8 text (always frozen) |
@@ -250,7 +250,9 @@ s = Shape.Circle(2.0)
 area = match s { .Circle(r) => 3.14 * r * r, .Rect(w, h) => w * h, .Empty => 0.0 }
 ```
 
-Enums may be generic and have methods. Enum values are immutable.
+Enums may be generic and have methods. Enum values are immutable. When no variant has a payload,
+`E.values()` returns every variant in declaration order (`List[E]`), unless the enum declares its own
+static `values`; on an enum with payloads it is an error (E0367).
 
 `extend T { fn ... }` adds methods to an existing type (`String`, `List[T]`, a user class). Extensions
 resolve statically and are visible only in modules that declare or import them (`import m` brings

@@ -337,6 +337,9 @@ pub enum CallRes {
     FnValue(FnId),
     /// `freeze(x)`.
     Freeze,
+    /// `E.values()` on an enum whose variants are all payload-less: the variants' classes, in
+    /// declaration order.
+    EnumValues(Vec<ClassId>),
     /// Reading an element: List[Int] fast path.
     ListGet,
     /// Generic `x[i]`.
