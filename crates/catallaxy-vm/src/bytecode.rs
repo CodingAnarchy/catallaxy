@@ -199,12 +199,27 @@ pub enum Op {
     JNEqI,
     /// if R[A] == R[B] (Int) { pc += d }
     JEqI,
+    // The same against a small constant: B is a signed 8-bit immediate K.
+    /// if !(R[A] < K) { pc += d }
+    JNLtIK,
+    /// if !(R[A] <= K) { pc += d }
+    JNLeIK,
+    /// if !(R[A] > K) { pc += d }
+    JNGtIK,
+    /// if !(R[A] >= K) { pc += d }
+    JNGeIK,
+    /// if R[A] != K { pc += d }
+    JNEqIK,
+    /// if R[A] == K { pc += d }
+    JEqIK,
+    /// R[A] = R[B].field[d & 0xffff]; R[A+1] = R[C].field[d >> 16] (two `GetField`s, fused)
+    GetField2,
 }
 
 /// `IsKind` operand for tuples (`catallaxy_runtime::ObjKind::Tuple as u8`, checked at load).
 pub const KIND_TUPLE: u8 = 7;
 
-pub const NUM_OPS: usize = Op::JEqI as usize + 1;
+pub const NUM_OPS: usize = Op::GetField2 as usize + 1;
 
 impl Op {
     pub fn from_u8(b: u8) -> Op {
@@ -229,6 +244,13 @@ impl Op {
                 | Op::JNLeF
                 | Op::JNEqI
                 | Op::JEqI
+                | Op::JNLtIK
+                | Op::JNLeIK
+                | Op::JNGtIK
+                | Op::JNGeIK
+                | Op::JNEqIK
+                | Op::JEqIK
+                | Op::GetField2
                 | Op::CallVirtual
                 | Op::New
                 | Op::Closure
@@ -441,10 +463,24 @@ pub fn disassemble(p: &Program, f: &FuncProto) -> String {
                 Op::CallNative => {
                     let _ = write!(out, "  ; native {}", p.natives.get(d as usize).map(|s| s.as_str()).unwrap_or("?"));
                 }
-                Op::JNLtI | Op::JNLeI | Op::JNLtF | Op::JNLeF | Op::JNEqI | Op::JEqI => {
+                Op::JNLtI
+                | Op::JNLeI
+                | Op::JNLtF
+                | Op::JNLeF
+                | Op::JNEqI
+                | Op::JEqI
+                | Op::JNLtIK
+                | Op::JNLeIK
+                | Op::JNGtIK
+                | Op::JNGeIK
+                | Op::JNEqIK
+                | Op::JEqIK => {
                     let c = c_of(f.code[pc - 1]);
                     let off = if c < 0x80 { c as isize } else { d as i32 as isize };
                     let _ = write!(out, "  ; -> {}", pc as isize + 1 + off);
+                }
+                Op::GetField2 => {
+                    let _ = write!(out, "  ; .{} .{}", d & 0xffff, d >> 16);
                 }
                 Op::CallMethod | Op::DynGet => {
                     let _ = write!(out, "  ; .{}", f.ics.get(d as usize).map(|i| i.name.as_str()).unwrap_or("?"));

@@ -1,0 +1,7 @@
+["neg", "zero", "pos"]
+["none", "even 4", "odd 7"]
+[9, nil]
+[5, 5, -5]
+[3, 80]
+noop with -1
+[105, 50]

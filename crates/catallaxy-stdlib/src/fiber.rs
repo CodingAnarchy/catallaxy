@@ -76,8 +76,11 @@ impl Waker {
 
 enum Outcome {
     Running,
-    /// The result is pinned in the thread's main VM under the fiber id.
-    Done,
+    /// Finished. The result is in the handle's `_result` field, or (if the handle had left this
+    /// thread) pinned in the thread's main VM under the fiber id.
+    Done {
+        in_handle: bool,
+    },
     Panicked(String),
     Joined,
 }
@@ -158,12 +161,22 @@ thread_local! {
 
 // ---- spawning and running ----------------------------------------------------------------------
 
-/// Starts a fiber running `closure` on this thread. It first runs when this thread's main
-/// context waits (or when another fiber parks). Returns the fiber id.
-pub fn spawn(vm: &mut Vm, closure: Value) -> u64 {
+/// Field positions in the prelude's `Fiber` class.
+const ID_FIELD: usize = 0;
+const RESULT_FIELD: usize = 1;
+
+/// Starts a fiber running `closure` on this thread, recording its id in `handle` (a `Fiber`).
+/// It first runs when this thread's main context waits (or when another fiber parks).
+pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let h = unsafe { &*handle.as_ptr() };
+    catallaxy_runtime::ownership::check_write(&vm.m, h)?;
+    unsafe { catallaxy_runtime::object::as_instance(handle) }.set(ID_FIELD, Value::small_int(id as i64));
     let fvm = Box::into_raw(vm.new_fiber(FIBER_REGISTERS));
-    unsafe { (*fvm).extra_roots().push(closure) };
+    unsafe {
+        (*fvm).extra_roots().push(closure);
+        (*fvm).extra_roots().push(handle);
+    }
     let ctl = Arc::new(Ctl { outcome: Mutex::new(Outcome::Running), joiners: Mutex::new(Vec::new()) });
     let ctl2 = ctl.clone();
     let vm_ptr = fvm as usize;
@@ -176,8 +189,18 @@ pub fn spawn(vm: &mut Vm, closure: Value) -> u64 {
         let r = vm.call_value(closure, &[]);
         let outcome = match r {
             Ok(v) => {
-                vm.pin(id, v);
-                Outcome::Done
+                // Store the result in the handle while this thread still owns it, so it is freed
+                // with the handle; otherwise keep it until `join`.
+                let handle = vm.extra_roots()[1];
+                let h = unsafe { &*handle.as_ptr() };
+                let mine = h.state() == catallaxy_gc::ObjState::Owned && h.owner() == vm.tid();
+                if mine && catallaxy_runtime::ownership::check_write(&vm.m, h).is_ok() {
+                    unsafe { catallaxy_runtime::object::as_instance(handle) }.set(RESULT_FIELD, v);
+                    Outcome::Done { in_handle: true }
+                } else {
+                    vm.pin(id, v);
+                    Outcome::Done { in_handle: false }
+                }
             }
             Err(Trap::Panic(msg)) => {
                 let mut full = msg;
@@ -205,7 +228,7 @@ pub fn spawn(vm: &mut Vm, closure: Value) -> u64 {
         s.ctl.insert(id, ctl);
         s.ready.push_back(id);
     });
-    id
+    Ok(id)
 }
 
 /// Resumes fiber `id` until it parks or finishes. Main context only.
@@ -395,8 +418,10 @@ pub fn yield_now(vm: &mut Vm) {
 
 // ---- joining -----------------------------------------------------------------------------------
 
-/// Waits for fiber `id` (of this thread) and returns its result, or the panic message.
-pub fn join(vm: &mut Vm, id: u64) -> RtResult<Result<Value, String>> {
+/// Waits for the fiber behind `handle` (of this thread) and returns its result, or the panic
+/// message.
+pub fn join(vm: &mut Vm, handle: Value) -> RtResult<Result<Value, String>> {
+    let id = unsafe { catallaxy_runtime::object::as_instance(handle) }.get(ID_FIELD).as_small_int() as u64;
     let Some(ctl) = with_sched(|s| s.ctl.get(&id).cloned()) else {
         return Err(Trap::Panic(
             "FiberError: no such fiber on this thread (fibers are joined on the thread that spawned them)".into(),
@@ -424,7 +449,10 @@ pub fn join(vm: &mut Vm, id: u64) -> RtResult<Result<Value, String>> {
     with_sched(|s| s.ctl.remove(&id));
     let outcome = std::mem::replace(&mut *ctl.outcome.lock(), Outcome::Joined);
     Ok(match outcome {
-        Outcome::Done => Ok(vm.unpin(id).unwrap_or(Value::NIL)),
+        Outcome::Done { in_handle: true } => {
+            Ok(unsafe { catallaxy_runtime::object::as_instance(handle) }.get(RESULT_FIELD))
+        }
+        Outcome::Done { in_handle: false } => Ok(vm.unpin(id).unwrap_or(Value::NIL)),
         Outcome::Panicked(m) => Err(m),
         Outcome::Joined => Err("fiber was already joined".into()),
         Outcome::Running => unreachable!(),

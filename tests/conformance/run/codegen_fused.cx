@@ -121,3 +121,20 @@ while q < 3 {
   q += 1
 }
 puts(acc)
+
+# Comparisons against small constants (immediate operands), on both sides, with big integers.
+big2 = 140737488355327 + 10
+hits: List[String] = []
+for v in [-129, -128, -1, 0, 5, 127, 128, big2] {
+  tag = ""
+  if v < 5 { tag = tag + "<5 " }
+  if v <= -128 { tag = tag + "<=-128 " }
+  if v > 127 { tag = tag + ">127 " }
+  if v >= 0 { tag = tag + ">=0 " }
+  if v == 0 { tag = tag + "==0 " }
+  if v != -1 { tag = tag + "!=-1 " }
+  if 5 > v { tag = tag + "5>v " }
+  if -1 == v { tag = tag + "-1==v " }
+  hits.push(tag)
+}
+for h in hits { puts(h) }
