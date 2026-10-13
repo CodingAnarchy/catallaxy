@@ -79,6 +79,8 @@ catx lsp                        language server (stdio)
 
 ## Documentation
 
+- [Getting started](docs/getting-started.md) — install, a first program, a two-file project, tests and
+  editor setup.
 - [Language reference](docs/reference.md) — syntax, types and semantics.
 - [Standard library](docs/stdlib.md) — every builtin type, method and function.
 - [Design](docs/design.md) — why the language and runtime look the way they do.
