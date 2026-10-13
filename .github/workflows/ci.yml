@@ -132,3 +132,32 @@ jobs:
           mkdir -p fuzz/corpus/check
           cp tests/conformance/run/*.cx tests/conformance/reject/*.cx examples/*.cx fuzz/corpus/check/
           cd fuzz && cargo fuzz run check -- -max_total_time=120 -max_len=4096 -timeout=10
+
+  difffuzz:
+    # Keep this name stable: it may be made a required check.
+    name: Differential fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            tools/difffuzz
+      - name: Build catx (release and debug) and the fuzzer
+        run: |
+          cargo build --release --locked
+          cargo build --locked
+          cargo build --release --locked --manifest-path tools/difffuzz/Cargo.toml
+          cargo test --release --locked --manifest-path tools/difffuzz/Cargo.toml
+      - name: Differential fuzz (corpus, then 3 minutes of generated programs)
+        run: >
+          ./tools/difffuzz/target/release/catallaxy-difffuzz --time 180 --seed ${{ github.run_id }}000
+          --corpus tools/difffuzz/corpus --corpus tests/conformance/run --corpus examples
+          --out difffuzz-failures --minimize-secs 60
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: difffuzz-failures
+          path: difffuzz-failures
