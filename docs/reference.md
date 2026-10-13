@@ -332,7 +332,9 @@ pages = fs.map { |f| f.join().unwrap() }
 - A fiber does not park while it holds a lock keyed by its OS thread (inside `with lock` or a
   `Mutex` closure): it blocks the thread instead, so its sibling fibers cannot enter the lock.
 - A thread, and the program, finishes only after the fibers it started. A fiber is joined on
-  the thread that started it; its result is kept until then.
+  the thread that started it. Its result is stored in the `Fiber` handle, so a result nobody
+  joins is freed with the handle.
+- Keywords are valid method names after `.` and in method declarations (`obj.match(x)`).
 
 ## 9. Dyn
 

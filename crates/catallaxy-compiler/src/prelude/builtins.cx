@@ -579,16 +579,23 @@ extend Thread[T] {
 # finishes only after its fibers do.
 pub class Fiber[T] {
   id: Int
-  fn start(f: fn() -> T) -> Fiber[T] { Fiber.new(__fiber_spawn(f)) }
+  # Internal: the result, stored in the handle so it lives exactly as long as the handle. Read it
+  # with `join`. (The runtime addresses fields by position: `id` is 0, this is 1.)
+  _result: T?
+  fn start(f: fn() -> T) -> Fiber[T] {
+    h: Fiber[T] = Fiber.new(0, nil)
+    __fiber_spawn(h, f)
+    h
+  }
   # Waits for the fiber and returns its result, or the message of the panic that ended it.
-  fn join(self) -> Result[T, String] { __fiber_join(self.id) }
+  fn join(self) -> Result[T, String] { __fiber_join(self) }
   fn is_done(self) -> Bool { __fiber_done(self.id) }
   # Lets the thread's other fibers run.
   fn yield() { __fiber_yield() }
 }
 
-native fn __fiber_spawn[T](f: fn() -> T) -> Int
-native fn __fiber_join[T](id: Int) -> Result[T, String]
+native fn __fiber_spawn[T](handle: Fiber[T], f: fn() -> T)
+native fn __fiber_join[T](handle: Fiber[T]) -> Result[T, String]
 native fn __fiber_done(id: Int) -> Bool
 native fn __fiber_yield()
 

@@ -1,0 +1,11 @@
+# Keywords are valid method names after `.` and in method declarations.
+class Job {
+  n: Int
+  fn spawn(self) -> Int { self.n * 2 }
+  fn match(self, k: Int) -> Bool { self.n == k }
+  fn loop(self) -> String { "looped" }
+}
+j = Job.new(21)
+puts(j.spawn())
+puts(j.match(21))
+puts(j.loop())
