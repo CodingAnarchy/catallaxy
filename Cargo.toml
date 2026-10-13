@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -15,12 +15,12 @@ categories = ["compilers", "development-tools"]
 readme = "README.md"
 
 [workspace.dependencies]
-catallaxy-gc = { path = "crates/catallaxy-gc", version = "0.2.0" }
-catallaxy-runtime = { path = "crates/catallaxy-runtime", version = "0.2.0" }
-catallaxy-vm = { path = "crates/catallaxy-vm", version = "0.2.0" }
-catallaxy-compiler = { path = "crates/catallaxy-compiler", version = "0.2.0" }
-catallaxy-stdlib = { path = "crates/catallaxy-stdlib", version = "0.2.0" }
-catallaxy = { path = "crates/catallaxy", version = "0.2.0" }
+catallaxy-gc = { path = "crates/catallaxy-gc", version = "0.3.0" }
+catallaxy-runtime = { path = "crates/catallaxy-runtime", version = "0.3.0" }
+catallaxy-vm = { path = "crates/catallaxy-vm", version = "0.3.0" }
+catallaxy-compiler = { path = "crates/catallaxy-compiler", version = "0.3.0" }
+catallaxy-stdlib = { path = "crates/catallaxy-stdlib", version = "0.3.0" }
+catallaxy = { path = "crates/catallaxy", version = "0.3.0" }
 crossbeam-deque = "0.8"
 crossbeam-utils = "0.8"
 parking_lot = "0.12"
