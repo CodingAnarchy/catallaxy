@@ -45,7 +45,11 @@ puts(w.wait().unwrap())
 
 # Runs in fibers overlap; results come back in order.
 inputs = ["a", "b", "c", "d"]
-fs = inputs.map { |s| Fiber.start { Process.run("git", ["hash-object", "--stdin"], input: s).unwrap().stdout.strip.length } }
+fs = inputs.map { |s|
+  Fiber.start {
+    Process.run("git", ["hash-object", "--stdin"], input: s).unwrap().stdout.strip.length
+  }
+}
 puts(fs.map { |f| f.join().unwrap() })
 
 # Killing a child that would wait forever for input.

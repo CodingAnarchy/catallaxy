@@ -1,5 +1,6 @@
 //! `catx`: the Catallaxy command-line tool.
 
+mod files;
 mod fmt_cmd;
 mod lsp;
 mod repl;
@@ -13,8 +14,8 @@ catx — the Catallaxy language
 
 USAGE:
     catx run [--promote-on-access] <file.cx> [args...]
-    catx check [--json] <file.cx>...
-    catx fmt [--check] <file.cx>...   (`catx fmt -` formats stdin to stdout)
+    catx check [--json] <file.cx|dir>...
+    catx fmt [--check] <file.cx|dir>...   (`catx fmt -` formats stdin to stdout)
     catx test [dir]
     catx repl
     catx lsp
