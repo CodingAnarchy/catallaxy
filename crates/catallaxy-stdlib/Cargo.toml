@@ -27,6 +27,9 @@ regex = "1"
 corosensei = "0.3"
 mio = { version = "1", features = ["os-poll", "net"] }
 ureq = "3"
+# Both already in the tree through ureq (rustls), so digests and base64 add no new crates.
+ring = "0.17"
+base64 = "0.23"
 
 [lints.rust]
 # `catx_tsan`: ThreadSanitizer fiber annotations (src/fiber.rs, the `tsan-suite` CI job).

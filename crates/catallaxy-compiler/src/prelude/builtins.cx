@@ -167,6 +167,12 @@ extend String {
   native fn lines(self) -> List[String]
   native fn chars(self) -> List[String]
   native fn bytes(self) -> List[Int]
+  # The UTF-8 encoding as `Bytes`.
+  native fn to_bytes(self) -> Bytes
+  # Decodes UTF-8, or returns why the bytes are not valid UTF-8.
+  native fn from_bytes(bytes: Bytes) -> Result[String, String]
+  # Decodes UTF-8, replacing invalid sequences with U+FFFD.
+  native fn from_bytes_lossy(bytes: Bytes) -> String
   native fn starts_with(self, prefix: String) -> Bool
   native fn ends_with(self, suffix: String) -> Bool
   native fn contains(self, sub: String) -> Bool
@@ -635,6 +641,96 @@ pub class File {
   native fn read_lines(path: String) -> Result[List[String], String]
   native fn list_dir(path: String) -> Result[List[String], String]
   native fn metadata(path: String) -> Result[Metadata, String]
+  # The file's contents as they are, for binary files (`read` needs valid UTF-8).
+  native fn read_bytes(path: String) -> Result[Bytes, String]
+  native fn write_bytes(path: String, data: Bytes) -> Result[Nil, String]
+}
+
+# An immutable byte string. Like `String` it is frozen, so it is shared freely between threads
+# and fibers; build one from a list of byte values, from text (`s.to_bytes`), from hex or base64,
+# or by reading a file (`File.read_bytes`). To assemble bytes piece by piece, collect them in a
+# `List[Int]` and convert once with `Bytes.new`, or join pieces with `+`.
+pub frozen class Bytes {
+  handle: NativeHandle
+  # Bytes with the given values, each in 0..255.
+  native fn new(values: List[Int] = []) -> Bytes
+  # Parses hex digits (either case, no separators).
+  native fn from_hex(text: String) -> Result[Bytes, String]
+  # Parses standard base64 (with padding).
+  native fn from_base64(text: String) -> Result[Bytes, String]
+  native fn length(self) -> Int
+  fn size(self) -> Int { self.length }
+  fn is_empty(self) -> Bool { self.length == 0 }
+  # The byte at `index` (negative counts from the end); panics out of range.
+  native fn [](self, index: Int) -> Int
+  native fn get(self, index: Int) -> Int?
+  native fn slice(self, start: Int, len: Int) -> Bytes
+  native fn +(self, other: Bytes) -> Bytes
+  native fn ==(self, other: Bytes) -> Bool
+  native fn hash(self) -> Int
+  native fn to_list(self) -> List[Int]
+  fn each(self, f: fn(Int)) {
+    i = 0
+    n = self.length
+    while i < n {
+      f(self[i])
+      i += 1
+    }
+  }
+  # Lowercase hex, two digits per byte.
+  native fn to_hex(self) -> String
+  # Standard base64 with padding.
+  native fn to_base64(self) -> String
+  # `Bytes(` hex `)`. Decode text with `String.from_bytes`.
+  native fn to_s(self) -> String
+}
+
+# Message digests of text (its UTF-8 bytes) or bytes, as lowercase hex. MD5 and SHA-1 are
+# broken for security purposes; use them only for checksums and compatibility.
+pub class Digest {
+  native fn md5(data: String | Bytes) -> String
+  native fn sha1(data: String | Bytes) -> String
+  native fn sha256(data: String | Bytes) -> String
+  native fn sha512(data: String | Bytes) -> String
+}
+
+# Comma-separated values (RFC 4180). A field holding the separator, a quote or a line break is
+# quoted, with its quotes doubled. Rows may end with `\n` or `\r\n`; blank lines are skipped. A
+# quote inside an unquoted field is kept as text. `sep` must be a single character.
+pub class Csv {
+  # The rows of `text`, or an error for an unterminated quoted field or text after one.
+  native fn parse(text: String, sep: String = ",") -> Result[List[List[String]], String]
+  # The rows after the first as dicts keyed by the first (header) row's fields. A row with
+  # fewer fields lacks the missing keys; one with more fields is an error.
+  fn parse_records(text: String, sep: String = ",") -> Result[List[Dict[String, String]], String] {
+    rows = Csv.parse(text, sep)?
+    out: List[Dict[String, String]] = []
+    if rows.is_empty() { return Ok(out) }
+    header = rows[0]
+    i = 1
+    while i < rows.length {
+      row = rows[i]
+      if row.length > header.length {
+        return Err("record #{i}: #{row.length} fields, but the header has #{header.length}")
+      }
+      rec: Dict[String, String] = [:]
+      row.each_with_index { |f, j| rec[header[j]] = f }
+      out.push(rec)
+      i += 1
+    }
+    Ok(out)
+  }
+  # Every row followed by `\n`.
+  native fn format(rows: List[List[String]], sep: String = ",") -> String
+  # One row, without a line ending.
+  native fn format_row(row: List[String], sep: String = ",") -> String
+  fn read(path: String, sep: String = ",") -> Result[List[List[String]], String] {
+    text = File.read(path)?
+    Csv.parse(text, sep).map_err { |e| "#{path}: #{e}" }
+  }
+  fn write(path: String, rows: List[List[String]], sep: String = ",") -> Result[Nil, String] {
+    File.write(path, Csv.format(rows, sep))
+  }
 }
 
 # What `File.metadata` reports. `modified` is in seconds since the Unix epoch, like `Time.now`.
@@ -764,9 +860,42 @@ pub class Random {
   native fn choice[T](items: List[T]) -> T?
 }
 
+# The program's environment variables. `set` and `remove` change what `get` and `all` see and
+# what processes started with `Process` inherit, from any thread. They do not change the
+# environment of the `catx` process itself (that is unsound while other threads may read it), so
+# native code that reads the environment directly does not see them.
 pub class Env {
   native fn get(name: String) -> String?
+  # `name` must be non-empty and contain no `=`; neither may contain a NUL character.
+  native fn set(name: String, value: String)
+  native fn remove(name: String)
+  # Every variable, sorted by name.
+  native fn all() -> Dict[String, String]
   native fn cpu_count() -> Int
+}
+
+# Standard input. Reads park the calling fiber (the I/O pool waits) instead of blocking its
+# thread. All of these, and the global `read_line()`, read the same buffered stream.
+pub class Stdin {
+  # The next line without its line ending, or nil at end of input.
+  native fn read_line() -> String?
+  # The remaining lines, read one at a time as they are iterated:
+  # `for line in Stdin.lines() { ... }`. A single pass: each line is read once.
+  fn lines() -> StdinLines { StdinLines.new() }
+  # All remaining lines at once.
+  native fn read_lines() -> List[String]
+  # All remaining input (invalid UTF-8 is replaced).
+  native fn read_all() -> String
+  native fn read_bytes() -> Bytes
+}
+
+# The lines of standard input as an `Enumerable[String]`; see `Stdin.lines`.
+pub class StdinLines {
+  fn each(self, f: fn(String)) {
+    loop {
+      if let line = Stdin.read_line() { f(line) } else { break }
+    }
+  }
 }
 
 pub class Json {

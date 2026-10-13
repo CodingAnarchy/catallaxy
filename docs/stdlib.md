@@ -219,6 +219,9 @@ Everything here is available in every module without an import.
 - `fn lines(self) -> List[String]`
 - `fn chars(self) -> List[String]`
 - `fn bytes(self) -> List[Int]`
+- `fn to_bytes(self) -> Bytes`
+- `fn from_bytes(bytes: Bytes) -> Result[String, String]`
+- `fn from_bytes_lossy(bytes: Bytes) -> String`
 - `fn starts_with(self, prefix: String) -> Bool`
 - `fn ends_with(self, suffix: String) -> Bool`
 - `fn contains(self, sub: String) -> Bool`
@@ -464,6 +467,45 @@ Everything here is available in every module without an import.
 - `fn read_lines(path: String) -> Result[List[String], String]`
 - `fn list_dir(path: String) -> Result[List[String], String]`
 - `fn metadata(path: String) -> Result[Metadata, String]`
+- `fn read_bytes(path: String) -> Result[Bytes, String]`
+- `fn write_bytes(path: String, data: Bytes) -> Result[Nil, String]`
+
+## Bytes (frozen)
+
+- field `handle: NativeHandle`
+- `fn new(values: List[Int] = []) -> Bytes`
+- `fn from_hex(text: String) -> Result[Bytes, String]`
+- `fn from_base64(text: String) -> Result[Bytes, String]`
+- `fn length(self) -> Int`
+- `fn size(self) -> Int`
+- `fn is_empty(self) -> Bool`
+- `fn [](self, index: Int) -> Int`
+- `fn get(self, index: Int) -> Int?`
+- `fn slice(self, start: Int, len: Int) -> Bytes`
+- `fn +(self, other: Bytes) -> Bytes`
+- `fn ==(self, other: Bytes) -> Bool`
+- `fn hash(self) -> Int`
+- `fn to_list(self) -> List[Int]`
+- `fn each(self, f: fn(Int))`
+- `fn to_hex(self) -> String`
+- `fn to_base64(self) -> String`
+- `fn to_s(self) -> String`
+
+## Digest
+
+- `fn md5(data: String | Bytes) -> String`
+- `fn sha1(data: String | Bytes) -> String`
+- `fn sha256(data: String | Bytes) -> String`
+- `fn sha512(data: String | Bytes) -> String`
+
+## Csv
+
+- `fn parse(text: String, sep: String = ",") -> Result[List[List[String]], String]`
+- `fn parse_records(text: String, sep: String = ",") -> Result[List[Dict[String, String]], String]`
+- `fn format(rows: List[List[String]], sep: String = ",") -> String`
+- `fn format_row(row: List[String], sep: String = ",") -> String`
+- `fn read(path: String, sep: String = ",") -> Result[List[List[String]], String]`
+- `fn write(path: String, rows: List[List[String]], sep: String = ",") -> Result[Nil, String]`
 
 ## Metadata
 
@@ -557,7 +599,22 @@ Everything here is available in every module without an import.
 ## Env
 
 - `fn get(name: String) -> String?`
+- `fn set(name: String, value: String)`
+- `fn remove(name: String)`
+- `fn all() -> Dict[String, String]`
 - `fn cpu_count() -> Int`
+
+## Stdin
+
+- `fn read_line() -> String?`
+- `fn lines() -> StdinLines`
+- `fn read_lines() -> List[String]`
+- `fn read_all() -> String`
+- `fn read_bytes() -> Bytes`
+
+## StdinLines
+
+- `fn each(self, f: fn(String))`
 
 ## Json
 
