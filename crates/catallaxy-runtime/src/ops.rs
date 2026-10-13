@@ -693,8 +693,7 @@ pub fn dict_lookup(ix: &mut dyn Interop, dict: Value, key: Value) -> RtResult<Op
 pub fn dict_lookup_hashed(ix: &mut dyn Interop, dict: Value, key: Value, hash: u64) -> RtResult<Option<usize>> {
     let m = unsafe { &*(ix.mutator() as *mut Mutator) };
     loop {
-        let (probe, version) =
-            read_dict(m, dict, |t| (t.probe(hash, key), t.version()))?;
+        let (probe, version) = read_dict(m, dict, |t| (t.probe(hash, key), t.version()))?;
         match probe {
             Probe::Found(i) => return Ok(Some(i)),
             Probe::Absent => return Ok(None),

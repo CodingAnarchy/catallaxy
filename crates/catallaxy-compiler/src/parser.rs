@@ -212,9 +212,7 @@ impl<'a> Parser<'a> {
         let start = self.span();
         let is_pub = self.eat_kw(Kw::Pub);
         match self.tok() {
-            Tok::Kw(Kw::Fn) | Tok::Kw(Kw::Native) => {
-                Ok(Item::Fn(self.parse_fn(is_pub, start, false)?))
-            }
+            Tok::Kw(Kw::Fn) | Tok::Kw(Kw::Native) => Ok(Item::Fn(self.parse_fn(is_pub, start, false)?)),
             Tok::Kw(Kw::Class) => Ok(Item::Class(self.parse_class(is_pub, ClassModifier::Plain, start)?)),
             Tok::Kw(Kw::Frozen) if matches!(self.peek_tok(1), Tok::Kw(Kw::Class)) => {
                 self.bump();
@@ -248,8 +246,11 @@ impl<'a> Parser<'a> {
                 if !self.is_sym(":") {
                     let span = name.span.after();
                     self.diags.push(
-                        Diagnostic::error("E0104", "module variables need a type annotation", name.span)
-                            .fix("add a type", span, ": Int"),
+                        Diagnostic::error("E0104", "module variables need a type annotation", name.span).fix(
+                            "add a type",
+                            span,
+                            ": Int",
+                        ),
                     );
                     return Err(());
                 }
@@ -965,7 +966,14 @@ impl<'a> Parser<'a> {
                         let name = Ident { name: n, span };
                         let span = e.span.to(span);
                         e = self.mk(
-                            ExprKind::Member { recv: Box::new(e), name, args: vec![], block: None, parens: false, safe },
+                            ExprKind::Member {
+                                recv: Box::new(e),
+                                name,
+                                args: vec![],
+                                block: None,
+                                parens: false,
+                                safe,
+                            },
                             span,
                         );
                         continue;
@@ -1243,7 +1251,14 @@ impl<'a> Parser<'a> {
                 let span = start.to(name.span);
                 let recv = self.mk(ExprKind::Ident("_".into()), start);
                 Ok(self.mk(
-                    ExprKind::Member { recv: Box::new(recv), name, args: vec![], block: None, parens: false, safe: false },
+                    ExprKind::Member {
+                        recv: Box::new(recv),
+                        name,
+                        args: vec![],
+                        block: None,
+                        parens: false,
+                        safe: false,
+                    },
                     span,
                 ))
             }

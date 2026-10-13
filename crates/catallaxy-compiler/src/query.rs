@@ -224,10 +224,13 @@ pub fn expr_at(m: &Module, offset: u32) -> Option<&Expr> {
 pub fn expr_ending_at(m: &Module, end: u32) -> Option<&Expr> {
     let mut best: Option<&Expr> = None;
     walk(m, &mut |e| {
-        if e.span.end == end && e.span.start < end && !matches!(e.kind, ExprKind::Error)
-            && best.is_none_or(|b| e.span.end - e.span.start < b.span.end - b.span.start) {
-                best = Some(e);
-            }
+        if e.span.end == end
+            && e.span.start < end
+            && !matches!(e.kind, ExprKind::Error)
+            && best.is_none_or(|b| e.span.end - e.span.start < b.span.end - b.span.start)
+        {
+            best = Some(e);
+        }
     });
     best.or_else(|| expr_at(m, end.saturating_sub(1)))
 }
@@ -282,7 +285,10 @@ pub fn fn_signature(ck: &Checker, fid: u32) -> String {
     let tps = if f.type_params.is_empty() {
         String::new()
     } else {
-        format!("[{}]", f.type_params.iter().map(|&p| ck.params[p as usize].name.clone()).collect::<Vec<_>>().join(", "))
+        format!(
+            "[{}]",
+            f.type_params.iter().map(|&p| ck.params[p as usize].name.clone()).collect::<Vec<_>>().join(", ")
+        )
     };
     let mut ps: Vec<String> = Vec::new();
     match f.self_kind {
@@ -340,7 +346,10 @@ pub fn hover(ck: &Checker, m: ModId, offset: u32) -> Option<(String, Span)> {
                 Some(NameRes::Fn(f)) => with_doc(fn_signature(ck, *f), &ck.fns[*f as usize].doc),
                 Some(NameRes::Global(g)) => {
                     let gi = &ck.globals[*g as usize];
-                    with_doc(format!("{} {}: {}", if gi.is_const { "const" } else { "var" }, gi.name, ck.show(gi.ty)), &None)
+                    with_doc(
+                        format!("{} {}: {}", if gi.is_const { "const" } else { "var" }, gi.name, ck.show(gi.ty)),
+                        &None,
+                    )
                 }
                 Some(NameRes::Class(c)) => {
                     let ci = ck.classes.get(c)?;
@@ -439,9 +448,43 @@ pub struct Completion {
 }
 
 pub const KEYWORDS: &[&str] = &[
-    "and", "as", "break", "class", "const", "continue", "else", "enum", "extend", "false", "fn", "for", "frozen",
-    "if", "import", "in", "interface", "is", "let", "loop", "match", "move", "mut", "native", "nil", "not", "or",
-    "pub", "return", "self", "Self", "shared", "spawn", "true", "var", "while", "with",
+    "and",
+    "as",
+    "break",
+    "class",
+    "const",
+    "continue",
+    "else",
+    "enum",
+    "extend",
+    "false",
+    "fn",
+    "for",
+    "frozen",
+    "if",
+    "import",
+    "in",
+    "interface",
+    "is",
+    "let",
+    "loop",
+    "match",
+    "move",
+    "mut",
+    "native",
+    "nil",
+    "not",
+    "or",
+    "pub",
+    "return",
+    "self",
+    "Self",
+    "shared",
+    "spawn",
+    "true",
+    "var",
+    "while",
+    "with",
 ];
 
 fn scope_item_completion(ck: &Checker, name: &str, it: ScopeItem) -> Completion {
@@ -539,15 +582,27 @@ pub fn path_completions(ck: &Checker, res: NameRes) -> Vec<Completion> {
         NameRes::Class(c) => {
             let Some(ci) = ck.classes.get(&c) else { return out };
             if ci.constructor.is_some() {
-                out.push(Completion { label: "new".into(), kind: CompletionKind::Function, detail: ci.constructor.map(|f| fn_signature(ck, f)) });
+                out.push(Completion {
+                    label: "new".into(),
+                    kind: CompletionKind::Function,
+                    detail: ci.constructor.map(|f| fn_signature(ck, f)),
+                });
             }
             for (n, &f) in &ci.methods {
                 if ck.fns[f as usize].self_kind == crate::ast::SelfKind::None {
-                    out.push(Completion { label: n.clone(), kind: CompletionKind::Function, detail: Some(fn_signature(ck, f)) });
+                    out.push(Completion {
+                        label: n.clone(),
+                        kind: CompletionKind::Function,
+                        detail: Some(fn_signature(ck, f)),
+                    });
                 }
             }
             for (n, &g) in &ci.consts {
-                out.push(Completion { label: n.clone(), kind: CompletionKind::Constant, detail: Some(ck.show(ck.globals[g as usize].ty)) });
+                out.push(Completion {
+                    label: n.clone(),
+                    kind: CompletionKind::Constant,
+                    detail: Some(ck.show(ck.globals[g as usize].ty)),
+                });
             }
         }
         NameRes::Enum(e) => {
@@ -557,7 +612,11 @@ pub fn path_completions(ck: &Checker, res: NameRes) -> Vec<Completion> {
             }
             for (n, &f) in &ei.methods {
                 if ck.fns[f as usize].self_kind == crate::ast::SelfKind::None {
-                    out.push(Completion { label: n.clone(), kind: CompletionKind::Function, detail: Some(fn_signature(ck, f)) });
+                    out.push(Completion {
+                        label: n.clone(),
+                        kind: CompletionKind::Function,
+                        detail: Some(fn_signature(ck, f)),
+                    });
                 }
             }
         }

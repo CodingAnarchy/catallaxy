@@ -44,7 +44,13 @@ pub fn report(top: usize) -> String {
     let mut pairs: Vec<(usize, u64)> = counts.into_iter().enumerate().filter(|&(_, c)| c > 0).collect();
     pairs.sort_by_key(|&(_, c)| std::cmp::Reverse(c));
     for (i, c) in pairs.into_iter().take(top) {
-        let _ = writeln!(out, "  {:>6.2}%  {} -> {}", 100.0 * c as f64 / total as f64, name(i / NUM_OPS), name(i % NUM_OPS));
+        let _ = writeln!(
+            out,
+            "  {:>6.2}%  {} -> {}",
+            100.0 * c as f64 / total as f64,
+            name(i / NUM_OPS),
+            name(i % NUM_OPS)
+        );
     }
     out
 }

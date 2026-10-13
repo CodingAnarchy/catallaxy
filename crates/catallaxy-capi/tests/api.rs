@@ -9,7 +9,13 @@ use catallaxy_capi::*;
 static SEEN: Mutex<Vec<i64>> = Mutex::new(Vec::new());
 
 /// native fn record(x: Int) -> Nil
-unsafe extern "C" fn record(_vm: *mut cx_vm, args: *const cx_value, nargs: usize, out: *mut cx_value, _: *mut c_void) -> cx_status {
+unsafe extern "C" fn record(
+    _vm: *mut cx_vm,
+    args: *const cx_value,
+    nargs: usize,
+    out: *mut cx_value,
+    _: *mut c_void,
+) -> cx_status {
     assert_eq!(nargs, 1);
     let mut x = 0;
     assert_eq!(cx_to_int(*args, &mut x), 0);
@@ -19,7 +25,13 @@ unsafe extern "C" fn record(_vm: *mut cx_vm, args: *const cx_value, nargs: usize
 }
 
 /// native fn scale(x: Int) -> Int, multiplying by the registered user value.
-unsafe extern "C" fn scale(vm: *mut cx_vm, args: *const cx_value, _: usize, out: *mut cx_value, user: *mut c_void) -> cx_status {
+unsafe extern "C" fn scale(
+    vm: *mut cx_vm,
+    args: *const cx_value,
+    _: usize,
+    out: *mut cx_value,
+    user: *mut c_void,
+) -> cx_status {
     let mut x = 0;
     if cx_to_int(*args, &mut x) != 0 {
         return cx_panic(vm, c"scale: not an Int".as_ptr());
@@ -30,7 +42,13 @@ unsafe extern "C" fn scale(vm: *mut cx_vm, args: *const cx_value, _: usize, out:
 
 /// native fn map_strings(f: fn(String) -> String, xs: List[String]) -> List[String]: calls back
 /// into the VM for each item, rooting results between calls.
-unsafe extern "C" fn map_strings(vm: *mut cx_vm, args: *const cx_value, _: usize, out: *mut cx_value, _: *mut c_void) -> cx_status {
+unsafe extern "C" fn map_strings(
+    vm: *mut cx_vm,
+    args: *const cx_value,
+    _: usize,
+    out: *mut cx_value,
+    _: *mut c_void,
+) -> cx_status {
     let mark = cx_scope_open(vm);
     let f = cx_root(vm, *args);
     let xs = cx_root(vm, *args.add(1));

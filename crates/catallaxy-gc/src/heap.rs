@@ -24,8 +24,8 @@ pub const MAX_SMALL: usize = 2048;
 
 /// Slot sizes: 16-byte steps up to 512, then coarser steps up to 2048.
 pub const SIZE_CLASSES: [usize; 40] = [
-    16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 272, 288, 304, 320, 336,
-    352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048,
+    16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 272, 288, 304, 320, 336, 352, 368, 384,
+    400, 416, 432, 448, 464, 480, 496, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048,
 ];
 pub const NUM_CLASSES: usize = SIZE_CLASSES.len();
 
@@ -275,9 +275,8 @@ impl PagePool {
 
 /// Whether new objects start young (thread-local minor collection). On by default; off with
 /// `CATX_GC_GENERATIONAL=0`, or when `--promote-on-access` lets threads steal owned objects.
-static GENERATIONAL: std::sync::LazyLock<AtomicBool> = std::sync::LazyLock::new(|| {
-    AtomicBool::new(!matches!(std::env::var("CATX_GC_GENERATIONAL").as_deref(), Ok("0")))
-});
+static GENERATIONAL: std::sync::LazyLock<AtomicBool> =
+    std::sync::LazyLock::new(|| AtomicBool::new(!matches!(std::env::var("CATX_GC_GENERATIONAL").as_deref(), Ok("0"))));
 
 /// Turns generational collection on or off for threads registered from now on.
 pub fn set_generational(on: bool) {

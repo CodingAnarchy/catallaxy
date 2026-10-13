@@ -168,11 +168,17 @@ pub struct TypeExpr {
 #[derive(Clone, Debug)]
 pub enum TypeExprKind {
     /// `Name`, `mod.Name`, `Name[Args]`.
-    Named { path: Vec<Ident>, args: Vec<TypeExpr> },
+    Named {
+        path: Vec<Ident>,
+        args: Vec<TypeExpr>,
+    },
     Optional(Box<TypeExpr>),
     Union(Vec<TypeExpr>),
     Inter(Vec<TypeExpr>),
-    Fn { params: Vec<TypeExpr>, ret: Option<Box<TypeExpr>> },
+    Fn {
+        params: Vec<TypeExpr>,
+        ret: Option<Box<TypeExpr>>,
+    },
     Tuple(Vec<TypeExpr>),
     Inline(Vec<FnDecl>),
     Frozen(Box<TypeExpr>),
@@ -297,32 +303,96 @@ pub enum ExprKind {
     Tuple(Vec<Expr>),
     Unary(UnOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
-    Range { lo: Box<Expr>, hi: Box<Expr>, exclusive: bool },
+    Range {
+        lo: Box<Expr>,
+        hi: Box<Expr>,
+        exclusive: bool,
+    },
     /// `callee(args) { block }` where callee is not a member access.
-    Call { callee: Box<Expr>, args: Vec<Arg>, block: Option<Box<Expr>> },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Arg>,
+        block: Option<Box<Expr>>,
+    },
     /// `recv.name`, `recv.name(args)`, `recv?.name ...`.
-    Member { recv: Box<Expr>, name: Ident, args: Vec<Arg>, block: Option<Box<Expr>>, parens: bool, safe: bool },
-    Index { recv: Box<Expr>, args: Vec<Expr> },
-    Closure { params: Vec<ClosureParam>, ret: Option<TypeExpr>, body: Block, fn_syntax: bool },
-    If { cond: Box<Expr>, then: Block, else_: Option<Box<Expr>> },
-    IfLet { pattern: Pattern, value: Box<Expr>, then: Block, else_: Option<Box<Expr>> },
-    While { cond: Box<Expr>, body: Block },
-    Loop { body: Block },
-    For { pattern: Pattern, iter: Box<Expr>, body: Block },
-    Match { subject: Box<Expr>, arms: Vec<MatchArm> },
+    Member {
+        recv: Box<Expr>,
+        name: Ident,
+        args: Vec<Arg>,
+        block: Option<Box<Expr>>,
+        parens: bool,
+        safe: bool,
+    },
+    Index {
+        recv: Box<Expr>,
+        args: Vec<Expr>,
+    },
+    Closure {
+        params: Vec<ClosureParam>,
+        ret: Option<TypeExpr>,
+        body: Block,
+        fn_syntax: bool,
+    },
+    If {
+        cond: Box<Expr>,
+        then: Block,
+        else_: Option<Box<Expr>>,
+    },
+    IfLet {
+        pattern: Pattern,
+        value: Box<Expr>,
+        then: Block,
+        else_: Option<Box<Expr>>,
+    },
+    While {
+        cond: Box<Expr>,
+        body: Block,
+    },
+    Loop {
+        body: Block,
+    },
+    For {
+        pattern: Pattern,
+        iter: Box<Expr>,
+        body: Block,
+    },
+    Match {
+        subject: Box<Expr>,
+        arms: Vec<MatchArm>,
+    },
     Block(Block),
     Return(Option<Box<Expr>>),
     Break(Option<Box<Expr>>),
     Continue,
-    Assign { target: Box<Expr>, op: Option<BinOp>, value: Box<Expr>, ty: Option<TypeExpr> },
-    Let { pattern: Pattern, value: Box<Expr> },
-    Is { expr: Box<Expr>, ty: TypeExpr },
-    AsCast { expr: Box<Expr>, ty: TypeExpr },
+    Assign {
+        target: Box<Expr>,
+        op: Option<BinOp>,
+        value: Box<Expr>,
+        ty: Option<TypeExpr>,
+    },
+    Let {
+        pattern: Pattern,
+        value: Box<Expr>,
+    },
+    Is {
+        expr: Box<Expr>,
+        ty: TypeExpr,
+    },
+    AsCast {
+        expr: Box<Expr>,
+        ty: TypeExpr,
+    },
     Unwrap(Box<Expr>),
     Try(Box<Expr>),
-    Spawn { is_move: bool, body: Block },
+    Spawn {
+        is_move: bool,
+        body: Block,
+    },
     Move(Box<Expr>),
-    WithLock { obj: Box<Expr>, body: Block },
+    WithLock {
+        obj: Box<Expr>,
+        body: Block,
+    },
     /// Placeholder produced after a parse error.
     Error,
 }
@@ -340,11 +410,23 @@ pub enum PatternKind {
     Bind(Ident),
     /// A literal expression (number, string, bool, nil, negative number).
     Literal(Box<Expr>),
-    Range { lo: Box<Expr>, hi: Box<Expr>, exclusive: bool },
+    Range {
+        lo: Box<Expr>,
+        hi: Box<Expr>,
+        exclusive: bool,
+    },
     /// `Path.Variant(args)`, `Ok(x)`, `.Variant`, or a type name (resolved by the checker).
-    Ctor { path: Vec<Ident>, args: Vec<Pattern>, has_parens: bool, shorthand: bool },
+    Ctor {
+        path: Vec<Ident>,
+        args: Vec<Pattern>,
+        has_parens: bool,
+        shorthand: bool,
+    },
     Tuple(Vec<Pattern>),
     /// `name: Type` binding with a type test.
-    Typed { name: Ident, ty: TypeExpr },
+    Typed {
+        name: Ident,
+        ty: TypeExpr,
+    },
     Or(Vec<Pattern>),
 }

@@ -244,7 +244,12 @@ impl Checker {
             if !self.unify(f.ret, joined) {
                 // Fall back to a union with what was already inferred (recursive uses).
                 let cur = self.types.resolve(f.ret);
-                let msg = format!("cannot infer a single return type for `{}`: `{}` vs `{}`", f.name, self.show(cur), self.show(joined));
+                let msg = format!(
+                    "cannot infer a single return type for `{}`: `{}` vs `{}`",
+                    f.name,
+                    self.show(cur),
+                    self.show(joined)
+                );
                 self.err("E0302", msg, span);
             }
         }
@@ -493,7 +498,9 @@ fn assigned_self_fields(body: Option<&Block>) -> FxHashSet<String> {
 fn calls_super_init(body: Option<&Block>) -> bool {
     body.is_some_and(|b| {
         b.stmts.iter().any(|s| match &s.kind {
-            ExprKind::Member { recv, name, .. } => name.name == "init" && matches!(&recv.kind, ExprKind::Ident(n) if n == "super"),
+            ExprKind::Member { recv, name, .. } => {
+                name.name == "init" && matches!(&recv.kind, ExprKind::Ident(n) if n == "super")
+            }
             _ => false,
         })
     })

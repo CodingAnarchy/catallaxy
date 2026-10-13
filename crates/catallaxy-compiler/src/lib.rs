@@ -5,14 +5,14 @@
 
 pub mod ast;
 pub mod check;
-pub mod diag;
-pub mod lexer;
-pub mod parser;
-pub mod types;
-pub mod util;
 pub mod codegen;
+pub mod diag;
 pub mod driver;
 pub mod fmt;
+pub mod lexer;
+pub mod parser;
 pub mod query;
+pub mod types;
+pub mod util;
 
 pub use driver::{compile_path, compile_source, Compilation, Options};

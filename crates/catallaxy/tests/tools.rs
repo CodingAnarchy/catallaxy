@@ -64,7 +64,10 @@ impl Lsp {
     /// Waits for a message satisfying `pred`.
     fn wait(&self, what: &str, pred: impl Fn(&Value) -> bool) -> Value {
         loop {
-            let v = self.rx.recv_timeout(Duration::from_secs(30)).unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+            let v = self
+                .rx
+                .recv_timeout(Duration::from_secs(30))
+                .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
             if pred(&v) {
                 return v;
             }
@@ -81,7 +84,21 @@ fn file_uri(name: &str) -> (String, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("catx-lsp-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
-    (format!("file://{}", path.display()), path)
+    // A real file URI on every platform: `file:///C:/Users/...` on Windows, percent-encoded the way
+    // the server encodes the locations it returns.
+    let p = path.to_string_lossy().replace('\\', "/");
+    let mut uri = String::from("file://");
+    if !p.starts_with('/') {
+        uri.push('/');
+    }
+    for b in p.bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~:".contains(&b) {
+            uri.push(b as char);
+        } else {
+            uri.push_str(&format!("%{b:02X}"));
+        }
+    }
+    (uri, path)
 }
 
 #[test]
@@ -101,17 +118,29 @@ fn lsp_diagnostics_hover_definition_completion() {
     assert!(list.iter().any(|d| d["code"] == "E0300" && d["range"]["start"]["line"] == 2), "{diags}");
 
     // Hover over `total` (line 3) shows its type.
-    let h = lsp.request(2, "textDocument/hover", json!({"textDocument": {"uri": uri}, "position": {"line": 3, "character": 1}}));
+    let h = lsp.request(
+        2,
+        "textDocument/hover",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 3, "character": 1}}),
+    );
     let value = h["result"]["contents"]["value"].as_str().unwrap_or_default();
     assert!(value.contains("total: Int"), "{h}");
 
     // Hover over the call of `f` shows its signature.
-    let h = lsp.request(3, "textDocument/hover", json!({"textDocument": {"uri": uri}, "position": {"line": 2, "character": 0}}));
+    let h = lsp.request(
+        3,
+        "textDocument/hover",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 2, "character": 0}}),
+    );
     let value = h["result"]["contents"]["value"].as_str().unwrap_or_default();
     assert!(value.contains("fn f(s: String) -> Int"), "{h}");
 
     // Definition of `count` in `total = count + 1` is on line 1.
-    let d = lsp.request(4, "textDocument/definition", json!({"textDocument": {"uri": uri}, "position": {"line": 3, "character": 9}}));
+    let d = lsp.request(
+        4,
+        "textDocument/definition",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 3, "character": 9}}),
+    );
     assert_eq!(d["result"]["range"]["start"]["line"], 1, "{d}");
 
     // Member completion after `.` on a String.
@@ -119,12 +148,20 @@ fn lsp_diagnostics_hover_definition_completion() {
     lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
         "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": text2}]
     }}));
-    let c = lsp.request(5, "textDocument/completion", json!({"textDocument": {"uri": uri}, "position": {"line": 1, "character": 5}}));
+    let c = lsp.request(
+        5,
+        "textDocument/completion",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 1, "character": 5}}),
+    );
     let labels: Vec<&str> = c["result"].as_array().unwrap().iter().filter_map(|i| i["label"].as_str()).collect();
     assert!(labels.contains(&"upcase") && labels.contains(&"length"), "{labels:?}");
 
     // Scope completion offers locals and prelude functions.
-    let c = lsp.request(6, "textDocument/completion", json!({"textDocument": {"uri": uri}, "position": {"line": 1, "character": 0}}));
+    let c = lsp.request(
+        6,
+        "textDocument/completion",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 1, "character": 0}}),
+    );
     let labels: Vec<&str> = c["result"].as_array().unwrap().iter().filter_map(|i| i["label"].as_str()).collect();
     assert!(labels.contains(&"name") && labels.contains(&"puts"), "{labels:?}");
 
@@ -137,8 +174,11 @@ fn lsp_diagnostics_hover_definition_completion() {
         lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
             "textDocument": {"uri": uri, "version": 3 + i}, "contentChanges": [{"text": text}]
         }}));
-        let c = lsp.request(8 + i as i64, "textDocument/completion",
-            json!({"textDocument": {"uri": uri}, "position": {"line": 5, "character": col}}));
+        let c = lsp.request(
+            8 + i as i64,
+            "textDocument/completion",
+            json!({"textDocument": {"uri": uri}, "position": {"line": 5, "character": col}}),
+        );
         let labels: Vec<&str> = c["result"].as_array().unwrap().iter().filter_map(|i| i["label"].as_str()).collect();
         for w in want {
             assert!(labels.contains(w), "{line}: missing {w} in {labels:?}");

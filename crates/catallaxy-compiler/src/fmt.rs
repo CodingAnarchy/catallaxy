@@ -684,10 +684,8 @@ fn signature(src: &str) -> (Vec<Sig>, Vec<Span>) {
     }
     let mut out: Vec<(Sig, Span)> = Vec::new();
     for (sig, span) in raw {
-        let after_sep_ok = !matches!(
-            out.last(),
-            None | Some((Sig::Sep, _)) | Some((Sig::Tok(Tok::Sym("{" | "|" | "||"), _), _))
-        );
+        let after_sep_ok =
+            !matches!(out.last(), None | Some((Sig::Sep, _)) | Some((Sig::Tok(Tok::Sym("{" | "|" | "||"), _), _)));
         match sig {
             Sig::Sep if !after_sep_ok => {}
             Sig::Tok(Tok::Sym("}") | Tok::Kw(Kw::Else), _) if matches!(out.last(), Some((Sig::Sep, _))) => {

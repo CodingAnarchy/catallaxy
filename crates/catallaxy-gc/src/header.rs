@@ -83,10 +83,7 @@ impl Header {
             | ((color as u64) << COLOR_SHIFT)
             | ((owner as u64) << OWNER_SHIFT)
             | if young { YOUNG_BIT } else { 0 };
-        std::ptr::write(
-            this,
-            Header { vtable: AtomicUsize::new(vtable as usize), meta: AtomicU64::new(meta) },
-        );
+        std::ptr::write(this, Header { vtable: AtomicUsize::new(vtable as usize), meta: AtomicU64::new(meta) });
     }
 
     #[inline(always)]
@@ -138,8 +135,7 @@ impl Header {
     pub fn is_local_or_frozen(&self, tid: u16) -> bool {
         let m = self.meta.load(Ordering::Relaxed);
         let st = m & STATE_MASK;
-        st == ObjState::Frozen as u64
-            || (st == ObjState::Owned as u64 && Self::owner_of(m) == tid)
+        st == ObjState::Frozen as u64 || (st == ObjState::Owned as u64 && Self::owner_of(m) == tid)
     }
 
     fn update(&self, f: impl Fn(u64) -> u64) -> u64 {
@@ -326,10 +322,7 @@ impl Header {
                 continue;
             }
             if cur & PARKED_BIT == 0
-                && self
-                    .meta
-                    .compare_exchange_weak(cur, cur | PARKED_BIT, Ordering::Relaxed, Ordering::Relaxed)
-                    .is_err()
+                && self.meta.compare_exchange_weak(cur, cur | PARKED_BIT, Ordering::Relaxed, Ordering::Relaxed).is_err()
             {
                 continue;
             }

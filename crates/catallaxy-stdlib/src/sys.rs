@@ -65,7 +65,11 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             let c = s(a[1])?.to_string();
             let r = crate::fiber::blocking_io(vm, || {
                 use std::io::Write as _;
-                std::fs::OpenOptions::new().create(true).append(true).open(&p).and_then(|mut f| f.write_all(c.as_bytes()))
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&p)
+                    .and_then(|mut f| f.write_all(c.as_bytes()))
             });
             Ok(match r {
                 Ok(()) => ok(vm, Value::NIL),
@@ -84,8 +88,10 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "File.list_dir" => |vm, a| {
             let p = s(a[0])?.to_string();
             let r = crate::fiber::blocking_io(vm, || -> std::io::Result<Vec<String>> {
-                let mut names: Vec<String> =
-                    std::fs::read_dir(&p)?.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
+                let mut names: Vec<String> = std::fs::read_dir(&p)?
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect();
                 names.sort();
                 Ok(names)
             });
@@ -142,9 +148,9 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
                 Err(_) => Value::NIL,
             })
         },
-        "Env.cpu_count" => |_, _| {
-            Ok(Value::small_int(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as i64))
-        },
+        "Env.cpu_count" => {
+            |_, _| Ok(Value::small_int(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as i64))
+        }
 
         "Json.parse" => json_parse,
         "Json.stringify" => |vm, a| {
@@ -287,7 +293,8 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<serde_json::Value> {
             Ok(J::Array(out))
         }
         ObjKind::Dict => {
-            let pairs: Vec<(Value, Value)> = catallaxy_runtime::ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| (e.key, e.value)).collect())?;
+            let pairs: Vec<(Value, Value)> =
+                catallaxy_runtime::ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| (e.key, e.value)).collect())?;
             let mut map = serde_json::Map::new();
             for (k, x) in pairs {
                 let key = to_s(vm, k)?;

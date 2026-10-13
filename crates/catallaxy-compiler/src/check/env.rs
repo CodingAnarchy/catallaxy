@@ -60,7 +60,9 @@ pub enum CheckState {
 pub enum Synth {
     None,
     /// `fn field(self) { self.field }`
-    Getter { field: usize },
+    Getter {
+        field: usize,
+    },
     /// A module's top-level statements.
     Main(ModId),
     /// Evaluates class field defaults then runs `init` (generated `Class.new`).
@@ -302,15 +304,32 @@ pub enum ArgSlot {
 #[derive(Clone, Debug)]
 pub enum CallRes {
     /// A function or method call. `recv` is true when the receiver is passed as the first argument.
-    Fn { dispatch: Dispatch, recv: bool, args: Vec<ArgSlot>, safe: bool },
+    Fn {
+        dispatch: Dispatch,
+        recv: bool,
+        args: Vec<ArgSlot>,
+        safe: bool,
+    },
     /// Calling a closure value (the callee expression).
-    Closure { args: Vec<ArgSlot> },
+    Closure {
+        args: Vec<ArgSlot>,
+    },
     /// `Class.new(...)`.
-    Construct { class: ClassId, ctor: FnId, args: Vec<ArgSlot> },
+    Construct {
+        class: ClassId,
+        ctor: FnId,
+        args: Vec<ArgSlot>,
+    },
     /// Enum variant construction.
-    Variant { class: ClassId, args: Vec<ArgSlot> },
+    Variant {
+        class: ClassId,
+        args: Vec<ArgSlot>,
+    },
     /// Field read (member without parens).
-    Field { index: u32, safe: bool },
+    Field {
+        index: u32,
+        safe: bool,
+    },
     TupleField(u32),
     /// A module-level item accessed through a module or class path.
     Global(GlobalId),
@@ -376,9 +395,15 @@ pub enum AssignRes {
 pub enum PatRes {
     Bind(LocalId),
     /// Enum variant: runtime class id and tag.
-    Variant { class: ClassId, tag: u32 },
+    Variant {
+        class: ClassId,
+        tag: u32,
+    },
     /// Runtime type test against `rt_types[idx]`, optionally binding.
-    Type { rt: u32, bind: Option<LocalId> },
+    Type {
+        rt: u32,
+        bind: Option<LocalId>,
+    },
     Literal,
     Wildcard,
 }

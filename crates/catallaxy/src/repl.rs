@@ -278,15 +278,16 @@ impl Repl {
             ),
             None => input.to_string(),
         };
-        let mut program = format!(
-            "{base}puts(\"{m}\")\neputs(\"{m}\")\n{body}\nputs(\"{e}\")\n",
-            m = self.mark,
-            e = self.end_mark
-        );
+        let mut program =
+            format!("{base}puts(\"{m}\")\neputs(\"{m}\")\n{body}\nputs(\"{e}\")\n", m = self.mark, e = self.end_mark);
         let mut outcome = self.run_child(&program);
         if wrap.is_some() && matches!(outcome, Some((_, _, EXEC_COMPILE_FAILED, _))) {
             // The value wrapper did not compile (unusual syntax); run the input as written.
-            program = format!("{base}puts(\"{m}\")\neputs(\"{m}\")\n{input}\nputs(\"{e}\")\n", m = self.mark, e = self.end_mark);
+            program = format!(
+                "{base}puts(\"{m}\")\neputs(\"{m}\")\n{input}\nputs(\"{e}\")\n",
+                m = self.mark,
+                e = self.end_mark
+            );
             outcome = self.run_child(&program);
         }
         let Some((stdout, stderr, code, reached_end)) = outcome else { return };
@@ -348,7 +349,10 @@ impl Repl {
         let stderr = after(&stderr).unwrap_or(stderr);
         let reached_end = match stdout.find(&self.end_mark) {
             Some(i) => {
-                let tail = stdout[i + self.end_mark.len()..].strip_prefix('\n').unwrap_or(&stdout[i + self.end_mark.len()..]).to_string();
+                let tail = stdout[i + self.end_mark.len()..]
+                    .strip_prefix('\n')
+                    .unwrap_or(&stdout[i + self.end_mark.len()..])
+                    .to_string();
                 stdout.truncate(i);
                 stdout.push_str(&tail);
                 true
@@ -400,8 +404,35 @@ fn input_state(src: &str) -> Input {
     let continues = match last {
         Some(Tok::Sym(s)) => matches!(
             *s,
-            "+" | "-" | "*" | "/" | "%" | "**" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "<=>" | "&&" | "||" | "??"
-                | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "->" | "=>" | "," | "." | "?." | ".." | "..." | "|"
+            "+" | "-"
+                | "*"
+                | "/"
+                | "%"
+                | "**"
+                | "=="
+                | "!="
+                | "<"
+                | "<="
+                | ">"
+                | ">="
+                | "<=>"
+                | "&&"
+                | "||"
+                | "??"
+                | "="
+                | "+="
+                | "-="
+                | "*="
+                | "/="
+                | "%="
+                | "->"
+                | "=>"
+                | ","
+                | "."
+                | "?."
+                | ".."
+                | "..."
+                | "|"
         ),
         Some(Tok::Kw(k)) => {
             use catallaxy_compiler::lexer::Kw;

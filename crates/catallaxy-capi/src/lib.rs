@@ -29,8 +29,13 @@ pub enum cx_status {
     CX_PANIC = 1,
 }
 
-pub type cx_native =
-    unsafe extern "C" fn(vm: *mut cx_vm, args: *const cx_value, nargs: usize, out: *mut cx_value, user: *mut c_void) -> cx_status;
+pub type cx_native = unsafe extern "C" fn(
+    vm: *mut cx_vm,
+    args: *const cx_value,
+    nargs: usize,
+    out: *mut cx_value,
+    user: *mut c_void,
+) -> cx_status;
 
 // ---- native dispatch --------------------------------------------------------------------------
 
@@ -55,12 +60,20 @@ fn invoke(slot: usize, vm: &mut Vm, args: &[Value]) -> RtResult<Value> {
     let mut out = Value::NIL.0;
     PENDING.with(|p| p.borrow_mut().take());
     // SAFETY: the callee follows the header's contract; args live in rooted VM registers.
-    let status = unsafe { (s.f)(vm as *mut Vm as *mut cx_vm, args.as_ptr() as *const cx_value, args.len(), &mut out, s.user as *mut c_void) };
+    let status = unsafe {
+        (s.f)(
+            vm as *mut Vm as *mut cx_vm,
+            args.as_ptr() as *const cx_value,
+            args.len(),
+            &mut out,
+            s.user as *mut c_void,
+        )
+    };
     match status {
         cx_status::CX_OK => Ok(Value(out)),
-        cx_status::CX_PANIC => Err(PENDING
-            .with(|p| p.borrow_mut().take())
-            .unwrap_or_else(|| Trap::Panic("native function failed".into()))),
+        cx_status::CX_PANIC => {
+            Err(PENDING.with(|p| p.borrow_mut().take()).unwrap_or_else(|| Trap::Panic("native function failed".into())))
+        }
     }
 }
 
@@ -160,7 +173,8 @@ pub unsafe extern "C" fn cx_string(v: *mut cx_vm, utf8: *const c_char, len: usiz
 }
 #[no_mangle]
 pub unsafe extern "C" fn cx_list(v: *mut cx_vm, items: *const cx_value, n: usize) -> cx_value {
-    let items = if n == 0 { Vec::new() } else { std::slice::from_raw_parts(items, n).iter().map(|&w| Value(w)).collect() };
+    let items =
+        if n == 0 { Vec::new() } else { std::slice::from_raw_parts(items, n).iter().map(|&w| Value(w)).collect() };
     vm(v).m.alloc_list(items).0
 }
 
@@ -262,8 +276,18 @@ pub unsafe extern "C" fn cx_list_get(v: *mut cx_vm, l: cx_value, i: usize, out: 
 // ---- calls, rooting, errors -------------------------------------------------------------------
 
 #[no_mangle]
-pub unsafe extern "C" fn cx_call(v: *mut cx_vm, closure: cx_value, args: *const cx_value, nargs: usize, out: *mut cx_value) -> cx_status {
-    let args: Vec<Value> = if nargs == 0 { Vec::new() } else { std::slice::from_raw_parts(args, nargs).iter().map(|&w| Value(w)).collect() };
+pub unsafe extern "C" fn cx_call(
+    v: *mut cx_vm,
+    closure: cx_value,
+    args: *const cx_value,
+    nargs: usize,
+    out: *mut cx_value,
+) -> cx_status {
+    let args: Vec<Value> = if nargs == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(args, nargs).iter().map(|&w| Value(w)).collect()
+    };
     match vm(v).call_value(Value(closure), &args) {
         Ok(r) => {
             if !out.is_null() {
@@ -302,7 +326,11 @@ pub unsafe extern "C" fn cx_rooted(v: *mut cx_vm, handle: usize) -> cx_value {
 
 #[no_mangle]
 pub unsafe extern "C" fn cx_panic(_vm: *mut cx_vm, message: *const c_char) -> cx_status {
-    let msg = if message.is_null() { "native function failed".to_string() } else { CStr::from_ptr(message).to_string_lossy().into_owned() };
+    let msg = if message.is_null() {
+        "native function failed".to_string()
+    } else {
+        CStr::from_ptr(message).to_string_lossy().into_owned()
+    };
     PENDING.with(|p| *p.borrow_mut() = Some(Trap::Panic(msg)));
     cx_status::CX_PANIC
 }

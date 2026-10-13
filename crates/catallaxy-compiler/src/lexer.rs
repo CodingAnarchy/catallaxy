@@ -128,9 +128,9 @@ pub struct Comment {
 
 /// Operators, longest first.
 pub(crate) const SYMBOLS: &[&str] = &[
-    "...", "<=>", "**=", "<<=", ">>=", "??=", "||=", "&&=", "==", "!=", "<=", ">=", "&&", "||", "??", "?.", "->",
-    "=>", "..", "+=", "-=", "*=", "/=", "%=", "|=", "&=", "^=", "<<", ">>", "**", "::", "+", "-", "*", "/", "%",
-    "=", "<", ">", "!", "?", ".", ",", ":", ";", "(", ")", "[", "]", "{", "}", "|", "&", "^", "~", "@",
+    "...", "<=>", "**=", "<<=", ">>=", "??=", "||=", "&&=", "==", "!=", "<=", ">=", "&&", "||", "??", "?.", "->", "=>",
+    "..", "+=", "-=", "*=", "/=", "%=", "|=", "&=", "^=", "<<", ">>", "**", "::", "+", "-", "*", "/", "%", "=", "<",
+    ">", "!", "?", ".", ",", ":", ";", "(", ")", "[", "]", "{", "}", "|", "&", "^", "~", "@",
 ];
 
 /// Tokens after which a newline does not end the statement.
@@ -138,10 +138,48 @@ pub(crate) fn continues_line(t: &Tok) -> bool {
     match t {
         Tok::Sym(s) => matches!(
             *s,
-            "+" | "-" | "*" | "/" | "%" | "**" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "<=>" | "&&" | "||"
-                | "??" | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | "??=" | "||="
-                | "&&=" | "|=" | "&=" | "^=" | "->" | "=>" | "," | "." | "?." | "&" | "^" | "<<" | ">>"
-                | ".." | "..." | "::"
+            "+" | "-"
+                | "*"
+                | "/"
+                | "%"
+                | "**"
+                | "=="
+                | "!="
+                | "<"
+                | "<="
+                | ">"
+                | ">="
+                | "<=>"
+                | "&&"
+                | "||"
+                | "??"
+                | "="
+                | "+="
+                | "-="
+                | "*="
+                | "/="
+                | "%="
+                | "**="
+                | "<<="
+                | ">>="
+                | "??="
+                | "||="
+                | "&&="
+                | "|="
+                | "&="
+                | "^="
+                | "->"
+                | "=>"
+                | ","
+                | "."
+                | "?."
+                | "&"
+                | "^"
+                | "<<"
+                | ">>"
+                | ".."
+                | "..."
+                | "::"
         ),
         Tok::Kw(k) => matches!(k, Kw::And | Kw::Or | Kw::Not | Kw::In | Kw::Is | Kw::As),
         _ => false,
@@ -164,7 +202,17 @@ pub struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     /// Lexes `src`, whose first byte sits at offset `base` of file `file`.
     pub fn new(src: &'a str, file: u32, base: u32) -> Self {
-        Lexer { src, bytes: src.as_bytes(), pos: 0, file, base, out: Vec::new(), brackets: Vec::new(), diags: Vec::new(), comments: Vec::new() }
+        Lexer {
+            src,
+            bytes: src.as_bytes(),
+            pos: 0,
+            file,
+            base,
+            out: Vec::new(),
+            brackets: Vec::new(),
+            diags: Vec::new(),
+            comments: Vec::new(),
+        }
     }
 
     fn span(&self, start: usize, end: usize) -> Span {
@@ -247,8 +295,9 @@ impl<'a> Lexer<'a> {
             if saw_newline && self.newlines_significant() {
                 let cont_prev = self.out.last().map(|t| continues_line(&t.tok)).unwrap_or(true);
                 // `.method` continues a chain; `.Variant` (uppercase) starts a pattern or value.
-                let next_is_chain = (self.peek() == b'.' && self.peek_at(1) != b'.' && !self.peek_at(1).is_ascii_uppercase())
-                    || (self.peek() == b'?' && self.peek_at(1) == b'.');
+                let next_is_chain =
+                    (self.peek() == b'.' && self.peek_at(1) != b'.' && !self.peek_at(1).is_ascii_uppercase())
+                        || (self.peek() == b'?' && self.peek_at(1) == b'.');
                 let prev_is_nl = matches!(self.out.last().map(|t| &t.tok), Some(Tok::Newline) | None);
                 if !cont_prev && !next_is_chain && !prev_is_nl {
                     let span = self.span(newline_at, newline_at + 1);
@@ -267,7 +316,10 @@ impl<'a> Lexer<'a> {
             let c = self.peek();
             if c.is_ascii_digit() {
                 self.number(space);
-            } else if c == b'_' || c.is_ascii_alphabetic() || (c >= 0x80 && self.src[self.pos..].chars().next().is_some_and(|ch| ch.is_alphabetic())) {
+            } else if c == b'_'
+                || c.is_ascii_alphabetic()
+                || (c >= 0x80 && self.src[self.pos..].chars().next().is_some_and(|ch| ch.is_alphabetic()))
+            {
                 self.ident(space);
             } else if c == b'"' {
                 self.string(space);

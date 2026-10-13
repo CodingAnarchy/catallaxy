@@ -198,7 +198,10 @@ pub fn spawn(vm: &mut Vm, closure: Value) -> u64 {
         }
     });
     with_sched(|s| {
-        s.fibers.insert(id, Fiber { coro, vm: fvm, flag: Arc::new(AtomicBool::new(false)), yielder: Cell::new(std::ptr::null()) });
+        s.fibers.insert(
+            id,
+            Fiber { coro, vm: fvm, flag: Arc::new(AtomicBool::new(false)), yielder: Cell::new(std::ptr::null()) },
+        );
         s.ctl.insert(id, ctl);
         s.ready.push_back(id);
     });
@@ -395,7 +398,9 @@ pub fn yield_now(vm: &mut Vm) {
 /// Waits for fiber `id` (of this thread) and returns its result, or the panic message.
 pub fn join(vm: &mut Vm, id: u64) -> RtResult<Result<Value, String>> {
     let Some(ctl) = with_sched(|s| s.ctl.get(&id).cloned()) else {
-        return Err(Trap::Panic("FiberError: no such fiber on this thread (fibers are joined on the thread that spawned them)".into()));
+        return Err(Trap::Panic(
+            "FiberError: no such fiber on this thread (fibers are joined on the thread that spawned them)".into(),
+        ));
     };
     loop {
         if !matches!(*ctl.outcome.lock(), Outcome::Running) {

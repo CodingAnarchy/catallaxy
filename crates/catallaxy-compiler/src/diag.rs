@@ -54,10 +54,24 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     pub fn error(code: &'static str, message: impl Into<String>, span: Span) -> Self {
-        Diagnostic { code, severity: Severity::Error, message: message.into(), span, notes: Vec::new(), fixes: Vec::new() }
+        Diagnostic {
+            code,
+            severity: Severity::Error,
+            message: message.into(),
+            span,
+            notes: Vec::new(),
+            fixes: Vec::new(),
+        }
     }
     pub fn warning(code: &'static str, message: impl Into<String>, span: Span) -> Self {
-        Diagnostic { code, severity: Severity::Warning, message: message.into(), span, notes: Vec::new(), fixes: Vec::new() }
+        Diagnostic {
+            code,
+            severity: Severity::Warning,
+            message: message.into(),
+            span,
+            notes: Vec::new(),
+            fixes: Vec::new(),
+        }
     }
     pub fn note(mut self, msg: impl Into<String>) -> Self {
         self.notes.push((msg.into(), None));
@@ -149,6 +163,9 @@ pub struct SourceMap {
 
 impl SourceMap {
     pub fn add(&mut self, path: String, text: String) -> u32 {
+        // Display paths with `/` everywhere, so diagnostics and stack traces read the same on
+        // every platform (the file is opened by the caller's own path, not this one).
+        let path = if cfg!(windows) { path.replace('\\', "/") } else { path };
         self.files.push(SourceFile::new(path, text));
         self.files.len() as u32 - 1
     }
@@ -196,7 +213,11 @@ impl SourceMap {
         let w = line.to_string().len();
         let _ = writeln!(out, "  {blue}{:w$} |{reset}", "");
         let _ = writeln!(out, "  {blue}{line} |{reset} {text}");
-        let width = if eline == line { (ecol.saturating_sub(col)).max(1) } else { (text.chars().count() as u32 + 1).saturating_sub(col).max(1) };
+        let width = if eline == line {
+            (ecol.saturating_sub(col)).max(1)
+        } else {
+            (text.chars().count() as u32 + 1).saturating_sub(col).max(1)
+        };
         let _ = writeln!(
             out,
             "  {blue}{:w$} |{reset} {}{c}{}{reset}",
@@ -221,7 +242,8 @@ impl SourceMap {
                 json_str(if d.severity == Severity::Error { "error" } else { "warning" })
             );
             let _ = write!(out, "\"message\":{},", json_str(&d.message));
-            let file = if (d.span.file as usize) < self.files.len() { self.file(d.span.file).path.as_str() } else { "" };
+            let file =
+                if (d.span.file as usize) < self.files.len() { self.file(d.span.file).path.as_str() } else { "" };
             let _ = write!(out, "\"file\":{},", json_str(file));
             let _ = write!(out, "\"span\":{},", self.span_json(d.span));
             out.push_str("\"notes\":[");
@@ -232,7 +254,12 @@ impl SourceMap {
                 let _ = write!(out, "{{\"message\":{}", json_str(n));
                 if let Some(sp) = sp {
                     if (sp.file as usize) < self.files.len() {
-                        let _ = write!(out, ",\"file\":{},\"span\":{}", json_str(&self.file(sp.file).path), self.span_json(*sp));
+                        let _ = write!(
+                            out,
+                            ",\"file\":{},\"span\":{}",
+                            json_str(&self.file(sp.file).path),
+                            self.span_json(*sp)
+                        );
                     }
                 }
                 out.push('}');
@@ -247,7 +274,12 @@ impl SourceMap {
                     if k > 0 {
                         out.push(',');
                     }
-                    let _ = write!(out, "{{\"span\":{},\"replacement\":{}}}", self.span_json(e.span), json_str(&e.replacement));
+                    let _ = write!(
+                        out,
+                        "{{\"span\":{},\"replacement\":{}}}",
+                        self.span_json(e.span),
+                        json_str(&e.replacement)
+                    );
                 }
                 out.push_str("]}");
             }

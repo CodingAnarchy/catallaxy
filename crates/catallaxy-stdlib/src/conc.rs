@@ -7,11 +7,11 @@
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 
+use catallaxy_gc::ObjState;
 use catallaxy_gc::{RootSource, Tracer};
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership::{self, TRANSIT_TID};
-use catallaxy_gc::ObjState;
 use catallaxy_runtime::{panic, RtResult, Trap, Value};
 use catallaxy_vm::interp::THREAD_STACK;
 use catallaxy_vm::{NativeFn, Vm};
@@ -62,7 +62,9 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             Ok(Value::NIL)
         },
         "Channel.is_closed" => |_, a| Ok(Value::bool(unsafe { as_channel(a[0]) }.inner.queue.lock().closed)),
-        "Channel.length" => |_, a| Ok(Value::small_int(unsafe { as_channel(a[0]) }.inner.queue.lock().items.len() as i64)),
+        "Channel.length" => {
+            |_, a| Ok(Value::small_int(unsafe { as_channel(a[0]) }.inner.queue.lock().items.len() as i64))
+        }
 
         "Mutex.new" => |vm, a| {
             ownership::share_deep(&vm.m, a[0], false)?;

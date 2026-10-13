@@ -177,7 +177,12 @@ impl Checker {
                         let cid = self.next_class_id;
                         self.next_class_id += 1;
                         self.variant_of_class.insert(cid, (eid, tag as u32));
-                        variants.push(VariantInfo { name: v.name.name.clone(), fields: Vec::new(), class_id: cid, span: v.span });
+                        variants.push(VariantInfo {
+                            name: v.name.name.clone(),
+                            fields: Vec::new(),
+                            class_id: cid,
+                            span: v.span,
+                        });
                     }
                     self.enums.push(EnumInfo {
                         id: eid,
@@ -195,7 +200,9 @@ impl Checker {
                     if self.mods[m as usize].is_prelude && e.name.name == "Result" {
                         self.well_known.result = Some(eid);
                         for (tag, v) in e.variants.iter().enumerate() {
-                            self.mods[m as usize].items.insert(v.name.name.clone(), ScopeItem::Variant(eid, tag as u32));
+                            self.mods[m as usize]
+                                .items
+                                .insert(v.name.name.clone(), ScopeItem::Variant(eid, tag as u32));
                         }
                     }
                 }
@@ -247,7 +254,15 @@ impl Checker {
         }
     }
 
-    fn new_global(&mut self, name: &str, is_const: bool, m: ModId, is_pub: bool, span: Span, init: GlobalInit) -> GlobalId {
+    fn new_global(
+        &mut self,
+        name: &str,
+        is_const: bool,
+        m: ModId,
+        is_pub: bool,
+        span: Span,
+        init: GlobalInit,
+    ) -> GlobalId {
         let gid = self.globals.len() as GlobalId;
         let ty = self.types.fresh_var();
         self.globals.push(GlobalInfo {
@@ -289,11 +304,9 @@ impl Checker {
                             Some(si) if self.item_is_pub(si) => {
                                 self.mods[m as usize].imported.insert(name.name.clone(), (si, name.span));
                             }
-                            Some(_) => self.err(
-                                "E0202",
-                                format!("`{}` is private to module `{}`", name.name, key),
-                                name.span,
-                            ),
+                            Some(_) => {
+                                self.err("E0202", format!("`{}` is private to module `{}`", name.name, key), name.span)
+                            }
                             None => self.err("E0203", format!("module `{key}` has no item `{}`", name.name), name.span),
                         }
                     }
@@ -357,7 +370,11 @@ impl Checker {
                 let ts: Vec<TyId> = parts.iter().map(|p| self.resolve_type(p, scope)).collect();
                 for (p, &t) in parts.iter().zip(ts.iter()) {
                     if !matches!(self.types.get(t), Ty::Iface(..) | Ty::Error | Ty::Inter(_)) {
-                        self.err("E0211", format!("`&` combines interfaces, but `{}` is not one", self.show(t)), p.span);
+                        self.err(
+                            "E0211",
+                            format!("`&` combines interfaces, but `{}` is not one", self.show(t)),
+                            p.span,
+                        );
                     }
                 }
                 self.types.inter(ts)
@@ -443,11 +460,19 @@ impl Checker {
             if arg_tys.is_empty() && !params.is_empty() {
                 self.err(
                     "E0214",
-                    format!("`{name}` needs {} type argument{}", params.len(), if params.len() == 1 { "" } else { "s" }),
+                    format!(
+                        "`{name}` needs {} type argument{}",
+                        params.len(),
+                        if params.len() == 1 { "" } else { "s" }
+                    ),
                     span,
                 );
             } else {
-                self.err("E0214", format!("`{name}` takes {} type arguments, got {}", params.len(), arg_tys.len()), span);
+                self.err(
+                    "E0214",
+                    format!("`{name}` takes {} type arguments, got {}", params.len(), arg_tys.len()),
+                    span,
+                );
             }
             return self.types.error;
         }
@@ -656,7 +681,9 @@ impl Checker {
         for (i, item) in items.iter().enumerate() {
             match item {
                 Item::Fn(f) => {
-                    let Some(ScopeItem::Fn(fid)) = self.mods[m as usize].items.get(&f.name.name).copied() else { continue };
+                    let Some(ScopeItem::Fn(fid)) = self.mods[m as usize].items.get(&f.name.name).copied() else {
+                        continue;
+                    };
                     if self.fns[fid as usize].decl != DeclRef::Item(m, i) {
                         continue;
                     }
@@ -667,14 +694,18 @@ impl Checker {
                     }
                 }
                 Item::Enum(e) => {
-                    let Some(ScopeItem::Enum(eid)) = self.mods[m as usize].items.get(&e.name.name).copied() else { continue };
+                    let Some(ScopeItem::Enum(eid)) = self.mods[m as usize].items.get(&e.name.name).copied() else {
+                        continue;
+                    };
                     if self.enums[eid as usize].item != i {
                         continue;
                     }
                     self.resolve_enum(eid, e, i);
                 }
                 Item::Interface(f) => {
-                    let Some(ScopeItem::Iface(iid)) = self.mods[m as usize].items.get(&f.name.name).copied() else { continue };
+                    let Some(ScopeItem::Iface(iid)) = self.mods[m as usize].items.get(&f.name.name).copied() else {
+                        continue;
+                    };
                     if self.ifaces[iid as usize].item != Some(i) {
                         continue;
                     }
@@ -683,13 +714,17 @@ impl Checker {
                 Item::Extend(x) => self.resolve_extend(x, i, is_prelude),
                 Item::Const(c) => {
                     if let Some(t) = &c.ty {
-                        let Some(ScopeItem::Global(g)) = self.mods[m as usize].items.get(&c.name.name).copied() else { continue };
+                        let Some(ScopeItem::Global(g)) = self.mods[m as usize].items.get(&c.name.name).copied() else {
+                            continue;
+                        };
                         let ty = self.resolve_type(t, &mut TypeScope::default());
                         self.globals[g as usize].ty = ty;
                     }
                 }
                 Item::Var(v) => {
-                    let Some(ScopeItem::Global(g)) = self.mods[m as usize].items.get(&v.name.name).copied() else { continue };
+                    let Some(ScopeItem::Global(g)) = self.mods[m as usize].items.get(&v.name.name).copied() else {
+                        continue;
+                    };
                     let ty = self.resolve_type(&v.ty, &mut TypeScope::default());
                     self.globals[g as usize].ty = ty;
                     if self.cap_of(ty) == caps::Cap::Owned {
@@ -768,7 +803,11 @@ impl Checker {
                 ClassModifier::Frozen if cap != caps::Cap::Frozen => self.emit(
                     Diag::error(
                         "E0602",
-                        format!("field `{}` of a frozen class must have a frozen type, not `{}`", f.name.name, self.show(ty)),
+                        format!(
+                            "field `{}` of a frozen class must have a frozen type, not `{}`",
+                            f.name.name,
+                            self.show(ty)
+                        ),
                         f.ty.span,
                     )
                     .fix("make the field type frozen", f.ty.span.empty_at(), "frozen "),
@@ -866,8 +905,11 @@ impl Checker {
         let self_ty = self.types.intern(Ty::Enum(eid, ptys));
         scope.self_ty = Some(self_ty);
         for (vi, v) in e.variants.iter().enumerate() {
-            let fields: Vec<(Option<String>, TyId)> =
-                v.fields.iter().map(|(n, t)| (n.as_ref().map(|n| n.name.clone()), self.resolve_type(t, &mut scope))).collect();
+            let fields: Vec<(Option<String>, TyId)> = v
+                .fields
+                .iter()
+                .map(|(n, t)| (n.as_ref().map(|n| n.name.clone()), self.resolve_type(t, &mut scope)))
+                .collect();
             self.enums[eid as usize].variants[vi].fields = fields;
         }
         for (mi, md) in e.methods.iter().enumerate() {
@@ -928,7 +970,12 @@ impl Checker {
                         }
                         _ => false,
                     });
-                    if is_prelude && ci.is_builtin && simple && args.len() == ci.params.len() && x.type_params.is_empty() {
+                    if is_prelude
+                        && ci.is_builtin
+                        && simple
+                        && args.len() == ci.params.len()
+                        && x.type_params.is_empty()
+                    {
                         for (a, &p) in args.iter().zip(ci.params.iter()) {
                             if let TypeExprKind::Named { path, .. } = &a.kind {
                                 scope.params.insert(path[0].name.clone(), p);
@@ -1069,7 +1116,13 @@ impl Checker {
                     None => ci
                         .fields
                         .iter()
-                        .map(|f| PInfo { name: f.name.clone(), ty: f.ty, has_default: f.has_default, is_move: false, span: f.span })
+                        .map(|f| PInfo {
+                            name: f.name.clone(),
+                            ty: f.ty,
+                            has_default: f.has_default,
+                            is_move: false,
+                            span: f.span,
+                        })
                         .collect(),
                 };
                 let fnf = &mut self.fns[ctor as usize];

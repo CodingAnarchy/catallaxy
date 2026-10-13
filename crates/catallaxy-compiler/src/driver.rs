@@ -99,7 +99,8 @@ fn compile_entry(path: &Path, src: Option<String>, loader: &dyn SourceLoader, op
         diags.extend(d);
         prelude_items.extend(m.items);
     }
-    let prelude = ck.add_module("prelude", prelude_file, ast::Module { items: prelude_items, file: prelude_file }, true);
+    let prelude =
+        ck.add_module("prelude", prelude_file, ast::Module { items: prelude_items, file: prelude_file }, true);
     let _ = prelude;
 
     let Some(src) = src else {

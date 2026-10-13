@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::sync::LazyLock;
 
 use catallaxy_gc::{RootSource, Tracer};
+use catallaxy_runtime::class::Capability;
 use catallaxy_runtime::class::{self, register_class, ClassSpec, ObjKind};
 use catallaxy_runtime::object::mark_value;
-use catallaxy_runtime::class::Capability;
 use catallaxy_runtime::{intern, Mutator, RtResult, Sym, Value};
 use parking_lot::{Mutex, RwLock};
 use rustc_hash::FxHashMap;

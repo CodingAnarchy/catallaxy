@@ -27,7 +27,9 @@ use catallaxy_vm::program::{self, Func};
 use catallaxy_vm::{NativeFn, Vm};
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::{I64, I8};
-use cranelift_codegen::ir::{AbiParam, Block, FuncRef, InstBuilder, MemFlagsData, StackSlotData, StackSlotKind, UserFuncName};
+use cranelift_codegen::ir::{
+    AbiParam, Block, FuncRef, InstBuilder, MemFlagsData, StackSlotData, StackSlotKind, UserFuncName,
+};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
@@ -72,11 +74,7 @@ extern "C" fn jit_call_native(vm: *mut Vm, nf: usize, args: *const u64, nargs: u
     // SAFETY: `nf` was produced from a `NativeFn` by `Jit::compile`; `args` points at `nargs`
     // boxed values in the caller's stack slot; `vm` is the running thread's Vm.
     let (nf, args, vm) = unsafe {
-        (
-            std::mem::transmute::<usize, NativeFn>(nf),
-            std::slice::from_raw_parts(args as *const Value, nargs),
-            &mut *vm,
-        )
+        (std::mem::transmute::<usize, NativeFn>(nf), std::slice::from_raw_parts(args as *const Value, nargs), &mut *vm)
     };
     match nf(vm, args) {
         // A heap result would sit in a JIT frame the collector cannot see: bail.
@@ -120,8 +118,23 @@ impl Inst {
     /// Register written, if any.
     fn def(&self) -> Option<usize> {
         match self.op() {
-            Op::Move | Op::LoadK | Op::LoadInt | Op::LoadNil | Op::LoadTrue | Op::LoadFalse | Op::AddI | Op::SubI
-            | Op::MulI | Op::DivI | Op::ModI | Op::AddIK | Op::NegI | Op::EqI | Op::LtI | Op::LeI | Op::Call
+            Op::Move
+            | Op::LoadK
+            | Op::LoadInt
+            | Op::LoadNil
+            | Op::LoadTrue
+            | Op::LoadFalse
+            | Op::AddI
+            | Op::SubI
+            | Op::MulI
+            | Op::DivI
+            | Op::ModI
+            | Op::AddIK
+            | Op::NegI
+            | Op::EqI
+            | Op::LtI
+            | Op::LeI
+            | Op::Call
             | Op::CallNative => Some(a_of(self.w)),
             _ => None,
         }
@@ -162,10 +175,33 @@ fn scan(fid: u32) -> Result<FnInfo, String> {
         let data = if op.has_data() { code[pc + 1] } else { 0 };
         let i = Inst { pc, w, data };
         match op {
-            Op::Nop | Op::Move | Op::LoadInt | Op::LoadNil | Op::LoadTrue | Op::LoadFalse | Op::AddI | Op::SubI
-            | Op::MulI | Op::DivI | Op::ModI | Op::AddIK | Op::NegI | Op::EqI | Op::LtI | Op::LeI | Op::Jmp
-            | Op::JmpIf | Op::JmpIfNot | Op::JNLtI | Op::JNLeI | Op::JNEqI | Op::JEqI | Op::Return | Op::ReturnNil
-            | Op::Safepoint | Op::CallNative => {}
+            Op::Nop
+            | Op::Move
+            | Op::LoadInt
+            | Op::LoadNil
+            | Op::LoadTrue
+            | Op::LoadFalse
+            | Op::AddI
+            | Op::SubI
+            | Op::MulI
+            | Op::DivI
+            | Op::ModI
+            | Op::AddIK
+            | Op::NegI
+            | Op::EqI
+            | Op::LtI
+            | Op::LeI
+            | Op::Jmp
+            | Op::JmpIf
+            | Op::JmpIfNot
+            | Op::JNLtI
+            | Op::JNLeI
+            | Op::JNEqI
+            | Op::JEqI
+            | Op::Return
+            | Op::ReturnNil
+            | Op::Safepoint
+            | Op::CallNative => {}
             Op::LoadK => {
                 if !func.consts[bx_of(w)].is_small_int() {
                     return Err(format!("pc {pc}: non-Int constant"));
@@ -185,15 +221,7 @@ fn scan(fid: u32) -> Result<FnInfo, String> {
         insts.push(i);
         pc = i.next();
     }
-    Ok(FnInfo {
-        fid,
-        name: func.name.clone(),
-        func,
-        insts,
-        reg_int: vec![true; func.nregs],
-        ret_int: true,
-        callees,
-    })
+    Ok(FnInfo { fid, name: func.name.clone(), func, insts, reg_int: vec![true; func.nregs], ret_int: true, callees })
 }
 
 /// The result of analysis: eligible functions with register kinds, and why others are not.
@@ -223,10 +251,8 @@ pub fn analyse(roots: &[u32]) -> Analysis {
     }
     // Drop functions that call rejected ones, to a fixpoint.
     loop {
-        let bad: Vec<(u32, u32)> = fns
-            .values()
-            .filter_map(|f| f.callees.iter().find(|c| !fns.contains_key(c)).map(|c| (f.fid, *c)))
-            .collect();
+        let bad: Vec<(u32, u32)> =
+            fns.values().filter_map(|f| f.callees.iter().find(|c| !fns.contains_key(c)).map(|c| (f.fid, *c))).collect();
         if bad.is_empty() {
             break;
         }
@@ -246,7 +272,9 @@ pub fn analyse(roots: &[u32]) -> Analysis {
                     let Some(a) = i.def() else { continue };
                     let int = match i.op() {
                         Op::Move => f.reg_int[b_of(i.w)],
-                        Op::LoadNil | Op::LoadTrue | Op::LoadFalse | Op::EqI | Op::LtI | Op::LeI | Op::CallNative => false,
+                        Op::LoadNil | Op::LoadTrue | Op::LoadFalse | Op::EqI | Op::LtI | Op::LeI | Op::CallNative => {
+                            false
+                        }
                         Op::Call => ret_int.get(&i.data).copied().unwrap_or(false),
                         _ => true,
                     };
@@ -682,11 +710,8 @@ fn translate(b: &mut FunctionBuilder, f: &FnInfo, an: &Analysis, refs: &Refs, po
             Op::Safepoint => tx.poll(poll, refs),
             Op::Call | Op::CallNative => {
                 let nargs = b_of(w);
-                let native = if i.op() == Op::CallNative {
-                    Some(program::native(i.data))
-                } else {
-                    program::func(i.data).native
-                };
+                let native =
+                    if i.op() == Op::CallNative { Some(program::native(i.data)) } else { program::func(i.data).native };
                 match native.map(Callee::Native).unwrap_or(Callee::Jit(i.data)) {
                     Callee::Native(nf) => {
                         let slot = tx.b.create_sized_stack_slot(StackSlotData::new(

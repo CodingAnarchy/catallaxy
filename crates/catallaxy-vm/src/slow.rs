@@ -19,7 +19,11 @@ pub fn fused_jump(op: Op, x: Value, y: Value) -> RtResult<bool> {
     Ok(match op {
         Op::JNLtF | Op::JNLeF => {
             let (x, y) = (f(x)?, f(y)?);
-            if op == Op::JNLtF { !(x < y) } else { !(x <= y) }
+            if op == Op::JNLtF {
+                !(x < y)
+            } else {
+                !(x <= y)
+            }
         }
         Op::JNEqI | Op::JEqI => {
             // As EqI: non-Int operands are simply unequal.
@@ -29,7 +33,11 @@ pub fn fused_jump(op: Op, x: Value, y: Value) -> RtResult<bool> {
         _ => {
             expect_ints(x, y, if op == Op::JNLtI { "<" } else { "<=" })?;
             let ord = ops::int_cmp(x, y);
-            if op == Op::JNLtI { !ord.is_lt() } else { !ord.is_le() }
+            if op == Op::JNLtI {
+                !ord.is_lt()
+            } else {
+                !ord.is_le()
+            }
         }
     })
 }
@@ -38,11 +46,7 @@ pub fn expect_ints(x: Value, y: Value, op: &str) -> RtResult<()> {
     if ops::is_int(x) && ops::is_int(y) {
         Ok(())
     } else {
-        panic(format!(
-            "TypeError: `{op}` expects Int operands, got {} and {}",
-            class_of(x).name,
-            class_of(y).name
-        ))
+        panic(format!("TypeError: `{op}` expects Int operands, got {} and {}", class_of(x).name, class_of(y).name))
     }
 }
 
@@ -245,7 +249,8 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
                 let s = unsafe { as_str_obj(x) }.as_str();
                 let n = unsafe { as_str_obj(x) }.char_count();
                 let (a, b) = range_bounds(i, n)?;
-                let sub: String = if s.is_ascii() { s[a..b].to_string() } else { s.chars().skip(a).take(b - a).collect() };
+                let sub: String =
+                    if s.is_ascii() { s[a..b].to_string() } else { s.chars().skip(a).take(b - a).collect() };
                 return Ok(vm.m.alloc_str(&sub));
             }
             _ => {}
@@ -401,7 +406,8 @@ fn conforms_ty(vm: &mut Vm, v: Value, t: &RtType) -> RtResult<bool> {
             if *cid < ids::FIRST_USER {
                 class_id_of(v) == *cid
             } else {
-                v.is_ptr() && unsafe { heap_class(v.as_ptr()) }.is_subclass_of(catallaxy_runtime::class::class_by_id(*cid))
+                v.is_ptr()
+                    && unsafe { heap_class(v.as_ptr()) }.is_subclass_of(catallaxy_runtime::class::class_by_id(*cid))
             }
         }
         RtType::Enum(eid) => v.is_ptr() && unsafe { heap_class(v.as_ptr()) }.enum_id == Some(*eid),
