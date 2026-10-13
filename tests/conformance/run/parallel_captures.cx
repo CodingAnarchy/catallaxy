@@ -14,7 +14,9 @@ puts(match s { .Circle(r) => r, .Label(l, n) => l.length + n })
 
 # The same through `par_map`, and a tuple.
 pair = (Shape.Circle(2), "two")
-sizes = [1, 2, 3].par_map { |x| x + pair.1.length + (match pair.0 { .Circle(r) => r, .Label(_, n) => n }) }
+sizes = [1, 2, 3].par_map { |x|
+  x + pair.1.length + (match pair.0 { .Circle(r) => r, .Label(_, n) => n })
+}
 puts(sizes)
 puts(pair)
 

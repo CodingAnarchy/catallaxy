@@ -69,8 +69,8 @@ cargo build --release
 
 ```
 catx run file.cx [args...]      run a program
-catx check [--json] file.cx     type-check without running
-catx fmt [--check] file.cx      format source in place
+catx check [--json] paths...    type-check without running (files or directories)
+catx fmt [--check] paths...     format source in place (files or directories)
 catx test [dir]                 run a conformance-style test directory (see the reference, §10)
 catx repl                       interactive session
 catx lsp                        language server (stdio)

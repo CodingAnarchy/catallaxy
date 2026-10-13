@@ -1,4 +1,4 @@
-//! End-to-end tests of `catx lsp` and `catx repl`.
+//! End-to-end tests of `catx lsp`, `catx repl`, `catx fmt` and `catx check`.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -532,4 +532,60 @@ fn repl_piped_session() {
     assert_eq!(stdout, "=> 42\n=> 9\nhi\nList[Int]\n=> 40\nsession cleared\n", "stderr:\n{stderr}");
     assert!(stderr.contains("E0300"), "{stderr}");
     assert!(stderr.contains("panic: boom"), "{stderr}");
+}
+
+fn scratch_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("catx-{tag}-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn catx(args: &[&std::ffi::OsStr]) -> (i32, String, String) {
+    let out = Command::new(CATX).args(args).output().expect("run catx");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).replace('\\', "/"),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn fmt_and_check_walk_directories() {
+    let dir = scratch_dir("fmt");
+    std::fs::create_dir_all(dir.join("sub/deeper")).unwrap();
+    std::fs::create_dir_all(dir.join("reject")).unwrap();
+    std::fs::create_dir_all(dir.join(".hidden")).unwrap();
+    std::fs::write(dir.join("a.cx"), "puts(1)\n").unwrap();
+    std::fs::write(dir.join("sub/b.cx"), "x=1\nputs(x)\n").unwrap();
+    std::fs::write(dir.join("sub/deeper/c.cx"), "puts( 3 )\n").unwrap();
+    std::fs::write(dir.join("sub/notes.txt"), "not code (\n").unwrap();
+    // Skipped while walking: deliberately broken programs and hidden directories.
+    std::fs::write(dir.join("reject/bad.cx"), "fn (\n").unwrap();
+    std::fs::write(dir.join(".hidden/h.cx"), "puts( 4 )\n").unwrap();
+
+    let (code, out, err) = catx(&["fmt".as_ref(), "--check".as_ref(), dir.as_os_str()]);
+    assert_eq!(code, 1, "{out}{err}");
+    let listed: Vec<&str> = out.lines().collect();
+    assert_eq!(listed.len(), 2, "{out}");
+    assert!(listed[0].ends_with("/sub/b.cx") && listed[1].ends_with("/sub/deeper/c.cx"), "{out}");
+
+    let (code, out, err) = catx(&["fmt".as_ref(), dir.as_os_str()]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(std::fs::read_to_string(dir.join("sub/b.cx")).unwrap(), "x = 1\nputs(x)\n");
+    assert_eq!(std::fs::read_to_string(dir.join("reject/bad.cx")).unwrap(), "fn (\n");
+    assert_eq!(catx(&["fmt".as_ref(), "--check".as_ref(), dir.as_os_str()]).0, 0);
+
+    // A file named directly is never skipped.
+    assert_eq!(catx(&["fmt".as_ref(), "--check".as_ref(), dir.join("reject/bad.cx").as_os_str()]).0, 2);
+
+    // `check` walks everything, `reject/` included.
+    std::fs::remove_file(dir.join("reject/bad.cx")).unwrap();
+    let (code, _, err) = catx(&["check".as_ref(), dir.as_os_str()]);
+    assert_eq!(code, 0, "{err}");
+    std::fs::write(dir.join("sub/deeper/c.cx"), "x: Int = \"s\"\n").unwrap();
+    let (code, _, err) = catx(&["check".as_ref(), dir.as_os_str()]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("E0300"), "{err}");
+    std::fs::remove_dir_all(&dir).ok();
 }
