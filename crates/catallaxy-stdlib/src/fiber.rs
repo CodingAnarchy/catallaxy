@@ -46,6 +46,14 @@ const FIBER_REGISTERS: usize = 64 * 1024;
 /// ThreadSanitizer fiber annotations. Every stack switch is bracketed: the main context calls
 /// [`tsan::enter`] just before resuming a fiber, and the fiber calls [`tsan::leave`] just before
 /// it suspends or finishes. Switches synchronize (flag 0): fibers of one thread are ordered.
+///
+/// TSan keeps a shadow call stack per fiber, pushed and popped by instrumented function entry
+/// and exit. A function that calls `enter`/`leave` (or sits between that call and corosensei's
+/// stack switch: `Coroutine::resume`, `Yielder::suspend`, the fiber body) is entered under one
+/// fiber and exits under another, unbalancing both shadow stacks until one underflows and TSan
+/// crashes. corosensei offers no hook at the switch itself, so the `tsan-suite` job builds this
+/// crate and corosensei with `-tsan-instrument-func-entry-exit=0`: memory accesses here are
+/// still checked, but frames of this crate are missing from TSan's stack traces.
 #[cfg(catx_tsan)]
 mod tsan {
     use std::cell::Cell;

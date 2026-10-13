@@ -81,9 +81,9 @@ jobs:
         run: cargo test -p catallaxy-gc --test loom --release
 
   tsan-suite:
-    # The whole interpreter (VM, stdlib threads, channels, par_*, fibers) under ThreadSanitizer,
-    # over the conformance suite and the examples. `catx test` runs each program in a child
-    # process; a TSan report makes the child exit with 66, which fails the test.
+    # The whole interpreter (VM, stdlib threads, channels, Mutex/Atomic, par_*, fibers) under
+    # ThreadSanitizer, over the conformance suite and the examples. `catx test` runs each program
+    # in a child process; a TSan report makes the child exit with 66, which fails the test.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -103,21 +103,22 @@ jobs:
           key: tsan
       # TSan's shadow memory layout does not fit the runner's default mmap ASLR entropy.
       - run: sudo sysctl vm.mmap_rnd_bits=28
+      # The fiber switch code (stdlib, and corosensei inlined into it) is built without TSan's
+      # function entry/exit hooks, which a stack switch would unbalance: see `mod tsan` in fiber.rs.
       - name: Build catx with ThreadSanitizer
-        run: cargo build --release --locked -p catallaxy --bin catx --target x86_64-unknown-linux-gnu -Zbuild-std
-      - name: Diagnose (temporary)
-        run: |
-          for f in tests/conformance/run/*.cx examples/*.cx; do
-            start=$(date +%s)
-            code=0; timeout 120 $CATX run $f > /tmp/out 2> /tmp/err < /dev/null || code=$?
-            echo "== $f exit=$code $(( $(date +%s) - start ))s"
-            if [ $code -ne 0 ]; then head -c 6000 /tmp/err; fi
-          done
+        run: >-
+          cargo build --release --locked -p catallaxy --bin catx --target x86_64-unknown-linux-gnu
+          -Zbuild-std -Zprofile-rustflags
+          --config 'profile.release.package.catallaxy-stdlib.rustflags=["-Cllvm-args=-tsan-instrument-func-entry-exit=0"]'
+          --config 'profile.release.package.corosensei.rustflags=["-Cllvm-args=-tsan-instrument-func-entry-exit=0"]'
       - name: Conformance suite
+        timeout-minutes: 10
         run: $CATX test tests/conformance
       - name: Conformance suite under GC stress
+        timeout-minutes: 10
         run: CATX_GC_STRESS=1 $CATX test tests/conformance/run
       - name: Examples
+        timeout-minutes: 10
         run: $CATX test examples
 
   fuzz:

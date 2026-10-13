@@ -1,8 +1,9 @@
-# Ten thousand sleeping fibers share one thread: total time is one sleep, not ten thousand.
+# Ten thousand sleeping fibers share one thread: total time is one sleep, not ten thousand (500 s).
+# The bound leaves room for sanitizer builds (the tsan-suite CI job runs this ~20x slower).
 start = Time.now()
 fs = (1..10000).map { |i| Fiber.start { sleep(0.05); i } }
 total = 0
 for f in fs { total += f.join().unwrap() }
 puts(total)
 elapsed = Time.now() - start
-puts(elapsed < 3.0)
+puts(elapsed < 20.0)
