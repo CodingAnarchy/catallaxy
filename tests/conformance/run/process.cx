@@ -12,8 +12,10 @@ puts(Process.start("catx-no-such-program").is_err())
 h = Process.run("git", ["hash-object", "--stdin"], input: "hello\n").unwrap()
 puts(h.stdout.strip)
 
-# Working directory and environment, in a scratch repository.
-root = "catx_proc_#{Time.millis()}_#{Random.int(0, 1000000)}"
+# Working directory and environment, in a scratch repository under the system temp dir, so a
+# killed run does not leave it in the working tree.
+tmp = Env.get("TMPDIR") ?? Env.get("TEMP") ?? Env.get("TMP") ?? "/tmp"
+root = Path.join(tmp, "catx_proc_#{Time.millis()}_#{Random.int(0, 1000000)}")
 Dir.create(Path.join(root, "sub"), recursive: true).unwrap()
 puts(Process.run("git", ["init", "-q"], dir: root).unwrap().status)
 puts(Process.run("git", ["rev-parse", "--show-prefix"], dir: Path.join(root, "sub")).unwrap().stdout.strip)
@@ -45,7 +47,11 @@ puts(w.wait().unwrap())
 
 # Runs in fibers overlap; results come back in order.
 inputs = ["a", "b", "c", "d"]
-fs = inputs.map { |s| Fiber.start { Process.run("git", ["hash-object", "--stdin"], input: s).unwrap().stdout.strip.length } }
+fs = inputs.map { |s|
+  Fiber.start {
+    Process.run("git", ["hash-object", "--stdin"], input: s).unwrap().stdout.strip.length
+  }
+}
 puts(fs.map { |f| f.join().unwrap() })
 
 # Killing a child that would wait forever for input.

@@ -55,7 +55,9 @@ fn build_huffman(text: String) -> Tree {
   for (sym, n) in freq { queue.push(Weighted.new(n, queue.length, Tree.Leaf(sym))) }
   next_order = queue.length
   while queue.length > 1 {
-    queue = queue.sort_with { |a, b| if a.weight != b.weight { a.weight <=> b.weight } else { a.order <=> b.order } }
+    queue = queue.sort_with { |a, b|
+      if a.weight != b.weight { a.weight <=> b.weight } else { a.order <=> b.order }
+    }
     left = queue.shift()!
     right = queue.shift()!
     queue.push(Weighted.new(left.weight + right.weight, next_order, Tree.Node(left.tree, right.tree)))
