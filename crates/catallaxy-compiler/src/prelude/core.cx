@@ -301,10 +301,7 @@ pub class Lazy[T] {
   # `value` forever.
   fn repeat(value: T) -> Lazy[T] { Lazy.new({ |g: fn(T)| loop { g(value) } }) }
 
-  fn each(self, f: fn(T)) {
-    src = self.source
-    src(f)
-  }
+  fn each(self, f: fn(T)) { (self.source)(f) }
   fn lazy(self) -> Lazy[T] { self }
   fn map[U](self, f: fn(T) -> U) -> Lazy[U] { Lazy.new({ |g: fn(U)| self.each { |x| g(f(x)) } }) }
   fn flat_map[U](self, f: fn(T) -> List[U]) -> Lazy[U] {
