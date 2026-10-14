@@ -32,11 +32,14 @@ program's main body; top-level statements in an imported module run once, when i
 import geometry                 # binds module `geometry`; use geometry.area(...)
 import geometry.{Point, area}   # binds selected public items directly
 import lib.shapes               # lib/shapes.cx, bound as `shapes`
+import shapes.geometry as geo   # shapes/geometry.cx, bound as `geo`
 ```
 
 Module paths are resolved relative to the importing file's directory (`a.b` → `a/b.cx`), then the
 entry file's directory. A module that cannot be found is error E0204. Only `pub` items are visible to
-importers. Cyclic imports are an error.
+importers. Cyclic imports are an error. A module is bound to the last segment of its path unless
+renamed with `as`; two imports may not bind the same name to different modules or items (E0206), so
+`import a.util` and `import b.util` need an `as` on one of them.
 
 The standard library (`docs/stdlib.md`) needs no import: `Json`, `File`, `Regex`, `Time` and the rest
 are in scope in every module, and there are no `std.*` modules to import. `Time.now()` (seconds,
@@ -56,7 +59,7 @@ Module-wide state uses:
 
 | Type | Meaning |
 | --- | --- |
-| `Int` | arbitrary-precision integer |
+| `Int` | arbitrary-precision integer (so there is no `Int.MAX` or `Int.MIN`: start a running extreme from `nil` or the first element, or use `min`/`max`/`min_by`/`max_by`) |
 | `Float` | IEEE 754 double |
 | `Bool` | `true` / `false` |
 | `String` | immutable UTF-8 text (always frozen); `s[i]` and slices index characters, in O(1) for ASCII text |
@@ -172,6 +175,11 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
 - Operators on class instances call methods named by the operator: `fn +(self, o: Vec) -> Vec`,
   `fn ==(self, o: Self) -> Bool`, `fn <=>(self, o: Self) -> Int`, `fn [](self, i: Int) -> T`,
   `fn []=(self, i: Int, v: T)`. Comparison operators on a type with `<=>` come from `Comparable`.
+- `Int`, `Float`, `String` and classes with `<=>` are `Comparable`; tuples and lists are `Comparable` when
+  their elements are, and order lexicographically (`(1, "b") < (1, "c")`, `[1, 2] < [1, 2, 0]`). Sorting
+  needs it: `sorted`, `sort`, `sort_in_place`, `min` and `max` require `Comparable` items, and `sort_by`,
+  `min_by` and `max_by` a `Comparable` key (`recs.sort_by { |r| (r.last, r.first) }`). Use `sort_with`
+  for any other order.
 
 ### 4.3 Control flow
 
@@ -337,6 +345,14 @@ Any type that has all required methods satisfies an interface and gains its defa
 called directly on the concrete type. If two in-scope interfaces provide the same default method to one
 type, the call is ambiguous and must be resolved by defining the method.
 
+`Enumerable`'s `map`, `select` and the like are eager and return lists. `xs.lazy()` returns a
+`Lazy[T]`, whose adaptors (`map`, `flat_map`, `select`/`filter`, `reject`, `take`, `take_while`,
+`drop`, `drop_while`, `with_index`, `zip`, `uniq`) build a pipeline that runs only when consumed
+(`to_list`, `each`, `first`, `find`, `for`, ...), one element at a time. `take`, `take_while`,
+`first` and `find` stop the source early, so pipelines over infinite sources such as
+`Lazy.iterate(0) { |n| n + 1 }` terminate. `Lazy.new { |emit| ... }` makes a sequence from any
+function that feeds elements to `emit`; each consumption calls it again.
+
 ```
 enum Shape {
   Circle(r: Float)
@@ -347,7 +363,9 @@ s = Shape.Circle(2.0)
 area = match s { .Circle(r) => 3.14 * r * r, .Rect(w, h) => w * h, .Empty => 0.0 }
 ```
 
-Enums may be generic and have methods. Enum values are immutable.
+Enums may be generic and have methods. Enum values are immutable. When no variant has a payload,
+`E.values()` returns every variant in declaration order (`List[E]`), unless the enum declares its own
+static `values`; on an enum with payloads it is an error (E0367).
 
 `extend T { fn ... }` adds methods to an existing type (`String`, `List[T]`, a user class). Extensions
 resolve statically and are visible only in modules that declare or import them (`import m` brings
@@ -366,13 +384,35 @@ A member reached through a bound `T: I` (or `T: I & J`) is seen with `Self` repl
 ### 6.3 Implicit generics
 
 A non-`pub` function may leave parameter types off. The checker infers a structural requirement for each
-such parameter from how the body uses it, and checks every call site against it.
+such parameter from how the body uses it, and checks every call site against it with the rules typed code
+follows. A requirement records the types it is used at: the members the body reads or calls (with the
+argument types), operators on either side, indexing and element assignment, iteration, calls of the
+parameter as a function, and typed places the value flows into (an annotated variable, an argument, the
+declared result). Values derived from a parameter carry requirements too, so `x.name` must have an
+`upcase` below, and passing a value whose `name` is an `Int` is an error at the call.
 
 ```
 fn shout(x) { x.name.upcase }      # x: { fn name(self) -> { fn upcase(self) -> R } }
+fn greet(p) { "hi " + p.name }     # p.name must be a String
 ```
 
-Generics are erased: one compiled body serves every instantiation.
+An argument that does not meet a requirement is E0342 (E0341 when the value flows into a typed place),
+reported at the call with a note at the use in the body. A union argument must meet each requirement with
+every member, and the result is the union of what each member produces. Requirements on a parameter that
+is passed to another implicit-generic function become requirements of the caller's own parameter.
+
+Generics are erased: one compiled body serves every instantiation, and it reaches members by name at
+runtime. So, through an untyped parameter:
+
+- a method must be the argument type's own method or field, or the only extension method of that name
+  for its class; interface default methods and extensions of interfaces (such as `max` and `sort` on
+  lists) need an annotated parameter;
+- arguments are passed by position, so named arguments must follow the parameter order, and an `Int` is
+  not accepted where a `Float` is expected (typed calls convert it; this one cannot);
+- comparisons (`<`, `>`, ...) use the type's `<=>`, and bitwise operators apply to `Int` only;
+- assigning a field (`x.n = v`), `?`, and members of `freeze(x)` are not supported (E0369).
+
+Annotate the parameter to use any of these.
 
 ## 7. Errors
 
@@ -381,6 +421,11 @@ Generics are erased: one compiled body serves every instantiation.
   and ownership violations panic. A panic unwinds only the current thread. In the main thread it prints the
   message and a stack trace to stderr and exits with status 101.
 - `Thread.join` returns `Result[T, String]`: `Err` carries the panic message.
+- Running out of memory panics with a message starting `MemoryError:` where the runtime can see it coming:
+  a single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,
+  `s * n` or `s.ljust(n)` with a huge `n`, and, when `CATX_MAX_HEAP` is set, a collection that finds more
+  live data than the limit (the next thread to reach a safepoint panics). The allocator failing anywhere
+  else still aborts the process.
 
 ## 8. Concurrency
 

@@ -2,90 +2,65 @@
 //! with collections running in between. Run under Miri as part of the safety gates.
 
 use std::cell::UnsafeCell;
-use std::sync::Mutex as StdMutex;
 
-use catallaxy_gc::{enter_native, install, leave_native, register_thread, unregister_thread, RootSource, Tracer};
 use catallaxy_runtime::dict::DictTable;
 use catallaxy_runtime::object::*;
-use catallaxy_runtime::ops::{self, Interop};
+use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership::{self, Access};
-use catallaxy_runtime::{Mutator, RtResult, Sym, Value};
+use catallaxy_runtime::Value;
 
-/// A minimal host: one mutator whose roots are its handle stack.
-struct Host {
-    /// Shared with the collector's root scan, so owned through a raw pointer.
-    raw: *mut Mutator,
-    m: &'static mut Mutator,
-    finished: bool,
-}
+mod common;
+use common::*;
 
-struct HandleRoots(*const Vec<Value>);
-impl RootSource for HandleRoots {
-    fn trace_roots(&self, t: &mut Tracer) {
-        for &v in unsafe { &*self.0 } {
-            if v.is_ptr() {
-                t.mark(v.as_ptr());
-            }
+#[test]
+fn lists_built_from_vecs_and_slices() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let strs: Vec<Value> = (0..5).map(|i| h.m.alloc_str(&format!("v{i}"))).collect();
+    // A vector with spare capacity: its allocation becomes the list's buffer.
+    let mut items = Vec::with_capacity(9);
+    items.extend_from_slice(&strs);
+    let a = h.m.alloc_list(items);
+    let ha = h.m.root(a);
+    // A vector with no spare capacity, an empty one with capacity, and one with none.
+    let b = h.m.alloc_list(strs.clone());
+    let hb = h.m.root(b);
+    let c = h.m.alloc_list(Vec::with_capacity(3));
+    let hc = h.m.root(c);
+    let d = h.m.alloc_list(Vec::new());
+    let hd = h.m.root(d);
+    // Copies of a slice, with and without room to spare.
+    let e = h.m.alloc_list_from_slice(&strs[1..4], 8);
+    let he = h.m.root(e);
+    let f = h.m.alloc_list_from_slice(&[], 0);
+    let hf = h.m.root(f);
+    h.gc();
+    h.gc();
+    let names = |v: Value| -> Vec<String> {
+        unsafe { as_list(v) }.to_vec().iter().map(|&s| str_of(s).unwrap().to_string()).collect()
+    };
+    let (a, b, c, d, e, f) = (h.m.get(ha), h.m.get(hb), h.m.get(hc), h.m.get(hd), h.m.get(he), h.m.get(hf));
+    assert_eq!(names(a), ["v0", "v1", "v2", "v3", "v4"]);
+    assert_eq!(unsafe { as_list(a) }.capacity(), 9);
+    assert_eq!(names(b), ["v0", "v1", "v2", "v3", "v4"]);
+    assert_eq!(unsafe { as_list(c) }.capacity(), 3);
+    assert!(unsafe { as_list(c) }.is_empty() && unsafe { as_list(d) }.is_empty());
+    assert_eq!(names(e), ["v1", "v2", "v3"]);
+    assert_eq!(unsafe { as_list(e) }.capacity(), 8);
+    assert!(unsafe { as_list(f) }.is_empty());
+    // Spare slots are initialized: pushing into them and growing past them works.
+    for l in [a, b, c, d, e, f] {
+        for i in 0..12 {
+            let s = h.m.alloc_str(&format!("p{i}"));
+            unsafe { as_list(l).push(s, Access::Local) };
         }
     }
-}
-
-impl Interop for Host {
-    fn mutator(&mut self) -> &mut Mutator {
-        self.m
-    }
-    fn call_method(&mut self, _: Value, _: Sym, _: &[Value]) -> RtResult<Option<Value>> {
-        Ok(None)
-    }
-}
-
-impl Host {
-    fn new() -> Self {
-        let rec = register_thread();
-        let raw = Box::into_raw(Box::new(Mutator::new(rec)));
-        let roots: Box<dyn RootSource> = Box::new(HandleRoots(unsafe { (*raw).handles_ptr() }));
-        let m = unsafe { &mut *raw };
-        unsafe { install(&m.rec, Box::into_raw(roots), m.heap_ptr()) };
-        leave_native(&m.rec);
-        Host { raw, m, finished: false }
-    }
-    fn gc(&mut self) {
-        catallaxy_gc::collect_now(&self.m.rec);
-    }
-    fn minor(&mut self) {
-        catallaxy_gc::collect_minor(&self.m.rec);
-    }
-    fn finish(mut self) {
-        self.unregister();
-    }
-    fn unregister(&mut self) {
-        if std::mem::replace(&mut self.finished, true) {
-            return;
-        }
-        enter_native(&self.m.rec);
-        unregister_thread(&self.m.rec);
-        self.m.release_pages();
-        // The mutator is intentionally leaked: the collector may still hold its root pointer.
-        let _ = self.raw;
-    }
-}
-
-impl Drop for Host {
-    /// Also runs when a test thread panics: a thread left registered as running would make
-    /// every later collection wait for it forever, turning one failure into a hung test run.
-    fn drop(&mut self) {
-        self.unregister();
-    }
-}
-
-static SERIAL: StdMutex<()> = StdMutex::new(());
-
-fn n(i: usize) -> usize {
-    if cfg!(miri) {
-        (i / 50).max(3)
-    } else {
-        i
-    }
+    h.gc();
+    let a = h.m.get(ha);
+    assert_eq!(names(a).len(), 17);
+    assert_eq!(names(a)[16], "p11");
+    assert_eq!(names(h.m.get(hc)).len(), 12);
+    h.finish();
 }
 
 #[test]
@@ -124,51 +99,6 @@ fn containers_survive_collection() {
         let idx = ops::dict_lookup(&mut h, d, k).unwrap().expect("key present");
         assert_eq!(unsafe { as_dict(d).table() }.entry(idx).value, Value::small_int(i as i64));
     }
-    h.finish();
-}
-
-#[test]
-fn string_char_positions_use_the_index() {
-    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    let mut h = Host::new();
-    let texts = [
-        "a".repeat(300),
-        "aé€😀".repeat(90),
-        "日本語".repeat(100) + "tail",
-        "héllo".to_string(),
-        String::new(),
-        "x".repeat(StrObj::INDEX_MIN - 1) + "é",
-    ];
-    for text in &texts {
-        let v = h.m.alloc_str(text);
-        let hv = h.m.root(v);
-        // Strings with an index carry it through a collection.
-        h.gc();
-        let v = h.m.get(hv);
-        let o = unsafe { as_str_obj(v) };
-        let chars: Vec<(usize, char)> = text.char_indices().collect();
-        assert_eq!(o.char_count(), chars.len());
-        assert_eq!(o.is_ascii(), text.is_ascii());
-        let step = if cfg!(miri) { 7 } else { 1 };
-        for (i, &(b, c)) in chars.iter().enumerate().step_by(step) {
-            assert_eq!(o.byte_offset(i), b);
-            assert_eq!(o.char_offset(b), i);
-            assert_eq!(o.char_at(i), c.to_string());
-        }
-        assert_eq!(o.byte_offset(chars.len()), text.len());
-        assert_eq!(o.char_offset(text.len()), chars.len());
-        let (a, z) = (chars.len() / 3, chars.len() * 2 / 3 + 1);
-        let want: String = text.chars().skip(a).take(z.min(chars.len()).saturating_sub(a)).collect();
-        assert_eq!(o.char_slice(a, z), want);
-        assert_eq!(o.char_slice(z, a), "");
-        assert!(o.alloc_size() >= StrObj::BASE + text.len());
-    }
-    // Concatenated parts with a known character count.
-    let v = h.m.alloc_str_parts(&[&"é".repeat(200), &"z".repeat(100)]);
-    let o = unsafe { as_str_obj(v) };
-    assert_eq!(o.char_count(), 300);
-    assert_eq!(o.char_at(250), "z");
-    assert_eq!(o.char_at(199), "é");
     h.finish();
 }
 

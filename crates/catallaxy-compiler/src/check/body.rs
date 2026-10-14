@@ -225,7 +225,12 @@ impl Checker {
         for (i, p) in f.params.iter().enumerate() {
             let ty = if f.has_untyped_params && decl.params[i].ty.is_none() {
                 let o = self.opens.len() as OpenId;
-                self.opens.push(OpenInfo { param_name: p.name.clone(), reqs: Vec::new(), uppers: Vec::new() });
+                self.opens.push(OpenInfo {
+                    param_name: p.name.clone(),
+                    label: None,
+                    reqs: Vec::new(),
+                    uppers: Vec::new(),
+                });
                 self.types.intern(Ty::Open(o))
             } else {
                 p.ty

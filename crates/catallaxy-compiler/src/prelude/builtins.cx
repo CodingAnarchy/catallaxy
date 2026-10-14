@@ -231,7 +231,10 @@ extend String {
 
 extend List[T] {
   native fn new() -> List[T]
+  # An empty list with room for `n` items. The capacity is a hint: at most 2^24 items are
+  # reserved up front, and the list grows past that as usual. Panics if `n` is negative.
   native fn with_capacity(n: Int) -> List[T]
+  # `n` copies of `value`. Panics with a MemoryError if the list cannot fit in memory.
   native fn filled(n: Int, value: T) -> List[T]
   native fn length(self) -> Int
   fn size(self) -> Int { self.length }
@@ -373,9 +376,7 @@ extend List[T] {
     }
     out
   }
-  native fn sort_by_keys[K](self, keys: List[K]) -> List[T]
-  native fn sorted(self) -> List[T]
-  native fn sort_in_place(mut self)
+  native fn sort_by_keys[K: Comparable](self, keys: List[K]) -> List[T]
   fn sort_with(self, f: fn(T, T) -> Int) -> List[T] {
     # Merge sort using the comparator.
     if self.length <= 1 { return self.dup() }
@@ -408,6 +409,13 @@ extend List[T] {
   native fn par_each(self, f: fn(T))
   native fn par_reduce(self, identity: T, f: fn(T, T) -> T) -> T
   native fn par_select(self, f: fn(T) -> Bool) -> List[T]
+}
+
+# Sorting by the natural order needs `Comparable` items (tuples and lists of comparable items are
+# compared lexicographically).
+extend[T: Comparable] List[T] {
+  native fn sorted(self) -> List[T]
+  native fn sort_in_place(mut self)
 }
 
 extend List[List[U]] {
@@ -606,11 +614,17 @@ extend Dict[K, V] {
     for (k, v) in self.entries() { out[v] = k }
     out
   }
-  fn sort_by_value(self) -> List[(K, V)] {
-    self.entries().sort_by { |e| e.1 }
-  }
+}
+
+extend[K: Comparable, V] Dict[K, V] {
   fn sort_by_key(self) -> List[(K, V)] {
     self.entries().sort_by { |e| e.0 }
+  }
+}
+
+extend[K, V: Comparable] Dict[K, V] {
+  fn sort_by_value(self) -> List[(K, V)] {
+    self.entries().sort_by { |e| e.1 }
   }
 }
 

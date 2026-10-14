@@ -59,15 +59,37 @@ Everything here is available in every module without an import.
 - `fn group_by[K](self, f: fn(T) -> K) -> Dict[K, List[T]]`
 - `fn partition(self, f: fn(T) -> Bool) -> (List[T], List[T])`
 - `fn tally_by[K](self, f: fn(T) -> K) -> Dict[K, Int]`
-- `fn sort_by[K](self, f: fn(T) -> K) -> List[T]`
-- `fn min_by[K](self, f: fn(T) -> K) -> T?`
-- `fn max_by[K](self, f: fn(T) -> K) -> T?`
+- `fn sort_by[K: Comparable](self, f: fn(T) -> K) -> List[T]`
+- `fn min_by[K: Comparable](self, f: fn(T) -> K) -> T?`
+- `fn max_by[K: Comparable](self, f: fn(T) -> K) -> T?`
 - `fn sum_by(self, f: fn(T) -> Int) -> Int`
 - `fn zip[U](self, other: List[U]) -> List[(T, U)]`
 - `fn uniq(self) -> List[T]`
 - `fn contains(self, item: T) -> Bool`
 - `fn include(self, item: T) -> Bool`
 - `fn to_set(self) -> Set[T]`
+- `fn lazy(self) -> Lazy[T]`
+
+## Lazy[T]
+
+- field `source: fn(fn(T))`
+- `fn iterate(seed: T, f: fn(T) -> T) -> Lazy[T]`
+- `fn repeat(value: T) -> Lazy[T]`
+- `fn each(self, f: fn(T))`
+- `fn lazy(self) -> Lazy[T]`
+- `fn map[U](self, f: fn(T) -> U) -> Lazy[U]`
+- `fn flat_map[U](self, f: fn(T) -> List[U]) -> Lazy[U]`
+- `fn select(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn filter(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn reject(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn take(self, n: Int) -> Lazy[T]`
+- `fn take_while(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn drop(self, n: Int) -> Lazy[T]`
+- `fn drop_while(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn with_index(self) -> Lazy[(T, Int)]`
+- `fn zip[U](self, other: List[U]) -> Lazy[(T, U)]`
+- `fn uniq(self) -> Lazy[T]`
+- `fn force(self) -> List[T]`
 
 ## Enumerable[T] (where T: Comparable)
 
@@ -307,14 +329,17 @@ Everything here is available in every module without an import.
 - `fn fill(mut self, value: T)`
 - `fn rotate(self, n: Int = 1) -> List[T]`
 - `fn chunk(self, size: Int) -> List[List[T]]`
-- `fn sort_by_keys[K](self, keys: List[K]) -> List[T]`
-- `fn sorted(self) -> List[T]`
-- `fn sort_in_place(mut self)`
+- `fn sort_by_keys[K: Comparable](self, keys: List[K]) -> List[T]`
 - `fn sort_with(self, f: fn(T, T) -> Int) -> List[T]`
 - `fn par_map[U](self, f: fn(T) -> U) -> List[U]`
 - `fn par_each(self, f: fn(T))`
 - `fn par_reduce(self, identity: T, f: fn(T, T) -> T) -> T`
 - `fn par_select(self, f: fn(T) -> Bool) -> List[T]`
+
+## List[T] (where T: Comparable)
+
+- `fn sorted(self) -> List[T]`
+- `fn sort_in_place(mut self)`
 
 ## List[List[U]]
 
@@ -373,8 +398,14 @@ Everything here is available in every module without an import.
 - `fn map_values[W](self, f: fn(V) -> W) -> Dict[K, W]`
 - `fn select_entries(self, f: fn(K, V) -> Bool) -> Dict[K, V]`
 - `fn invert(self) -> Dict[V, K]`
-- `fn sort_by_value(self) -> List[(K, V)]`
+
+## Dict[K, V] (where K: Comparable)
+
 - `fn sort_by_key(self) -> List[(K, V)]`
+
+## Dict[K, V] (where V: Comparable)
+
+- `fn sort_by_value(self) -> List[(K, V)]`
 
 ## Set[T]
 

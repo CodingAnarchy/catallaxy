@@ -106,6 +106,10 @@ pub struct Checker {
     pub expr_ty: FxHashMap<NodeId, TyId>,
     pub names: FxHashMap<NodeId, NameRes>,
     pub calls: FxHashMap<NodeId, CallRes>,
+    /// For a method call dispatched by name at runtime (on an interface or a type parameter's
+    /// bound), the interface member the checker resolved it to. Editor
+    /// queries (hover, definition, references) use it; codegen does not.
+    pub dyn_targets: FxHashMap<NodeId, FnId>,
     pub bins: FxHashMap<NodeId, BinRes>,
     pub fors: FxHashMap<NodeId, ForKind>,
     pub assigns: FxHashMap<NodeId, AssignRes>,
@@ -146,6 +150,8 @@ pub struct Checker {
     pub checked_bodies: FxHashSet<FnId>,
     pub binding_log: Vec<VarId>,
     pub suppress_diags: u32,
+    /// Errors raised while diagnostics were suppressed (lets trial checks detect failure).
+    pub suppressed_errors: u32,
     /// Non-local control flow inside `for` bodies compiled as blocks.
     pub control: FxHashMap<NodeId, Control>,
     /// (caller, callee) pairs of method calls on `self`, for inferring mutating methods.
@@ -186,6 +192,9 @@ pub struct WellKnown {
     pub enumerable: Option<IfaceId>,
     pub comparable: Option<IfaceId>,
     pub display: Option<IfaceId>,
+    /// The prelude's `compare_values`: the runtime `<=>` of builtin comparable values (tuples
+    /// and lists), the fallback when `<=>` is dispatched dynamically on one of them.
+    pub compare_values: Option<FnId>,
 }
 
 impl Checker {
@@ -208,6 +217,7 @@ impl Checker {
             expr_ty: FxHashMap::default(),
             names: FxHashMap::default(),
             calls: FxHashMap::default(),
+            dyn_targets: FxHashMap::default(),
             bins: FxHashMap::default(),
             fors: FxHashMap::default(),
             assigns: FxHashMap::default(),
@@ -235,6 +245,7 @@ impl Checker {
             checked_bodies: FxHashSet::default(),
             binding_log: Vec::new(),
             suppress_diags: 0,
+            suppressed_errors: 0,
             control: FxHashMap::default(),
             self_calls: Vec::new(),
             frozen_calls: Vec::new(),
@@ -253,12 +264,16 @@ impl Checker {
     pub fn err(&mut self, code: &'static str, msg: impl Into<String>, span: Span) {
         if self.suppress_diags == 0 {
             self.diags.push(Diagnostic::error(code, msg, span));
+        } else {
+            self.suppressed_errors += 1;
         }
     }
 
     pub fn emit(&mut self, d: Diagnostic) {
         if self.suppress_diags == 0 {
             self.diags.push(d);
+        } else if d.is_error() {
+            self.suppressed_errors += 1;
         }
     }
 

@@ -1,0 +1,18 @@
+# `import a.b as c` binds a module under another name, so two modules with the same last
+# segment can both be imported.
+import lib.geometry
+import lib.alt.geometry as alt_geometry
+import lib.geometry as geo
+
+puts(geometry.answer())
+puts(alt_geometry.answer())
+puts(alt_geometry.Dir.Up)
+
+# One module under two names: the same items and types.
+v: geo.Vec2 = geometry.Vec2.new(3.0, 4.0)
+puts(v.length())
+puts(geo.dot(v, geo.Vec2.new(1.0, 0.0)))
+puts(geo.ORIGIN_NAME)
+
+# Extensions come along with an aliased import too.
+puts("hi".bang())

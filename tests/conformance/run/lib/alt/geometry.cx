@@ -1,0 +1,3 @@
+pub enum Dir { Up, Down }
+
+pub fn answer() -> Int { 7 }

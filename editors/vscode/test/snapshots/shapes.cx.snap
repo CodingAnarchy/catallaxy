@@ -1,0 +1,829 @@
+1:0 "#" comment.line.number-sign.catallaxy punctuation.definition.comment.catallaxy
+1:1 " Shapes: structural interfaces with default methods, subclassing and sorting." comment.line.number-sign.catallaxy
+3:0 "interface" storage.type.interface.catallaxy
+3:10 "Shape" entity.name.type.interface.catallaxy
+3:16 "{" punctuation.section.block.begin.catallaxy
+4:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+4:5 "area" meta.function.parameters.catallaxy entity.name.function.catallaxy
+4:9 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+4:10 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+4:14 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+4:16 "->" keyword.operator.arrow.catallaxy
+4:19 "Float" support.type.builtin.catallaxy
+5:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+5:5 "perimeter" meta.function.parameters.catallaxy entity.name.function.catallaxy
+5:14 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+5:15 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+5:19 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+5:21 "->" keyword.operator.arrow.catallaxy
+5:24 "Float" support.type.builtin.catallaxy
+6:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+6:5 "name" meta.function.parameters.catallaxy entity.name.function.catallaxy
+6:9 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+6:10 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+6:14 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+6:16 "->" keyword.operator.arrow.catallaxy
+6:19 "String" support.type.builtin.catallaxy
+7:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+7:5 "describe" meta.function.parameters.catallaxy entity.name.function.catallaxy
+7:13 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+7:14 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+7:18 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+7:20 "->" keyword.operator.arrow.catallaxy
+7:23 "String" support.type.builtin.catallaxy
+7:30 "{" punctuation.section.block.begin.catallaxy
+8:4 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+8:5 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+8:7 "self" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.language.self.catallaxy
+8:11 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+8:12 "name" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+8:16 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+8:17 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+8:18 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+8:19 ": area " string.quoted.double.catallaxy
+8:26 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+8:28 "self" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.language.self.catallaxy
+8:32 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+8:33 "area" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+8:37 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+8:38 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+8:39 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+8:40 "format" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+8:46 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+8:47 "2" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded constant.numeric.integer.catallaxy
+8:48 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+8:49 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+8:50 ", perimeter " string.quoted.double.catallaxy
+8:62 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+8:64 "self" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.language.self.catallaxy
+8:68 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+8:69 "perimeter" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+8:78 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+8:79 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+8:80 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+8:81 "format" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+8:87 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+8:88 "2" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded constant.numeric.integer.catallaxy
+8:89 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+8:90 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+8:91 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+9:2 "}" punctuation.section.block.end.catallaxy
+10:0 "}" punctuation.section.block.end.catallaxy
+12:0 "class" storage.type.class.catallaxy
+12:6 "Circle" entity.name.type.class.catallaxy
+12:13 "{" punctuation.section.block.begin.catallaxy
+13:0 "  r" 
+13:3 ":" punctuation.separator.colon.catallaxy
+13:5 "Float" support.type.builtin.catallaxy
+14:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+14:5 "area" meta.function.parameters.catallaxy entity.name.function.catallaxy
+14:9 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+14:10 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+14:14 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+14:16 "->" keyword.operator.arrow.catallaxy
+14:19 "Float" support.type.builtin.catallaxy
+14:25 "{" punctuation.section.block.begin.catallaxy
+14:27 "Math" entity.name.type.catallaxy
+14:31 "." punctuation.accessor.catallaxy
+14:32 "PI" variable.other.enummember.catallaxy
+14:35 "*" keyword.operator.arithmetic.catallaxy
+14:37 "self" variable.language.self.catallaxy
+14:41 "." punctuation.accessor.catallaxy
+14:42 "r" variable.other.property.catallaxy
+14:44 "*" keyword.operator.arithmetic.catallaxy
+14:46 "self" variable.language.self.catallaxy
+14:50 "." punctuation.accessor.catallaxy
+14:51 "r" variable.other.property.catallaxy
+14:53 "}" punctuation.section.block.end.catallaxy
+15:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+15:5 "perimeter" meta.function.parameters.catallaxy entity.name.function.catallaxy
+15:14 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+15:15 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+15:19 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+15:21 "->" keyword.operator.arrow.catallaxy
+15:24 "Float" support.type.builtin.catallaxy
+15:30 "{" punctuation.section.block.begin.catallaxy
+15:32 "2.0" constant.numeric.float.catallaxy
+15:36 "*" keyword.operator.arithmetic.catallaxy
+15:38 "Math" entity.name.type.catallaxy
+15:42 "." punctuation.accessor.catallaxy
+15:43 "PI" variable.other.enummember.catallaxy
+15:46 "*" keyword.operator.arithmetic.catallaxy
+15:48 "self" variable.language.self.catallaxy
+15:52 "." punctuation.accessor.catallaxy
+15:53 "r" variable.other.property.catallaxy
+15:55 "}" punctuation.section.block.end.catallaxy
+16:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+16:5 "name" meta.function.parameters.catallaxy entity.name.function.catallaxy
+16:9 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+16:10 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+16:14 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+16:16 "->" keyword.operator.arrow.catallaxy
+16:19 "String" support.type.builtin.catallaxy
+16:26 "{" punctuation.section.block.begin.catallaxy
+16:28 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+16:29 "circle(r=" string.quoted.double.catallaxy
+16:38 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+16:40 "self" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.language.self.catallaxy
+16:44 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+16:45 "r" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+16:46 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+16:47 ")" string.quoted.double.catallaxy
+16:48 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+16:50 "}" punctuation.section.block.end.catallaxy
+17:0 "}" punctuation.section.block.end.catallaxy
+19:0 "class" storage.type.class.catallaxy
+19:6 "Rect" entity.name.type.class.catallaxy
+19:11 "{" punctuation.section.block.begin.catallaxy
+20:0 "  w" 
+20:3 ":" punctuation.separator.colon.catallaxy
+20:5 "Float" support.type.builtin.catallaxy
+21:0 "  h" 
+21:3 ":" punctuation.separator.colon.catallaxy
+21:5 "Float" support.type.builtin.catallaxy
+22:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+22:5 "area" meta.function.parameters.catallaxy entity.name.function.catallaxy
+22:9 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+22:10 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+22:14 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+22:16 "->" keyword.operator.arrow.catallaxy
+22:19 "Float" support.type.builtin.catallaxy
+22:25 "{" punctuation.section.block.begin.catallaxy
+22:27 "self" variable.language.self.catallaxy
+22:31 "." punctuation.accessor.catallaxy
+22:32 "w" variable.other.property.catallaxy
+22:34 "*" keyword.operator.arithmetic.catallaxy
+22:36 "self" variable.language.self.catallaxy
+22:40 "." punctuation.accessor.catallaxy
+22:41 "h" variable.other.property.catallaxy
+22:43 "}" punctuation.section.block.end.catallaxy
+23:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+23:5 "perimeter" meta.function.parameters.catallaxy entity.name.function.catallaxy
+23:14 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+23:15 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+23:19 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+23:21 "->" keyword.operator.arrow.catallaxy
+23:24 "Float" support.type.builtin.catallaxy
+23:30 "{" punctuation.section.block.begin.catallaxy
+23:32 "2.0" constant.numeric.float.catallaxy
+23:36 "*" keyword.operator.arithmetic.catallaxy
+23:38 "(" punctuation.section.brackets.catallaxy
+23:39 "self" variable.language.self.catallaxy
+23:43 "." punctuation.accessor.catallaxy
+23:44 "w" variable.other.property.catallaxy
+23:46 "+" keyword.operator.arithmetic.catallaxy
+23:48 "self" variable.language.self.catallaxy
+23:52 "." punctuation.accessor.catallaxy
+23:53 "h" variable.other.property.catallaxy
+23:54 ")" punctuation.section.brackets.catallaxy
+23:56 "}" punctuation.section.block.end.catallaxy
+24:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+24:5 "name" meta.function.parameters.catallaxy entity.name.function.catallaxy
+24:9 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+24:10 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+24:14 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+24:16 "->" keyword.operator.arrow.catallaxy
+24:19 "String" support.type.builtin.catallaxy
+24:26 "{" punctuation.section.block.begin.catallaxy
+24:28 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+24:29 "rect(" string.quoted.double.catallaxy
+24:34 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+24:36 "self" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.language.self.catallaxy
+24:40 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+24:41 "w" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+24:42 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+24:43 "x" string.quoted.double.catallaxy
+24:44 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+24:46 "self" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.language.self.catallaxy
+24:50 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+24:51 "h" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+24:52 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+24:53 ")" string.quoted.double.catallaxy
+24:54 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+24:56 "}" punctuation.section.block.end.catallaxy
+25:0 "}" punctuation.section.block.end.catallaxy
+27:0 "class" storage.type.class.catallaxy
+27:6 "Square" entity.name.type.class.catallaxy
+27:13 "<" punctuation.separator.inheritance.catallaxy
+27:15 "Rect" entity.other.inherited-class.catallaxy
+27:20 "{" punctuation.section.block.begin.catallaxy
+28:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+28:5 "init" meta.function.parameters.catallaxy entity.name.function.catallaxy
+28:9 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+28:10 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+28:14 "," meta.function.parameters.catallaxy punctuation.separator.comma.catallaxy
+28:16 "side" meta.function.parameters.catallaxy variable.parameter.catallaxy
+28:20 ":" meta.function.parameters.catallaxy punctuation.separator.colon.catallaxy
+28:22 "Float" meta.function.parameters.catallaxy support.type.builtin.catallaxy
+28:27 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+28:29 "{" punctuation.section.block.begin.catallaxy
+29:4 "self" variable.language.self.catallaxy
+29:8 "." punctuation.accessor.catallaxy
+29:9 "w" variable.other.property.catallaxy
+29:11 "=" keyword.operator.assignment.catallaxy
+29:12 " side" 
+30:4 "self" variable.language.self.catallaxy
+30:8 "." punctuation.accessor.catallaxy
+30:9 "h" variable.other.property.catallaxy
+30:11 "=" keyword.operator.assignment.catallaxy
+30:12 " side" 
+31:2 "}" punctuation.section.block.end.catallaxy
+32:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+32:5 "name" meta.function.parameters.catallaxy entity.name.function.catallaxy
+32:9 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+32:10 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+32:14 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+32:16 "->" keyword.operator.arrow.catallaxy
+32:19 "String" support.type.builtin.catallaxy
+32:26 "{" punctuation.section.block.begin.catallaxy
+32:28 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+32:29 "square(" string.quoted.double.catallaxy
+32:36 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+32:38 "self" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.language.self.catallaxy
+32:42 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+32:43 "w" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+32:44 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+32:45 ")" string.quoted.double.catallaxy
+32:46 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+32:48 "}" punctuation.section.block.end.catallaxy
+33:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+33:5 "describe" meta.function.parameters.catallaxy entity.name.function.catallaxy
+33:13 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+33:14 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+33:18 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+33:20 "->" keyword.operator.arrow.catallaxy
+33:23 "String" support.type.builtin.catallaxy
+33:30 "{" punctuation.section.block.begin.catallaxy
+33:32 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+33:33 "a perfectly square " string.quoted.double.catallaxy
+33:52 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+33:54 "+" keyword.operator.arithmetic.catallaxy
+33:56 "super" variable.language.super.catallaxy
+33:61 "." punctuation.accessor.catallaxy
+33:62 "name" entity.name.function.member.catallaxy
+33:66 "(" punctuation.section.brackets.catallaxy
+33:67 ")" punctuation.section.brackets.catallaxy
+33:69 "}" punctuation.section.block.end.catallaxy
+34:0 "}" punctuation.section.block.end.catallaxy
+36:0 "class" storage.type.class.catallaxy
+36:6 "Triangle" entity.name.type.class.catallaxy
+36:15 "{" punctuation.section.block.begin.catallaxy
+37:0 "  a" 
+37:3 ":" punctuation.separator.colon.catallaxy
+37:5 "Float" support.type.builtin.catallaxy
+38:0 "  b" 
+38:3 ":" punctuation.separator.colon.catallaxy
+38:5 "Float" support.type.builtin.catallaxy
+39:0 "  c" 
+39:3 ":" punctuation.separator.colon.catallaxy
+39:5 "Float" support.type.builtin.catallaxy
+40:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+40:5 "perimeter" meta.function.parameters.catallaxy entity.name.function.catallaxy
+40:14 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+40:15 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+40:19 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+40:21 "->" keyword.operator.arrow.catallaxy
+40:24 "Float" support.type.builtin.catallaxy
+40:30 "{" punctuation.section.block.begin.catallaxy
+40:32 "self" variable.language.self.catallaxy
+40:36 "." punctuation.accessor.catallaxy
+40:37 "a" variable.other.property.catallaxy
+40:39 "+" keyword.operator.arithmetic.catallaxy
+40:41 "self" variable.language.self.catallaxy
+40:45 "." punctuation.accessor.catallaxy
+40:46 "b" variable.other.property.catallaxy
+40:48 "+" keyword.operator.arithmetic.catallaxy
+40:50 "self" variable.language.self.catallaxy
+40:54 "." punctuation.accessor.catallaxy
+40:55 "c" variable.other.property.catallaxy
+40:57 "}" punctuation.section.block.end.catallaxy
+41:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+41:5 "area" meta.function.parameters.catallaxy entity.name.function.catallaxy
+41:9 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+41:10 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+41:14 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+41:16 "->" keyword.operator.arrow.catallaxy
+41:19 "Float" support.type.builtin.catallaxy
+41:25 "{" punctuation.section.block.begin.catallaxy
+42:4 "#" comment.line.number-sign.catallaxy punctuation.definition.comment.catallaxy
+42:5 " Heron's formula" comment.line.number-sign.catallaxy
+43:0 "    s " 
+43:6 "=" keyword.operator.assignment.catallaxy
+43:8 "self" variable.language.self.catallaxy
+43:12 "." punctuation.accessor.catallaxy
+43:13 "perimeter" entity.name.function.member.catallaxy
+43:22 "(" punctuation.section.brackets.catallaxy
+43:23 ")" punctuation.section.brackets.catallaxy
+43:25 "/" keyword.operator.arithmetic.catallaxy
+43:27 "2.0" constant.numeric.float.catallaxy
+44:4 "(" punctuation.section.brackets.catallaxy
+44:5 "s " 
+44:7 "*" keyword.operator.arithmetic.catallaxy
+44:9 "(" punctuation.section.brackets.catallaxy
+44:10 "s " 
+44:12 "-" keyword.operator.arithmetic.catallaxy
+44:14 "self" variable.language.self.catallaxy
+44:18 "." punctuation.accessor.catallaxy
+44:19 "a" variable.other.property.catallaxy
+44:20 ")" punctuation.section.brackets.catallaxy
+44:22 "*" keyword.operator.arithmetic.catallaxy
+44:24 "(" punctuation.section.brackets.catallaxy
+44:25 "s " 
+44:27 "-" keyword.operator.arithmetic.catallaxy
+44:29 "self" variable.language.self.catallaxy
+44:33 "." punctuation.accessor.catallaxy
+44:34 "b" variable.other.property.catallaxy
+44:35 ")" punctuation.section.brackets.catallaxy
+44:37 "*" keyword.operator.arithmetic.catallaxy
+44:39 "(" punctuation.section.brackets.catallaxy
+44:40 "s " 
+44:42 "-" keyword.operator.arithmetic.catallaxy
+44:44 "self" variable.language.self.catallaxy
+44:48 "." punctuation.accessor.catallaxy
+44:49 "c" variable.other.property.catallaxy
+44:50 ")" punctuation.section.brackets.catallaxy
+44:51 ")" punctuation.section.brackets.catallaxy
+44:52 "." punctuation.accessor.catallaxy
+44:53 "sqrt" variable.other.property.catallaxy
+45:2 "}" punctuation.section.block.end.catallaxy
+46:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+46:5 "name" meta.function.parameters.catallaxy entity.name.function.catallaxy
+46:9 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+46:10 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+46:14 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+46:16 "->" keyword.operator.arrow.catallaxy
+46:19 "String" support.type.builtin.catallaxy
+46:26 "{" punctuation.section.block.begin.catallaxy
+46:28 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+46:29 "triangle(" string.quoted.double.catallaxy
+46:38 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+46:40 "self" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.language.self.catallaxy
+46:44 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+46:45 "a" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+46:46 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+46:47 ", " string.quoted.double.catallaxy
+46:49 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+46:51 "self" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.language.self.catallaxy
+46:55 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+46:56 "b" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+46:57 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+46:58 ", " string.quoted.double.catallaxy
+46:60 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+46:62 "self" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.language.self.catallaxy
+46:66 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+46:67 "c" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+46:68 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+46:69 ")" string.quoted.double.catallaxy
+46:70 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+46:72 "}" punctuation.section.block.end.catallaxy
+47:0 "}" punctuation.section.block.end.catallaxy
+49:0 "#" comment.line.number-sign.catallaxy punctuation.definition.comment.catallaxy
+49:1 " A wrapper that orders shapes by area, so generic Comparable code can rank them." comment.line.number-sign.catallaxy
+50:0 "class" storage.type.class.catallaxy
+50:6 "ByArea" entity.name.type.class.catallaxy
+50:13 "{" punctuation.section.block.begin.catallaxy
+51:0 "  shape" 
+51:7 ":" punctuation.separator.colon.catallaxy
+51:9 "Shape" entity.name.type.catallaxy
+52:2 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+52:5 "<=>" meta.function.parameters.catallaxy entity.name.function.catallaxy
+52:8 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+52:9 "self" meta.function.parameters.catallaxy variable.language.self.catallaxy
+52:13 "," meta.function.parameters.catallaxy punctuation.separator.comma.catallaxy
+52:15 "other" meta.function.parameters.catallaxy variable.parameter.catallaxy
+52:20 ":" meta.function.parameters.catallaxy punctuation.separator.colon.catallaxy
+52:22 "ByArea" meta.function.parameters.catallaxy entity.name.type.catallaxy
+52:28 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+52:30 "->" keyword.operator.arrow.catallaxy
+52:33 "Int" support.type.builtin.catallaxy
+52:37 "{" punctuation.section.block.begin.catallaxy
+52:39 "self" variable.language.self.catallaxy
+52:43 "." punctuation.accessor.catallaxy
+52:44 "shape" variable.other.property.catallaxy
+52:49 "." punctuation.accessor.catallaxy
+52:50 "area" entity.name.function.member.catallaxy
+52:54 "(" punctuation.section.brackets.catallaxy
+52:55 ")" punctuation.section.brackets.catallaxy
+52:57 "<=>" keyword.operator.comparison.catallaxy
+52:60 " other" 
+52:66 "." punctuation.accessor.catallaxy
+52:67 "shape" variable.other.property.catallaxy
+52:72 "." punctuation.accessor.catallaxy
+52:73 "area" entity.name.function.member.catallaxy
+52:77 "(" punctuation.section.brackets.catallaxy
+52:78 ")" punctuation.section.brackets.catallaxy
+52:80 "}" punctuation.section.block.end.catallaxy
+53:0 "}" punctuation.section.block.end.catallaxy
+55:0 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+55:3 "largest" meta.function.parameters.catallaxy entity.name.function.catallaxy
+55:10 "[" meta.function.parameters.catallaxy punctuation.definition.generic.begin.catallaxy
+55:11 "T" meta.function.parameters.catallaxy entity.name.type.parameter.catallaxy
+55:12 ":" meta.function.parameters.catallaxy punctuation.separator.catallaxy
+55:14 "Comparable" meta.function.parameters.catallaxy entity.name.type.parameter.catallaxy
+55:24 "]" meta.function.parameters.catallaxy punctuation.definition.generic.end.catallaxy
+55:25 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+55:26 "xs" meta.function.parameters.catallaxy variable.parameter.catallaxy
+55:28 ":" meta.function.parameters.catallaxy punctuation.separator.colon.catallaxy
+55:30 "List" meta.function.parameters.catallaxy support.type.builtin.catallaxy
+55:34 "[" meta.function.parameters.catallaxy punctuation.section.brackets.catallaxy
+55:35 "T" meta.function.parameters.catallaxy entity.name.type.catallaxy
+55:36 "]" meta.function.parameters.catallaxy punctuation.section.brackets.catallaxy
+55:37 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+55:39 "->" keyword.operator.arrow.catallaxy
+55:42 "T" entity.name.type.catallaxy
+55:43 "?" keyword.operator.try.catallaxy
+55:45 "{" punctuation.section.block.begin.catallaxy
+56:0 "  best" 
+56:6 ":" punctuation.separator.colon.catallaxy
+56:8 "T" entity.name.type.catallaxy
+56:9 "?" keyword.operator.try.catallaxy
+56:11 "=" keyword.operator.assignment.catallaxy
+56:13 "nil" constant.language.nil.catallaxy
+57:2 "for" keyword.control.catallaxy
+57:5 " x " 
+57:8 "in" keyword.control.catallaxy
+57:10 " xs " 
+57:14 "{" punctuation.section.block.begin.catallaxy
+58:4 "if" keyword.control.catallaxy
+58:6 " best " 
+58:12 "==" keyword.operator.comparison.catallaxy
+58:15 "nil" constant.language.nil.catallaxy
+58:19 "or" keyword.operator.word.catallaxy
+58:21 " x " 
+58:24 ">" keyword.operator.comparison.catallaxy
+58:25 " best " 
+58:31 "{" punctuation.section.block.begin.catallaxy
+58:32 " best " 
+58:38 "=" keyword.operator.assignment.catallaxy
+58:39 " x " 
+58:42 "}" punctuation.section.block.end.catallaxy
+59:2 "}" punctuation.section.block.end.catallaxy
+60:0 "  best" 
+61:0 "}" punctuation.section.block.end.catallaxy
+63:0 "pub" storage.modifier.catallaxy
+63:4 "fn" meta.function.parameters.catallaxy storage.type.function.catallaxy
+63:7 "total_area" meta.function.parameters.catallaxy entity.name.function.catallaxy
+63:17 "(" meta.function.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+63:18 "shapes" meta.function.parameters.catallaxy variable.parameter.catallaxy
+63:24 ":" meta.function.parameters.catallaxy punctuation.separator.colon.catallaxy
+63:26 "List" meta.function.parameters.catallaxy support.type.builtin.catallaxy
+63:30 "[" meta.function.parameters.catallaxy punctuation.section.brackets.catallaxy
+63:31 "Shape" meta.function.parameters.catallaxy entity.name.type.catallaxy
+63:36 "]" meta.function.parameters.catallaxy punctuation.section.brackets.catallaxy
+63:37 ")" meta.function.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+63:39 "->" keyword.operator.arrow.catallaxy
+63:42 "Float" support.type.builtin.catallaxy
+63:48 "{" punctuation.section.block.begin.catallaxy
+64:0 "  shapes" 
+64:8 "." punctuation.accessor.catallaxy
+64:9 "reduce" entity.name.function.member.catallaxy
+64:15 "(" punctuation.section.brackets.catallaxy
+64:16 "0.0" constant.numeric.float.catallaxy
+64:19 ")" punctuation.section.brackets.catallaxy
+64:21 "{" punctuation.section.block.begin.catallaxy
+64:23 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+64:24 "acc" meta.block.parameters.catallaxy variable.parameter.catallaxy
+64:27 "," meta.block.parameters.catallaxy punctuation.separator.catallaxy
+64:29 "s" meta.block.parameters.catallaxy variable.parameter.catallaxy
+64:30 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+64:31 " acc " 
+64:36 "+" keyword.operator.arithmetic.catallaxy
+64:37 " s" 
+64:39 "." punctuation.accessor.catallaxy
+64:40 "area" entity.name.function.member.catallaxy
+64:44 "(" punctuation.section.brackets.catallaxy
+64:45 ")" punctuation.section.brackets.catallaxy
+64:47 "}" punctuation.section.block.end.catallaxy
+65:0 "}" punctuation.section.block.end.catallaxy
+67:0 "shapes" 
+67:6 ":" punctuation.separator.colon.catallaxy
+67:8 "List" support.type.builtin.catallaxy
+67:12 "[" punctuation.section.brackets.catallaxy
+67:13 "Shape" entity.name.type.catallaxy
+67:18 "]" punctuation.section.brackets.catallaxy
+67:20 "=" keyword.operator.assignment.catallaxy
+67:22 "[" punctuation.section.brackets.catallaxy
+68:2 "Circle" entity.name.type.catallaxy
+68:8 "." punctuation.accessor.catallaxy
+68:9 "new" entity.name.function.member.catallaxy
+68:12 "(" punctuation.section.brackets.catallaxy
+68:13 "1.0" constant.numeric.float.catallaxy
+68:16 ")" punctuation.section.brackets.catallaxy
+68:17 "," punctuation.separator.comma.catallaxy
+69:2 "Rect" entity.name.type.catallaxy
+69:6 "." punctuation.accessor.catallaxy
+69:7 "new" entity.name.function.member.catallaxy
+69:10 "(" punctuation.section.brackets.catallaxy
+69:11 "3.0" constant.numeric.float.catallaxy
+69:14 "," punctuation.separator.comma.catallaxy
+69:16 "4.0" constant.numeric.float.catallaxy
+69:19 ")" punctuation.section.brackets.catallaxy
+69:20 "," punctuation.separator.comma.catallaxy
+70:2 "Square" entity.name.type.catallaxy
+70:8 "." punctuation.accessor.catallaxy
+70:9 "new" entity.name.function.member.catallaxy
+70:12 "(" punctuation.section.brackets.catallaxy
+70:13 "2.0" constant.numeric.float.catallaxy
+70:16 ")" punctuation.section.brackets.catallaxy
+70:17 "," punctuation.separator.comma.catallaxy
+71:2 "Triangle" entity.name.type.catallaxy
+71:10 "." punctuation.accessor.catallaxy
+71:11 "new" entity.name.function.member.catallaxy
+71:14 "(" punctuation.section.brackets.catallaxy
+71:15 "3.0" constant.numeric.float.catallaxy
+71:18 "," punctuation.separator.comma.catallaxy
+71:20 "4.0" constant.numeric.float.catallaxy
+71:23 "," punctuation.separator.comma.catallaxy
+71:25 "5.0" constant.numeric.float.catallaxy
+71:28 ")" punctuation.section.brackets.catallaxy
+71:29 "," punctuation.separator.comma.catallaxy
+72:2 "Circle" entity.name.type.catallaxy
+72:8 "." punctuation.accessor.catallaxy
+72:9 "new" entity.name.function.member.catallaxy
+72:12 "(" punctuation.section.brackets.catallaxy
+72:13 "2.0" constant.numeric.float.catallaxy
+72:16 ")" punctuation.section.brackets.catallaxy
+72:17 "," punctuation.separator.comma.catallaxy
+73:0 "]" punctuation.section.brackets.catallaxy
+75:0 "puts" entity.name.function.call.catallaxy
+75:4 "(" punctuation.section.brackets.catallaxy
+75:5 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+75:6 "== all shapes ==" string.quoted.double.catallaxy
+75:22 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+75:23 ")" punctuation.section.brackets.catallaxy
+76:0 "for" keyword.control.catallaxy
+76:3 " s " 
+76:6 "in" keyword.control.catallaxy
+76:8 " shapes " 
+76:16 "{" punctuation.section.block.begin.catallaxy
+76:18 "puts" entity.name.function.call.catallaxy
+76:22 "(" punctuation.section.brackets.catallaxy
+76:23 "s" 
+76:24 "." punctuation.accessor.catallaxy
+76:25 "describe" entity.name.function.member.catallaxy
+76:33 "(" punctuation.section.brackets.catallaxy
+76:34 ")" punctuation.section.brackets.catallaxy
+76:35 ")" punctuation.section.brackets.catallaxy
+76:37 "}" punctuation.section.block.end.catallaxy
+78:0 "puts" entity.name.function.call.catallaxy
+78:4 "(" punctuation.section.brackets.catallaxy
+78:5 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+78:6 "== sorted by area ==" string.quoted.double.catallaxy
+78:26 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+78:27 ")" punctuation.section.brackets.catallaxy
+79:0 "by_area " 
+79:8 "=" keyword.operator.assignment.catallaxy
+79:9 " shapes" 
+79:16 "." punctuation.accessor.catallaxy
+79:17 "sort_with" entity.name.function.member.catallaxy
+79:27 "{" punctuation.section.block.begin.catallaxy
+79:29 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+79:30 "a" meta.block.parameters.catallaxy variable.parameter.catallaxy
+79:31 "," meta.block.parameters.catallaxy punctuation.separator.catallaxy
+79:33 "b" meta.block.parameters.catallaxy variable.parameter.catallaxy
+79:34 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+79:35 " a" 
+79:37 "." punctuation.accessor.catallaxy
+79:38 "area" entity.name.function.member.catallaxy
+79:42 "(" punctuation.section.brackets.catallaxy
+79:43 ")" punctuation.section.brackets.catallaxy
+79:45 "<=>" keyword.operator.comparison.catallaxy
+79:48 " b" 
+79:50 "." punctuation.accessor.catallaxy
+79:51 "area" entity.name.function.member.catallaxy
+79:55 "(" punctuation.section.brackets.catallaxy
+79:56 ")" punctuation.section.brackets.catallaxy
+79:58 "}" punctuation.section.block.end.catallaxy
+80:0 "for" keyword.control.catallaxy
+80:3 " s " 
+80:6 "in" keyword.control.catallaxy
+80:8 " by_area " 
+80:17 "{" punctuation.section.block.begin.catallaxy
+80:19 "puts" entity.name.function.call.catallaxy
+80:23 "(" punctuation.section.brackets.catallaxy
+80:24 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+80:25 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+80:27 "s" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded
+80:28 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+80:29 "name" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+80:33 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+80:34 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+80:35 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+80:37 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+80:39 "s" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded
+80:40 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+80:41 "area" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+80:45 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+80:46 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+80:47 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+80:48 "format" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+80:54 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+80:55 "3" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded constant.numeric.integer.catallaxy
+80:56 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+80:57 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+80:58 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+80:59 ")" punctuation.section.brackets.catallaxy
+80:61 "}" punctuation.section.block.end.catallaxy
+82:0 "puts" entity.name.function.call.catallaxy
+82:4 "(" punctuation.section.brackets.catallaxy
+82:5 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+82:6 "== sorted by perimeter, descending ==" string.quoted.double.catallaxy
+82:43 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+82:44 ")" punctuation.section.brackets.catallaxy
+83:0 "by_perimeter " 
+83:13 "=" keyword.operator.assignment.catallaxy
+83:14 " shapes" 
+83:21 "." punctuation.accessor.catallaxy
+83:22 "sort_with" entity.name.function.member.catallaxy
+83:32 "{" punctuation.section.block.begin.catallaxy
+83:34 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+83:35 "a" meta.block.parameters.catallaxy variable.parameter.catallaxy
+83:36 "," meta.block.parameters.catallaxy punctuation.separator.catallaxy
+83:38 "b" meta.block.parameters.catallaxy variable.parameter.catallaxy
+83:39 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+83:40 " b" 
+83:42 "." punctuation.accessor.catallaxy
+83:43 "perimeter" entity.name.function.member.catallaxy
+83:52 "(" punctuation.section.brackets.catallaxy
+83:53 ")" punctuation.section.brackets.catallaxy
+83:55 "<=>" keyword.operator.comparison.catallaxy
+83:58 " a" 
+83:60 "." punctuation.accessor.catallaxy
+83:61 "perimeter" entity.name.function.member.catallaxy
+83:70 "(" punctuation.section.brackets.catallaxy
+83:71 ")" punctuation.section.brackets.catallaxy
+83:73 "}" punctuation.section.block.end.catallaxy
+84:0 "for" keyword.control.catallaxy
+84:3 " s " 
+84:6 "in" keyword.control.catallaxy
+84:8 " by_perimeter " 
+84:22 "{" punctuation.section.block.begin.catallaxy
+85:2 "puts" entity.name.function.call.catallaxy
+85:6 "(" punctuation.section.brackets.catallaxy
+85:7 "s" 
+85:8 "." punctuation.accessor.catallaxy
+85:9 "name" entity.name.function.member.catallaxy
+85:13 "(" punctuation.section.brackets.catallaxy
+85:14 ")" punctuation.section.brackets.catallaxy
+85:15 ")" punctuation.section.brackets.catallaxy
+86:0 "}" punctuation.section.block.end.catallaxy
+88:0 "wrapped " 
+88:8 "=" keyword.operator.assignment.catallaxy
+88:9 " shapes" 
+88:16 "." punctuation.accessor.catallaxy
+88:17 "map" entity.name.function.member.catallaxy
+88:21 "{" punctuation.section.block.begin.catallaxy
+88:23 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+88:24 "s" meta.block.parameters.catallaxy variable.parameter.catallaxy
+88:25 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+88:27 "ByArea" entity.name.type.catallaxy
+88:33 "." punctuation.accessor.catallaxy
+88:34 "new" entity.name.function.member.catallaxy
+88:37 "(" punctuation.section.brackets.catallaxy
+88:38 "s" 
+88:39 ")" punctuation.section.brackets.catallaxy
+88:41 "}" punctuation.section.block.end.catallaxy
+89:0 "if" keyword.control.catallaxy
+89:3 "let" storage.type.catallaxy
+89:6 " big " 
+89:11 "=" keyword.operator.assignment.catallaxy
+89:13 "largest" entity.name.function.call.catallaxy
+89:20 "(" punctuation.section.brackets.catallaxy
+89:21 "wrapped" 
+89:28 ")" punctuation.section.brackets.catallaxy
+89:30 "{" punctuation.section.block.begin.catallaxy
+90:2 "puts" entity.name.function.call.catallaxy
+90:6 "(" punctuation.section.brackets.catallaxy
+90:7 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+90:8 "largest: " string.quoted.double.catallaxy
+90:17 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+90:19 "big" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded
+90:22 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+90:23 "shape" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+90:28 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+90:29 "name" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+90:33 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+90:34 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+90:35 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+90:36 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+90:37 ")" punctuation.section.brackets.catallaxy
+91:0 "}" punctuation.section.block.end.catallaxy
+92:0 "puts" entity.name.function.call.catallaxy
+92:4 "(" punctuation.section.brackets.catallaxy
+92:5 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+92:6 "smallest: " string.quoted.double.catallaxy
+92:16 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+92:18 "wrapped" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded
+92:25 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+92:26 "sorted" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+92:32 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+92:33 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+92:34 "[" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+92:35 "0" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded constant.numeric.integer.catallaxy
+92:36 "]" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+92:37 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+92:38 "shape" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+92:43 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+92:44 "name" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+92:48 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+92:49 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+92:50 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+92:51 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+92:52 ")" punctuation.section.brackets.catallaxy
+93:0 "puts" entity.name.function.call.catallaxy
+93:4 "(" punctuation.section.brackets.catallaxy
+93:5 "wrapped" 
+93:12 "[" punctuation.section.brackets.catallaxy
+93:13 "1" constant.numeric.integer.catallaxy
+93:14 "]" punctuation.section.brackets.catallaxy
+93:16 ">" keyword.operator.comparison.catallaxy
+93:17 " wrapped" 
+93:25 "[" punctuation.section.brackets.catallaxy
+93:26 "2" constant.numeric.integer.catallaxy
+93:27 "]" punctuation.section.brackets.catallaxy
+93:28 ")" punctuation.section.brackets.catallaxy
+94:0 "puts" entity.name.function.call.catallaxy
+94:4 "(" punctuation.section.brackets.catallaxy
+94:5 "wrapped" 
+94:12 "[" punctuation.section.brackets.catallaxy
+94:13 "2" constant.numeric.integer.catallaxy
+94:14 "]" punctuation.section.brackets.catallaxy
+94:15 "." punctuation.accessor.catallaxy
+94:16 "between" entity.name.function.member.catallaxy
+94:23 "(" punctuation.section.brackets.catallaxy
+94:24 "wrapped" 
+94:31 "[" punctuation.section.brackets.catallaxy
+94:32 "0" constant.numeric.integer.catallaxy
+94:33 "]" punctuation.section.brackets.catallaxy
+94:34 "," punctuation.separator.comma.catallaxy
+94:35 " wrapped" 
+94:43 "[" punctuation.section.brackets.catallaxy
+94:44 "1" constant.numeric.integer.catallaxy
+94:45 "]" punctuation.section.brackets.catallaxy
+94:46 ")" punctuation.section.brackets.catallaxy
+94:47 ")" punctuation.section.brackets.catallaxy
+96:0 "puts" entity.name.function.call.catallaxy
+96:4 "(" punctuation.section.brackets.catallaxy
+96:5 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+96:6 "total area: " string.quoted.double.catallaxy
+96:18 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+96:20 "total_area" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.call.catallaxy
+96:30 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+96:31 "shapes" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded
+96:37 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+96:38 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+96:39 "format" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded entity.name.function.member.catallaxy
+96:45 "(" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+96:46 "4" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded constant.numeric.integer.catallaxy
+96:47 ")" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.section.brackets.catallaxy
+96:48 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+96:49 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+96:50 ")" punctuation.section.brackets.catallaxy
+97:0 "squares " 
+97:8 "=" keyword.operator.assignment.catallaxy
+97:9 " shapes" 
+97:16 "." punctuation.accessor.catallaxy
+97:17 "select" entity.name.function.member.catallaxy
+97:24 "{" punctuation.section.block.begin.catallaxy
+97:26 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+97:27 "s" meta.block.parameters.catallaxy variable.parameter.catallaxy
+97:28 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+97:29 " s " 
+97:32 "is" keyword.operator.word.catallaxy
+97:35 "Square" entity.name.type.catallaxy
+97:42 "}" punctuation.section.block.end.catallaxy
+98:0 "puts" entity.name.function.call.catallaxy
+98:4 "(" punctuation.section.brackets.catallaxy
+98:5 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+98:6 "squares: " string.quoted.double.catallaxy
+98:15 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+98:17 "squares" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded
+98:24 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+98:25 "length" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+98:31 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+98:32 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+98:33 ")" punctuation.section.brackets.catallaxy
+99:0 "rects " 
+99:6 "=" keyword.operator.assignment.catallaxy
+99:7 " shapes" 
+99:14 "." punctuation.accessor.catallaxy
+99:15 "select" entity.name.function.member.catallaxy
+99:22 "{" punctuation.section.block.begin.catallaxy
+99:24 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.begin.catallaxy
+99:25 "s" meta.block.parameters.catallaxy variable.parameter.catallaxy
+99:26 "|" meta.block.parameters.catallaxy punctuation.definition.parameters.end.catallaxy
+99:27 " s " 
+99:30 "is" keyword.operator.word.catallaxy
+99:33 "Rect" entity.name.type.catallaxy
+99:38 "}" punctuation.section.block.end.catallaxy
+100:0 "puts" entity.name.function.call.catallaxy
+100:4 "(" punctuation.section.brackets.catallaxy
+100:5 "\"" string.quoted.double.catallaxy punctuation.definition.string.begin.catallaxy
+100:6 "rect-like: " string.quoted.double.catallaxy
+100:17 "#{" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.begin.catallaxy
+100:19 "rects" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded
+100:24 "." string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded punctuation.accessor.catallaxy
+100:25 "length" string.quoted.double.catallaxy meta.interpolation.catallaxy source.catallaxy.embedded variable.other.property.catallaxy
+100:31 "}" string.quoted.double.catallaxy meta.interpolation.catallaxy punctuation.section.interpolation.end.catallaxy
+100:32 "\"" string.quoted.double.catallaxy punctuation.definition.string.end.catallaxy
+100:33 ")" punctuation.section.brackets.catallaxy

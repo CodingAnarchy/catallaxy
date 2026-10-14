@@ -1,12 +1,114 @@
 name: Release
-# Publishes every crate on a version tag, in dependency order, then creates a GitHub release.
+# On a version tag: build prebuilt `catx` archives for each platform, publish every crate in
+# dependency order, create the GitHub release (if missing) and attach the archives and checksums.
 # Needs a CARGO_REGISTRY_TOKEN repository secret (a crates.io API token with publish scope).
+#
+# Run it by hand (Actions > Release > Run workflow) to build the archives without publishing or
+# uploading anything: the archives are kept as workflow artifacts.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build the archives only (never publishes, whatever this says)
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04 rather than latest: binaries link against the runner's glibc, so build on an
+          # older one to run on more distributions.
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          # Cross-compiled on Apple silicon (the Intel macOS runners are being retired).
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+      # Leave out the debug info the release profile keeps for profiling: it triples the archives.
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_STRIP: debuginfo
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build catx and the C ABI library
+        run: |
+          cargo build --release --locked --target "$TARGET" -p catallaxy --bin catx
+          cargo build --release --locked --target "$TARGET" -p catallaxy-capi
+      - name: Package
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          name="catx-$version-$TARGET"
+          out="target/$TARGET/release"
+          mkdir -p "dist/$name/lib" "dist/$name/include"
+          cp README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cp crates/catallaxy-capi/include/catallaxy.h "dist/$name/include/"
+          case "$TARGET" in
+            *windows*)
+              cp "$out/catx.exe" "dist/$name/"
+              cp "$out/catallaxy_capi.lib" "$out/catallaxy_capi.dll" "$out/catallaxy_capi.dll.lib" "dist/$name/lib/"
+              (cd dist && 7z a -tzip -bd "$name.zip" "$name" >/dev/null)
+              archive="$name.zip"
+              ;;
+            *)
+              cp "$out/catx" "dist/$name/"
+              cp "$out/libcatallaxy_capi.a" "dist/$name/lib/"
+              case "$TARGET" in
+                *apple*) cp "$out/libcatallaxy_capi.dylib" "dist/$name/lib/" ;;
+                *) cp "$out/libcatallaxy_capi.so" "dist/$name/lib/" ;;
+              esac
+              tar -C dist -czf "dist/$name.tar.gz" "$name"
+              archive="$name.tar.gz"
+              ;;
+          esac
+          if command -v sha256sum >/dev/null; then sum=$(sha256sum "dist/$archive"); else sum=$(shasum -a 256 "dist/$archive"); fi
+          # `sha256sum -c` format, without the `*` (binary mode) Windows tools put before the name.
+          printf '%s  %s\n' "${sum%% *}" "$archive" > "dist/$archive.sha256"
+          cat "dist/$archive.sha256"
+          rm -rf "dist/$name"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Smoke test
+        run: |
+          # The x86_64 macOS build is cross-compiled; it runs only if Rosetta is installed.
+          runs=yes
+          if [ "$TARGET" = x86_64-apple-darwin ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            runs=no; echo "no Rosetta: not running the x86_64 build"
+          fi
+          if [ $runs = yes ]; then
+            "target/$TARGET/release/catx" --version
+            "target/$TARGET/release/catx" run examples/hello.cx
+          fi
+          # install.sh against the archive just built (told the target, so the Rosetta case works).
+          if [ "$RUNNER_OS" != Windows ]; then
+            CATX_DOWNLOAD_URL="file://$PWD/dist" CATX_TARGET="$TARGET" \
+              sh install.sh --version "$VERSION" --prefix "$RUNNER_TEMP/catx-install"
+            if [ $runs = yes ]; then "$RUNNER_TEMP/catx-install/bin/catx" run examples/hello.cx; fi
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catx-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
   publish:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -42,13 +144,33 @@ jobs:
           for c in $todo; do
             cargo publish --locked -p "$c"
           done
-      - name: GitHub release
+
+  upload:
+    # Runs after the crates are out, so the release never advertises a version crates.io lacks.
+    needs: [build, publish]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: catx-*
+          path: dist
+          merge-multiple: true
+      - name: Create the release and attach the archives
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Safe to re-run: leave an existing release alone.
+          cd dist
+          cat ./*.sha256 | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+          # Safe to re-run: leave an existing release alone, and replace same-named assets.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already exists"
           else
             gh release create "$GITHUB_REF_NAME" --generate-notes --title "Catallaxy ${GITHUB_REF_NAME#v}"
           fi
+          gh release upload "$GITHUB_REF_NAME" --clobber catx-* SHA256SUMS

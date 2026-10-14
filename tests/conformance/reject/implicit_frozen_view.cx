@@ -1,0 +1,5 @@
+# expect: E0369
+fn f(x) {
+  y = freeze(x)
+  y.push(1)
+}
