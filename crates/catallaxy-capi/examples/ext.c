@@ -78,6 +78,10 @@ static const char *PROGRAM =
     "}\n";
 
 int main(void) {
+    if (!cx_allocator_active()) {
+        fprintf(stderr, "the library was built without its global allocator\n");
+        return 1;
+    }
     if (cx_register("c_sum", c_sum, NULL) || cx_register("c_greet", c_greet, (void *)"Hello") ||
         cx_register("c_apply_twice", c_apply_twice, NULL) || cx_register("c_fail", c_fail, NULL)) {
         fprintf(stderr, "registration failed\n");

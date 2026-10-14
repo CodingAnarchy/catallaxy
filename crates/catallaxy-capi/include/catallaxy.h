@@ -48,6 +48,10 @@ void cx_set_args(int argc, const char *const *argv);
  * printed to stderr and return 2. */
 int cx_run_file(const char *path);
 int cx_run_source(const char *name, const char *source);
+/* 1 if the library's own allocations go through the runtime's allocator, which on out-of-memory
+ * releases a reserve, retries, and raises a MemoryError in the program rather than aborting
+ * (the default build); 0 if not. The host's malloc is not affected either way. */
+int cx_allocator_active(void);
 
 /* ---- values ---------------------------------------------------------------------------- */
 

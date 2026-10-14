@@ -20,3 +20,10 @@ catallaxy.workspace = true
 catallaxy-runtime.workspace = true
 catallaxy-stdlib.workspace = true
 catallaxy-vm.workspace = true
+catallaxy-gc.workspace = true
+
+[features]
+# Makes `catallaxy_gc::Allocator` the global allocator of the C libraries (see the crate docs).
+# A Rust program that depends on this crate and brings its own allocator turns it off.
+default = ["global-allocator"]
+global-allocator = []
