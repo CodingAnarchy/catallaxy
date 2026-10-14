@@ -1,0 +1,43 @@
+# A local that a closure assigns keeps its narrowing until the next call; test it again after a
+# call, or bind the value.
+fn g() -> Int {
+  x: Int? = 1
+  clear = fn() { x = nil }
+  total = 0
+  if x != nil { total += x + 1 }
+  if let v = x {
+    clear()
+    total += v * 10
+  }
+  if x != nil { total += 100 }
+  total
+}
+
+# A closure that only reads the local does not end its narrowing.
+fn h() -> Int {
+  x: Int? = 5
+  show = fn() { puts(x) }
+  if x != nil {
+    show()
+    return x + 1
+  }
+  0
+}
+
+# A closure may test a captured local that nothing reassigns, and its own locals.
+fn k(x: Int?) -> Int {
+  f = fn() -> Int {
+    y: Int? = 2
+    if x != nil && y != nil {
+      puts("both")
+      return x + y
+    }
+    0
+  }
+  f()
+}
+
+puts(g())
+puts(h())
+puts(k(3))
+puts(k(nil))

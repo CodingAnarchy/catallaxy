@@ -256,29 +256,52 @@ impl Checker {
         let mut tys = Vec::new();
         // What the subject can still be after the arms so far.
         let mut remaining = st;
+        // Each arm starts from the narrowings here, joined with those after the guards of earlier
+        // arms (a guard that fails has run). After the `match`, what every arm that falls through
+        // ends with holds (`joined_narrowing`).
+        let mut start = self.save_narrowing();
+        let mut ends = Vec::new();
         for arm in arms {
-            self.push_scope();
-            self.check_pattern(&arm.pattern, remaining, false);
-            // Narrow the subject variable inside the arm.
-            if let Some(l) = subject_local {
-                if let Some(nt) = self.pattern_narrowing(&arm.pattern, st) {
-                    self.narrow(l, nt);
+            self.restore_narrowing(start.clone());
+            let mut after_guard = None;
+            let (t, end) = self.check_branch(Vec::new(), |c| {
+                c.check_pattern(&arm.pattern, remaining, false);
+                // Narrow the subject variable inside the arm.
+                if let Some(l) = subject_local {
+                    if let Some(nt) = c.pattern_narrowing(&arm.pattern, st) {
+                        c.narrow(l, nt);
+                    }
                 }
-            }
-            if let Some(g) = &arm.guard {
-                let (tn, _) = self.check_cond(g);
-                for (l, t) in tn {
-                    self.narrow(l, t);
+                if let Some(g) = &arm.guard {
+                    let (tn, _) = c.check_cond(g);
+                    // Without the arm's own scope.
+                    let (mut n, mut p) = c.save_narrowing();
+                    n.pop();
+                    p.pop();
+                    after_guard = Some(Self::flat_narrowing(&(n, p)));
+                    for (l, t) in tn {
+                        c.narrow(l, t);
+                    }
                 }
-            }
-            let t = self.check_stmt(&arm.body, expected);
-            self.record_ty(arm.body.id, t);
+                let t = c.check_branch_expr(&arm.body, expected);
+                c.record_ty(arm.body.id, t);
+                t
+            });
             tys.push(t);
-            self.pop_scope();
+            if !self.is_never(t) {
+                ends.push(end);
+            }
+            if let Some(g) = after_guard {
+                let from = start.clone();
+                start = self.joined_narrowing(&from, &[Self::flat_narrowing(&from), g]);
+            }
             if arm.guard.is_none() {
                 remaining = self.subtract_pattern(remaining, &arm.pattern);
             }
         }
+        // A `match` that is not exhaustive (an error) may also fall through without an arm.
+        let joined = if arms.is_empty() { start } else { self.joined_narrowing(&start, &ends) };
+        self.restore_narrowing(joined);
         self.check_exhaustive(e, st, arms);
         if arms.is_empty() {
             return self.types.never;

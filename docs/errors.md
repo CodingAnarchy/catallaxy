@@ -536,14 +536,6 @@ fn name() -> String { 42 }
 
 Return a value of the declared type, or change the declared type.
 
-## E0302
-
-Conflicting return types. The checker could not settle on one result type for a function without a
-result annotation. The values a function returns are normally joined into a union (`Int | String`),
-so this is a consistency check that no known program reaches; there is no example.
-
-Annotate the function's result type.
-
 ## E0303
 
 Unknown name. A name is not a local, parameter, function, constant or import in scope.
@@ -629,7 +621,8 @@ Annotate its parameters (`fn twice(x: Int) -> Int`), or pass a closure: `{ |x: I
 
 Value may be nil. A member, operator or index is used on an optional value (`T?`) without checking
 for `nil`. A call between a `!= nil` test on a field and its use also counts, because the call may
-have changed the field.
+have changed the field; so does a call between a test on a variable that a closure assigns and its
+use, because the call may have run the closure.
 
 ```cx
 x: String? = nil

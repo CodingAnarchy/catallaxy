@@ -56,6 +56,12 @@ pub enum CtxKind {
 /// A field path rooted at a local (or `self`): `n.next` is `(n, ["next"])`.
 pub type FieldPath = (LocalId, Vec<String>);
 
+/// The narrowings of a context: of locals, and of field paths (see `FnCtx`).
+pub type NarrowState = (Vec<FxHashMap<LocalId, TyId>>, Vec<FxHashMap<FieldPath, (TyId, bool)>>);
+
+/// The narrowings in effect at one point, without layers.
+pub type FlatNarrow = (FxHashMap<LocalId, TyId>, FxHashMap<FieldPath, (TyId, bool)>);
+
 /// What a narrowing applies to.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum NKey {
@@ -90,7 +96,41 @@ pub struct FnCtx {
     pub self_local: Option<LocalId>,
     /// Locals whose values were moved away.
     pub moved: FxHashSet<LocalId>,
+    /// The assignments in this context's body (closures included), for the locals it declares.
+    pub scan: std::rc::Rc<AssignScan>,
     pub span: Span,
+}
+
+/// What a function, closure or `for` body (closures in it included) assigns, found before it is
+/// checked: assignments that come later in the text may still run first, through closures,
+/// loops and fibers.
+#[derive(Default, Debug)]
+pub struct AssignScan {
+    /// Names assigned inside a closure or `spawn` block.
+    pub in_closures: FxHashSet<String>,
+    /// How many times each name is assigned (declarations included).
+    pub counts: FxHashMap<String, u32>,
+}
+
+impl AssignScan {
+    pub fn new<'a>(stmts: impl IntoIterator<Item = &'a ast::Expr>) -> Self {
+        let mut scan = AssignScan::default();
+        let mut stack: Vec<(&ast::Expr, bool)> = stmts.into_iter().map(|x| (x, false)).collect();
+        while let Some((x, in_closure)) = stack.pop() {
+            if let ast::ExprKind::Assign { target, .. } = &x.kind {
+                if let ast::ExprKind::Ident(n) = &target.kind {
+                    *scan.counts.entry(n.clone()).or_default() += 1;
+                    if in_closure {
+                        scan.in_closures.insert(n.clone());
+                    }
+                }
+            }
+            let in_closure =
+                in_closure || matches!(x.kind, ast::ExprKind::Closure { .. } | ast::ExprKind::Spawn { .. });
+            stack.extend(crate::query::children(x).into_iter().map(|c| (c, in_closure)));
+        }
+        scan
+    }
 }
 
 pub struct Checker {
@@ -163,6 +203,9 @@ pub struct Checker {
     /// Locals whose narrowing a loop being checked dropped, because it assigns them a value that
     /// may not fit it (for diagnostics).
     pub loop_dropped: Vec<LocalId>,
+    /// Set to make the next `check_block` record the narrowings at its end in `block_end`.
+    pub capture_block_end: bool,
+    pub block_end: Option<FlatNarrow>,
     /// Every method name of every type (built on first use, for loop pre-scans).
     pub method_names: FxHashSet<String>,
     /// When set, `Open` requirements are recorded against this function.
@@ -268,6 +311,8 @@ impl Checker {
             path_epoch: 0,
             loop_facts: Vec::new(),
             loop_dropped: Vec::new(),
+            capture_block_end: false,
+            block_end: None,
             method_names: FxHashSet::default(),
             open_owner: None,
             well_known: WellKnown::default(),
@@ -324,12 +369,17 @@ impl Checker {
 
     pub fn new_local(&mut self, name: &str, ty: TyId, span: Span, is_param: bool) -> LocalId {
         let ctx = self.ctxs.len() as u32 - 1;
+        let scan = &self.ctxs.last().unwrap().scan;
+        let closure_assigned = scan.in_closures.contains(name);
+        let reassigned = scan.counts.get(name).is_some_and(|&n| n + u32::from(is_param) > 1);
         self.locals.push(LocalInfo {
             name: name.to_string(),
             ty,
             ctx,
             captured: false,
             assigns: 1,
+            closure_assigned,
+            reassigned,
             is_param,
             span,
             used: false,

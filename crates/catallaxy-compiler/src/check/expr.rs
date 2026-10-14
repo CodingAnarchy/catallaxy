@@ -86,7 +86,11 @@ impl Checker {
     /// once). A call anywhere drops the unstable ones, an assignment to a field drops paths
     /// through that field name, and an assignment to a local drops paths rooted at it.
     fn loop_invalidate(&mut self, body: &Block) {
-        if self.ctxs.last().is_none_or(|c| c.path_narrow.iter().all(|l| l.is_empty())) {
+        if self
+            .ctxs
+            .last()
+            .is_none_or(|c| c.path_narrow.iter().all(|l| l.is_empty()) && c.narrow.iter().all(|l| l.is_empty()))
+        {
             return;
         }
         if self.method_names.is_empty() {
@@ -160,6 +164,14 @@ impl Checker {
                 continue;
             }
             seen.push(l);
+            if self.dies_at_calls(l) {
+                // Already dropped at each call; a loop fact would outlive those.
+                if self.local_ty(l) != self.locals[l as usize].ty {
+                    self.clear_narrowing(l);
+                    self.loop_dropped.push(l);
+                }
+                continue;
+            }
             let declared = self.locals[l as usize].ty;
             let narrowed = self.local_ty(l);
             // Only narrowings to a subtype (not, say, the frozen view after `freeze`).
@@ -246,15 +258,30 @@ impl Checker {
         }
     }
 
-    /// A note for a nil error on `e`, when `e` is a local whose narrowing an enclosing loop dropped.
+    /// A note for a nil error on `e`, when `e` is a local whose narrowing an enclosing loop dropped,
+    /// or one that a call may change (`dies_at_calls`).
     fn loop_dropped_note(&self, e: &Expr) -> Option<String> {
         let ExprKind::Ident(n) = &e.kind else { return None };
-        let l = self.lookup_local_quiet(n)?;
-        self.loop_dropped.contains(&l).then(|| {
-            format!(
+        let l = match self.names.get(&e.id) {
+            Some(NameRes::Local(l)) => *l,
+            _ => self.lookup_local_quiet(n)?,
+        };
+        if self.loop_dropped.contains(&l) {
+            return Some(format!(
                 "`{n}` is not nil before this loop, but the loop assigns it a value that may be nil, so it may be nil here on a later iteration; check it inside the loop"
+            ));
+        }
+        if !self.dies_at_calls(l) {
+            return None;
+        }
+        let why = if self.locals[l as usize].closure_assigned {
+            format!("a closure assigns `{n}`, so a nil test on it holds only until the next call, which may run the closure")
+        } else {
+            format!(
+                "`{n}` is assigned elsewhere in its function, so in this closure a nil test outside it does not apply, and one inside it holds only until the next call"
             )
-        })
+        };
+        Some(format!("{why}; bind the value instead: `if let v = {n} {{ ... }}`"))
     }
 
     /// For an assignment to local `l` of a value of type `vt` inside loops: each narrowing of `l`
@@ -1260,10 +1287,9 @@ impl Checker {
                 let (rt, rf) = self.check_cond(r);
                 self.pop_scope();
                 if self.path_epoch != epoch {
-                    // A call on the right may have changed what the left found about fields.
-                    let keep = |(k, _): &(NKey, TyId)| !matches!(k, NKey::Path(_, false));
-                    lt.retain(keep);
-                    lf.retain(keep);
+                    // A call on the right may have changed what the left found.
+                    self.retain_past_calls(&mut lt);
+                    self.retain_past_calls(&mut lf);
                 }
                 self.bins.insert(e.id, BinRes::Logic);
                 self.record_ty(e.id, bool_);
@@ -1373,6 +1399,14 @@ impl Checker {
         Some(((root, fields), stable && frozen_here))
     }
 
+    /// Keeps the narrowings that still hold after a call (see `clear_unstable_paths`).
+    fn retain_past_calls(&self, ns: &mut Vec<(NKey, TyId)>) {
+        ns.retain(|(k, _)| match k {
+            NKey::Path(_, stable) => *stable,
+            NKey::Local(l) => !self.dies_at_calls(*l),
+        });
+    }
+
     fn narrowable_local(&self, e: &Expr) -> Option<LocalId> {
         match (&e.kind, self.names.get(&e.id)) {
             (ExprKind::Ident(_), Some(NameRes::Local(l))) => Some(*l),
@@ -1385,36 +1419,45 @@ impl Checker {
 
     fn check_if(&mut self, cond: &Expr, then: &Block, else_: Option<&Expr>, expected: Option<TyId>) -> TyId {
         let (tn, fne) = self.check_cond(cond);
-        self.push_scope();
-        for (l, t) in tn.iter().cloned() {
-            self.narrow(l, t);
+        // Each branch starts from the narrowings here. After the `if`, what every branch that
+        // falls through ends with holds (`joined_narrowing`); this also makes guard clauses
+        // (`if x == nil { return }`) narrow the rest of the block.
+        let start = self.save_narrowing();
+        let mut ends = Vec::new();
+        let (tt, end) = self.check_branch(tn, |c| {
+            c.capture_block_end = true;
+            c.check_block(then, expected)
+        });
+        if !self.is_never(tt) {
+            ends.push(end);
         }
-        let tt = self.check_block(then, expected);
-        self.pop_scope();
+        self.restore_narrowing(start.clone());
         let et = match else_ {
             Some(x) => {
-                self.push_scope();
-                for (l, t) in fne.iter().cloned() {
-                    self.narrow(l, t);
+                let (t, end) = self.check_branch(fne, |c| c.check_branch_expr(x, expected));
+                if !self.is_never(t) {
+                    ends.push(end);
                 }
-                let t = self.check_expr(x, expected);
-                self.pop_scope();
                 Some(t)
             }
-            None => None,
+            None => {
+                let mut end = Self::flat_narrowing(&start);
+                for (k, t) in fne {
+                    match k {
+                        NKey::Local(l) => {
+                            end.0.insert(l, t);
+                        }
+                        NKey::Path(p, stable) => {
+                            end.1.insert(p, (t, stable));
+                        }
+                    }
+                }
+                ends.push(end);
+                None
+            }
         };
-        // Guard clauses: `if x == nil { return }` narrows the rest of the block.
-        let then_diverges = self.is_never(tt);
-        let else_diverges = et.is_some_and(|t| self.is_never(t));
-        if then_diverges && !else_diverges {
-            for (l, t) in fne {
-                self.narrow(l, t);
-            }
-        } else if else_diverges && !then_diverges {
-            for (l, t) in tn {
-                self.narrow(l, t);
-            }
-        }
+        let joined = self.joined_narrowing(&start, &ends);
+        self.restore_narrowing(joined);
         match et {
             None => {
                 if self.is_never(tt) || self.types.shallow_resolve(tt) == self.types.nil {
@@ -1443,25 +1486,46 @@ impl Checker {
         expected: Option<TyId>,
     ) -> TyId {
         let vt = self.check_expr(value, None);
-        self.push_scope();
-        // A plain binding unwraps an optional.
-        let bind_ty = match &pattern.kind {
-            ast::PatternKind::Bind(_) => match self.types.strip_nil(vt) {
-                Some(inner) => inner,
-                None => {
-                    if !self.is_dynamic(vt) {
-                        let msg = format!("`if let` needs an optional value, found `{}`", self.show(vt));
-                        self.err("E0317", msg, value.span);
+        let start = self.save_narrowing();
+        let mut ends = Vec::new();
+        let (tt, end) = self.check_branch(Vec::new(), |c| {
+            // A plain binding unwraps an optional.
+            let bind_ty = match &pattern.kind {
+                ast::PatternKind::Bind(_) => match c.types.strip_nil(vt) {
+                    Some(inner) => inner,
+                    None => {
+                        if !c.is_dynamic(vt) {
+                            let msg = format!("`if let` needs an optional value, found `{}`", c.show(vt));
+                            c.err("E0317", msg, value.span);
+                        }
+                        vt
                     }
-                    vt
+                },
+                _ => vt,
+            };
+            c.check_pattern(pattern, bind_ty, false);
+            c.capture_block_end = true;
+            c.check_block(then, expected)
+        });
+        if !self.is_never(tt) {
+            ends.push(end);
+        }
+        self.restore_narrowing(start.clone());
+        let et = match else_ {
+            Some(x) => {
+                let (t, end) = self.check_branch(Vec::new(), |c| c.check_branch_expr(x, expected));
+                if !self.is_never(t) {
+                    ends.push(end);
                 }
-            },
-            _ => vt,
+                Some(t)
+            }
+            None => {
+                ends.push(Self::flat_narrowing(&start));
+                None
+            }
         };
-        self.check_pattern(pattern, bind_ty, false);
-        let tt = self.check_block(then, expected);
-        self.pop_scope();
-        let et = else_.map(|x| self.check_expr(x, expected));
+        let joined = self.joined_narrowing(&start, &ends);
+        self.restore_narrowing(joined);
         match et {
             None => {
                 if self.is_never(tt) || self.types.shallow_resolve(tt) == self.types.nil {
@@ -1496,6 +1560,8 @@ impl Checker {
             ctx: ci as u32,
             captured: false,
             assigns: 1,
+            closure_assigned: false,
+            reassigned: false,
             is_param: false,
             span: Span::default(),
             used: true,
@@ -1760,6 +1826,9 @@ impl Checker {
                         self.check_loop_facts(l, stored, value);
                     }
                     self.locals[l as usize].assigns += 1;
+                    if owner + 1 < self.ctxs.len() {
+                        self.locals[l as usize].closure_assigned = true;
+                    }
                     for c in self.ctxs.iter_mut() {
                         c.moved.remove(&l);
                     }
@@ -4102,6 +4171,7 @@ impl Checker {
         let ret_is_nil = self.types.shallow_resolve(ret_ty) == nil;
         let body_ret = if ret_is_nil { self.types.fresh_var() } else { ret_ty };
         self.push_ctx(fid, kind, body_ret, e.span);
+        self.ctx().scan = std::rc::Rc::new(AssignScan::new(&body.stmts));
         let mut plocals = Vec::new();
         if implicit_it {
             plocals.push(self.new_local("it", ptys[0], e.span, true));
@@ -4299,6 +4369,7 @@ impl Checker {
             let fid = self.new_closure_fn(e, None);
             let nil = self.types.nil;
             self.push_ctx(fid, CtxKind::ForBody, nil, e.span);
+            self.ctx().scan = std::rc::Rc::new(AssignScan::new(&body.stmts));
             self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: true });
             let param = self.new_local("$item", elem, pattern.span, true);
             self.bind_irrefutable(pattern, elem);
