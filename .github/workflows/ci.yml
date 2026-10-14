@@ -52,7 +52,7 @@ jobs:
           ./ext 2>/dev/null | diff - crates/catallaxy-capi/examples/ext.out
           CATX_GC_STRESS=1 ./ext 2>/dev/null | diff - crates/catallaxy-capi/examples/ext.out
       - name: Clippy
-        run: cargo clippy --release --locked -- -D warnings
+        run: cargo clippy --release --locked --workspace --all-targets -- -D warnings
 
   miri:
     # parking_lot_core's Linux futex call is rejected by current Miri; macOS is fine.

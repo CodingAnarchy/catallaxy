@@ -659,9 +659,9 @@ mod tests {
 
     #[test]
     fn formats_floats_and_text() {
-        assert_eq!(fmt_f(".2f", 3.14159), "3.14");
-        assert_eq!(fmt_f(">8.2f", -3.14159), "   -3.14");
-        assert_eq!(fmt_f("08.2f", -3.14159), "-0003.14");
+        assert_eq!(fmt_f(".2f", 2.34567), "2.35");
+        assert_eq!(fmt_f(">8.2f", -2.34567), "   -2.35");
+        assert_eq!(fmt_f("08.2f", -2.34567), "-0002.35");
         assert_eq!(fmt_f(",.2f", 1234567.891), "1,234,567.89");
         assert_eq!(fmt_f(".3e", 1234.5), "1.234e+03");
         assert_eq!(fmt_f("E", 0.00012), "1.200000E-04");
