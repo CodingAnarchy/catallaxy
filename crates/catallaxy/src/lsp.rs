@@ -7,14 +7,14 @@
 //! `catallaxy_compiler::query`). References, rename, signature help, inlay hints and symbol lists
 //! use the symbol index and outlines of `catallaxy_compiler::symbols`. References, rename and
 //! `workspace/symbol` cover the workspace (see [`workspace`]): every `.cx` file under the
-//! workspace folders and every open document, each compiled with the modules it imports. They
+//! workspace folders and every open document, each compiled with the modules it imports and
+//! cached; the cache is warmed in the background at startup and when folders change. They
 //! match symbols across those compilations by their declarations, and take along the methods that
 //! implement an interface member in the types used as that interface. Code actions offer the fixes
 //! attached to the document's diagnostics as quick fixes.
 
 mod workspace;
 
-use std::cell::RefCell;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -93,7 +93,9 @@ struct Server<'a> {
     /// Open documents by file path: (uri, text).
     docs: FxHashMap<PathBuf, (lt::Uri, String)>,
     /// The workspace folders, their files and the cached compilations of references and rename.
-    ws: RefCell<Workspace>,
+    ws: Arc<Workspace>,
+    /// Whether the client accepts `window/workDoneProgress` (for the warm-up).
+    progress: bool,
 }
 
 /// The id of the request registering the file watcher.
@@ -123,11 +125,10 @@ fn serve(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Syn
     });
     let (id, params) = conn.initialize_start()?;
     conn.initialize_finish(id, init)?;
-    let mut ws = Workspace::default();
-    ws.roots = initial_roots(&params);
     // Ask to hear of created and deleted files, so the list of workspace files can be kept
     // between requests (otherwise it is rebuilt for each).
-    if params["capabilities"]["workspace"]["didChangeWatchedFiles"]["dynamicRegistration"] == true {
+    let watching = params["capabilities"]["workspace"]["didChangeWatchedFiles"]["dynamicRegistration"] == true;
+    if watching {
         let reg = lt::RegistrationParams {
             registrations: vec![lt::Registration {
                 id: "catx-watch-files".into(),
@@ -139,35 +140,58 @@ fn serve(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Syn
         };
         let req = Request::new(WATCH_REQUEST.to_string().into(), "client/registerCapability".into(), reg);
         conn.sender.send(Message::Request(req))?;
-        ws.watching = true;
     }
-    let mut s = Server { conn, docs: FxHashMap::default(), ws: RefCell::new(ws) };
-    for msg in &conn.receiver {
-        match msg {
-            Message::Request(req) => {
-                if conn.handle_shutdown(&req)? {
-                    return Ok(());
+    let ws = Arc::new(Workspace::new(initial_roots(&params), watching));
+    let progress = params["capabilities"]["window"]["workDoneProgress"] == true;
+    let mut s = Server { conn, docs: FxHashMap::default(), ws, progress };
+    s.warm();
+    let r = s.serve();
+    // Wait for the warm-up's threads, which hold senders of the connection.
+    s.ws.stop();
+    r
+}
+
+impl Server<'_> {
+    fn serve(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let conn = self.conn;
+        for msg in &conn.receiver {
+            match msg {
+                Message::Request(req) => {
+                    if req.method == "shutdown" {
+                        self.ws.stop();
+                    }
+                    if conn.handle_shutdown(&req)? {
+                        return Ok(());
+                    }
+                    let id = req.id.clone();
+                    let resp = match std::panic::catch_unwind(AssertUnwindSafe(|| self.request(req))) {
+                        Ok(r) => r,
+                        Err(_) => Response::new_err(id, ErrorCode::InternalError as i32, "internal error".into()),
+                    };
+                    conn.sender.send(Message::Response(resp))?;
                 }
-                let id = req.id.clone();
-                let resp = match std::panic::catch_unwind(AssertUnwindSafe(|| s.request(req))) {
-                    Ok(r) => r,
-                    Err(_) => Response::new_err(id, ErrorCode::InternalError as i32, "internal error".into()),
-                };
-                conn.sender.send(Message::Response(resp))?;
-            }
-            Message::Notification(n) => {
-                let _ = std::panic::catch_unwind(AssertUnwindSafe(|| s.notification(n)));
-            }
-            Message::Response(r) => {
-                if r.id == WATCH_REQUEST.to_string().into() && r.error.is_some() {
-                    let mut ws = s.ws.borrow_mut();
-                    ws.watching = false;
-                    ws.rescan();
+                Message::Notification(n) => {
+                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| self.notification(n)));
+                }
+                Message::Response(r) => {
+                    let id = serde_json::to_value(&r.id).unwrap_or_default();
+                    let id = id.as_str().unwrap_or_default();
+                    if id == WATCH_REQUEST && r.error.is_some() {
+                        self.ws.stop_watching();
+                    } else if id.starts_with(workspace::PROGRESS_REQUEST) {
+                        self.ws.progress_answer(id.to_string(), r.error.is_none());
+                    }
                 }
             }
         }
+        Ok(())
     }
-    Ok(())
+
+    /// Warms the workspace cache in the background (see `Workspace::warm`).
+    fn warm(&self) {
+        let tx = self.conn.sender.clone();
+        self.ws.warm(Arc::new(move |m| drop(tx.send(m))), self.progress);
+    }
 }
 
 // ---- URIs ----------------------------------------------------------------------------------
@@ -299,6 +323,8 @@ impl Server<'_> {
     }
 
     fn publish_all(&self) {
+        // The warm-up pauses meanwhile.
+        let _busy = self.ws.busy();
         let paths: Vec<PathBuf> = self.docs.keys().cloned().collect();
         for p in paths {
             self.publish(&p);
@@ -316,6 +342,15 @@ impl Server<'_> {
             let params = lt::LogMessageParams { typ: lt::MessageType::WARNING, message: w };
             self.notify("window/logMessage", params);
         }
+        for d in notes.debug {
+            let params = lt::LogMessageParams { typ: lt::MessageType::LOG, message: d };
+            self.notify("window/logMessage", params);
+        }
+    }
+
+    /// The open documents changed: they overlay the disk for the workspace.
+    fn docs_changed(&self) {
+        self.ws.set_overlay(Overlay::new(self.docs.iter().map(|(p, (_, t))| (p, t))));
     }
 
     // ---- notifications -----------------------------------------------------------------------
@@ -326,6 +361,7 @@ impl Server<'_> {
                 let Ok(p) = serde_json::from_value::<lt::DidOpenTextDocumentParams>(n.params) else { return };
                 let Some(path) = uri_to_path(&p.text_document.uri) else { return };
                 self.docs.insert(path, (p.text_document.uri, p.text_document.text));
+                self.docs_changed();
                 self.publish_all();
             }
             "textDocument/didChange" => {
@@ -335,6 +371,7 @@ impl Server<'_> {
                 if let Some(c) = p.content_changes.into_iter().last() {
                     self.docs.insert(path, (p.text_document.uri, c.text));
                 }
+                self.docs_changed();
                 self.publish_all();
             }
             "textDocument/didSave" => self.publish_all(),
@@ -343,6 +380,7 @@ impl Server<'_> {
                 if let Some(path) = uri_to_path(&p.text_document.uri) {
                     self.docs.remove(&path);
                 }
+                self.docs_changed();
                 let params =
                     lt::PublishDiagnosticsParams { uri: p.text_document.uri, diagnostics: Vec::new(), version: None };
                 self.notify("textDocument/publishDiagnostics", params);
@@ -350,23 +388,24 @@ impl Server<'_> {
             }
             "workspace/didChangeWorkspaceFolders" => {
                 let Ok(p) = serde_json::from_value::<lt::DidChangeWorkspaceFoldersParams>(n.params) else { return };
-                let mut ws = self.ws.borrow_mut();
-                for f in p.event.removed {
-                    if let Some(path) = uri_to_path(&f.uri) {
-                        ws.roots.retain(|r| *r != path);
-                    }
-                }
-                for f in p.event.added {
-                    if let Some(path) = uri_to_path(&f.uri) {
-                        if !ws.roots.contains(&path) {
-                            ws.roots.push(path);
+                self.ws.set_roots(|roots| {
+                    for f in p.event.removed {
+                        if let Some(path) = uri_to_path(&f.uri) {
+                            roots.retain(|r| *r != path);
                         }
                     }
-                }
-                ws.rescan();
+                    for f in p.event.added {
+                        if let Some(path) = uri_to_path(&f.uri) {
+                            if !roots.contains(&path) {
+                                roots.push(path);
+                            }
+                        }
+                    }
+                });
+                self.warm();
             }
             // Contents are checked by each request; only the list of files can change here.
-            "workspace/didChangeWatchedFiles" => self.ws.borrow_mut().rescan(),
+            "workspace/didChangeWatchedFiles" => self.ws.rescan(),
             _ => {}
         }
     }
@@ -587,10 +626,6 @@ struct Gathered {
 type Key = (PathBuf, u32, u32);
 
 impl Server<'_> {
-    fn overlay(&self) -> Overlay {
-        Overlay::new(self.docs.iter().map(|(p, (_, t))| (p, t)))
-    }
-
     /// The units of `first` and then, with `all`, of the open documents and the workspace files.
     fn units(&self, first: Option<&Path>, all: bool) -> Vec<(PathBuf, Arc<Unit>)> {
         let mut entries: Vec<PathBuf> = first.map(Path::to_path_buf).into_iter().collect();
@@ -600,7 +635,7 @@ impl Server<'_> {
             entries.extend(open);
         }
         let mut notes = Notes::default();
-        let units = self.ws.borrow_mut().units(&self.overlay(), entries, all, &mut notes);
+        let units = self.ws.units(entries, all, &mut notes);
         self.log(notes);
         units
     }
