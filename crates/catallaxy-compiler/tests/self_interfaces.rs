@@ -37,6 +37,10 @@ fn comparable_is_not_a_value_type() {
     assert_eq!(codes("class K {\n  v: Comparable\n}\n"), ["E0375"]);
     assert_eq!(codes("fn f() -> Comparable { 1 }\n"), ["E0375"]);
     assert_eq!(codes("x: Dyn = 1\nif x is Comparable { puts(1) }\n"), ["E0375"]);
+    assert_eq!(codes("x: Dyn = 1\nmatch x {\n  Comparable => puts(1)\n  _ => puts(2)\n}\n"), ["E0375"]);
+    // The erased form of a generic interface too.
+    let src = "interface Pile[T] { fn put(self, other: Self, x: T) -> Int }\nx: Dyn = 1\nif x is Pile { puts(1) }\n";
+    assert_eq!(codes(src), ["E0375"]);
 }
 
 #[test]

@@ -1,0 +1,59 @@
+# Type tests on generic types: the erased form (`is Box`) keeps the type arguments the static
+# type implies; arguments the static type determines may be written out.
+class Box[T] {
+  v: T
+}
+class Foo {
+  n: Int = 1
+}
+fn a(x: Box[Int] | Foo) -> Int {
+  if x is Box[Int] {
+    return x.v + 1
+  }
+  x.n
+}
+fn b(x: Box[Int] | Foo) -> Int {
+  if x is Box {
+    return x.v + 2
+  }
+  x.n
+}
+fn c(x: Box[Int] | Box[String]) -> String {
+  match x {
+    y: Box => "box of #{y.v}"
+  }
+}
+fn d(x: Box[Int] | Foo) -> Int {
+  match x {
+    Box => 1
+    Foo => 2
+  }
+}
+fn f(x: Dyn) -> String {
+  if x is List[Int] {
+    return "ints #{x[0] + 1}"
+  }
+  if let bx = x as? Box {
+    return "box #{bx.v}"
+  }
+  "other"
+}
+fn g(r: Result[Int, String] | Result[String, Int]) -> String {
+  match r {
+    Ok(v) => "ok #{v}"
+    Err(e) => "err #{e}"
+  }
+}
+puts(a(Box.new(1)))
+puts(a(Foo.new()))
+puts(b(Box.new(1)))
+s: Box[String] = Box.new("s")
+puts(c(s))
+puts(c(Box.new(3)))
+puts(d(Foo.new()))
+puts(f([5]))
+puts(f(Box.new("x")))
+puts(f(1))
+r: Result[String, Int] = Ok("fine")
+puts(g(r))
+puts(g(Ok(2)))

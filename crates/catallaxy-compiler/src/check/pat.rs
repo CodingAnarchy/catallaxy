@@ -28,8 +28,8 @@ impl Checker {
                 _ => false,
             },
             PatternKind::Typed { ty: te, .. } => {
-                let t = self.resolve_type(te, &mut self.type_scope());
-                self.trial(|c| c.assignable(ty, t))
+                let t = self.resolve_test_type(te);
+                self.passes_test(ty, t)
             }
             _ => false,
         }
@@ -87,10 +87,11 @@ impl Checker {
                 }
             },
             PatternKind::Typed { name, ty: te } => {
-                let target = self.resolve_type(te, &mut self.type_scope());
-                let (narrowed, _) = self.split_by_type(ty, target);
+                let target = self.resolve_test_type(te);
+                self.check_type_test(ty, target, Some(te), te.span);
+                let (narrowed, _, _) = self.split_by_test(ty, target);
                 let l = self.declare_local(&name.name, narrowed, name.span);
-                let rt = self.rt_of(target);
+                let rt = self.rt_of(target.ty);
                 let idx = self.rt_type(rt);
                 self.pats.insert(p.id, PatRes::Type { rt: idx, bind: Some(l) });
             }
@@ -148,12 +149,16 @@ impl Checker {
         };
         if let Some((en, tag)) = variant {
             let info = self.enums[en as usize].clone();
-            // Payload types: from the subject when it is (or contains) this enum.
-            let targs: Vec<TyId> = match self.enum_in(ty) {
-                Some((e2, a)) if e2 == en => a,
-                _ => info.params.iter().map(|_| self.types.fresh_var()).collect(),
-            };
-            let subst: FxHashMap<ParamId, TyId> = info.params.iter().copied().zip(targs).collect();
+            // Payload types: from the subject's instantiations of this enum (each one a union
+            // member may have; type arguments are not known at run time). A subject that does
+            // not name the enum (`Dyn`, an interface) gives `Dyn` payloads.
+            let mut insts = self.enum_insts(ty, en);
+            if insts.is_empty() {
+                let fill = if matches!(self.types.get(ty), Ty::Error) { self.types.error } else { self.types.dyn_ };
+                insts.push(vec![fill; info.params.len()]);
+            }
+            let substs: Vec<FxHashMap<ParamId, TyId>> =
+                insts.into_iter().map(|a| info.params.iter().copied().zip(a).collect()).collect();
             let v = &info.variants[tag as usize];
             if has_parens && args.len() != v.fields.len() {
                 let msg = format!("`{}` has {} field(s), but the pattern has {}", v.name, v.fields.len(), args.len());
@@ -163,7 +168,13 @@ impl Checker {
                 // `.Circle` without bindings matches any payload.
             }
             for (i, a) in args.iter().enumerate() {
-                let ft = v.fields.get(i).map(|&(_, t)| self.types.subst(t, &subst, None)).unwrap_or(self.types.error);
+                let ft = match v.fields.get(i) {
+                    Some(&(_, t)) => {
+                        let each: Vec<TyId> = substs.iter().map(|s| self.types.subst(t, s, None)).collect();
+                        self.types.union(each)
+                    }
+                    None => self.types.error,
+                };
                 self.check_pattern(a, ft, irr);
             }
             if !self.subject_has_enum(ty, en) {
@@ -179,17 +190,28 @@ impl Checker {
                 ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.to_vec(), args: vec![] }, span: p.span };
             let before = self.diags.len();
             self.suppress_diags += 1;
-            let t = self.resolve_type(&te, &mut self.type_scope());
+            let tt = self.resolve_test_type(&te);
             self.suppress_diags -= 1;
             self.diags.truncate(before);
+            let t = tt.ty;
+            if let Ty::Iface(i, _) = self.types.get(t).clone() {
+                // Resolved with diagnostics off (an unknown name is E0366 below).
+                self.check_iface_value_type(i, p.span);
+            }
             if !matches!(self.types.get(t), Ty::Error) {
                 if !args.is_empty() {
                     self.err("E0365", "type patterns do not take arguments; bind with `name: Type`", p.span);
                 }
-                if !self.trial(|c| c.assignable(t, ty) || c.assignable(ty, t)) && !self.overlaps(ty, t) {
+                let can_match = if tt.erased {
+                    self.test_can_match(ty, tt)
+                } else {
+                    self.trial(|c| c.assignable(t, ty) || c.assignable(ty, t)) || self.overlaps(ty, t)
+                };
+                if !can_match {
                     let msg = format!("type `{}` can never match `{}`", self.show(t), self.show(ty));
                     self.err("E0362", msg, p.span);
                 }
+                self.check_type_test(ty, tt, Some(&te), p.span);
                 let rt = self.rt_of(t);
                 let idx = self.rt_type(rt);
                 self.pats.insert(p.id, PatRes::Type { rt: idx, bind: None });
@@ -240,6 +262,29 @@ impl Checker {
             Ty::Frozen(i) => self.enum_in(*i),
             _ => None,
         }
+    }
+
+    /// The type arguments of each instantiation of enum `en` in `ty` (directly or as union
+    /// members).
+    fn enum_insts(&self, ty: TyId, en: EnumId) -> Vec<Vec<TyId>> {
+        let ty = self.types.shallow_resolve(ty);
+        let members = match self.types.get(ty) {
+            Ty::Union(parts) => parts.clone(),
+            _ => vec![ty],
+        };
+        let mut out: Vec<Vec<TyId>> = Vec::new();
+        for m in members {
+            let mut m = self.types.shallow_resolve(m);
+            if let Ty::Frozen(i) = self.types.get(m) {
+                m = self.types.shallow_resolve(*i);
+            }
+            if let Ty::Enum(e, a) = self.types.get(m) {
+                if *e == en && !out.contains(a) {
+                    out.push(a.clone());
+                }
+            }
+        }
+        out
     }
 
     fn subject_has_enum(&self, ty: TyId, en: EnumId) -> bool {
@@ -322,25 +367,18 @@ impl Checker {
 
     /// The subject type minus the values an unguarded arm with pattern `p` certainly matched.
     fn subtract_pattern(&mut self, ty: TyId, p: &Pattern) -> TyId {
-        let removed: Option<TyId> = match (&p.kind, self.pats.get(&p.id).cloned()) {
-            (PatternKind::Literal(e), _) if matches!(e.kind, ExprKind::Nil) => Some(self.types.nil),
-            (PatternKind::Typed { ty: te, .. }, _) => Some(self.resolve_type(te, &mut self.type_scope())),
-            (PatternKind::Ctor { path, .. }, Some(PatRes::Type { .. })) => {
-                let te =
-                    ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
-                self.suppress_diags += 1;
-                let before = self.diags.len();
-                let t = self.resolve_type(&te, &mut self.type_scope());
-                self.diags.truncate(before);
-                self.suppress_diags -= 1;
-                Some(t)
+        let removed: Option<TestTy> = match (&p.kind, self.pats.get(&p.id).cloned()) {
+            (PatternKind::Literal(e), _) if matches!(e.kind, ExprKind::Nil) => {
+                Some(TestTy { ty: self.types.nil, erased: false })
             }
+            (PatternKind::Typed { ty: te, .. }, _) => Some(self.resolve_test_type(te)),
+            (PatternKind::Ctor { path, .. }, Some(PatRes::Type { .. })) => Some(self.ctor_test_type(path, p.span)),
             _ => None,
         };
         let Some(r) = removed else { return ty };
-        match self.split_by_type(ty, r) {
-            (_, Some(rest)) => rest,
-            (_, None) => ty,
+        match self.split_by_test(ty, r) {
+            (_, Some(rest), _) => rest,
+            (_, None, _) => ty,
         }
     }
 
@@ -349,20 +387,16 @@ impl Checker {
         match (&p.kind, self.pats.get(&p.id).cloned()) {
             (_, Some(PatRes::Variant { class, .. })) => {
                 let (en, _) = self.variant_of_class.get(&class).copied()?;
-                let (e2, a) = self.enum_in(st)?;
-                if e2 == en {
-                    Some(self.types.intern(Ty::Enum(en, a)))
-                } else {
-                    None
+                let insts = self.enum_insts(st, en);
+                if insts.is_empty() {
+                    return None;
                 }
+                let tys = insts.into_iter().map(|a| self.types.intern(Ty::Enum(en, a))).collect();
+                Some(self.types.union(tys))
             }
             (PatternKind::Ctor { path, .. }, Some(PatRes::Type { .. })) => {
-                let te =
-                    ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
-                self.suppress_diags += 1;
-                let t = self.resolve_type(&te, &mut self.type_scope());
-                self.suppress_diags -= 1;
-                Some(self.split_by_type(st, t).0)
+                let t = self.ctor_test_type(path, p.span);
+                Some(self.split_by_test(st, t).0)
             }
             (PatternKind::Literal(e), _) if matches!(e.kind, ExprKind::Nil) => Some(self.types.nil),
             _ => None,
@@ -407,7 +441,7 @@ impl Checker {
             }
             (PatternKind::Or(alts), _) => AP::Or(alts.iter().map(|x| self.abstract_pat(x)).collect()),
             (PatternKind::Typed { ty, .. }, _) => {
-                let t = self.resolve_type(ty, &mut self.type_scope());
+                let t = self.resolve_test_type(ty);
                 AP::Type(t)
             }
             (PatternKind::Ctor { args, has_parens, .. }, Some(PatRes::Variant { class, .. })) => {
@@ -423,16 +457,7 @@ impl Checker {
                 };
                 AP::Ctor(Key::Variant(class), sub)
             }
-            (PatternKind::Ctor { path, .. }, Some(PatRes::Type { .. })) => {
-                let te =
-                    ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.clone(), args: vec![] }, span: p.span };
-                self.suppress_diags += 1;
-                let before = self.diags.len();
-                let t = self.resolve_type(&te, &mut self.type_scope());
-                self.diags.truncate(before);
-                self.suppress_diags -= 1;
-                AP::Type(t)
-            }
+            (PatternKind::Ctor { path, .. }, Some(PatRes::Type { .. })) => AP::Type(self.ctor_test_type(path, p.span)),
             _ => AP::Lit,
         }
     }
@@ -552,7 +577,7 @@ impl Checker {
                             }
                             AP::Type(pt) => {
                                 let pt = *pt;
-                                if self.trial(|c| c.assignable(kt, pt)) {
+                                if self.passes_test(kt, pt) {
                                     Some(vec![AP::Wild; fts.len()])
                                 } else {
                                     None
@@ -591,7 +616,7 @@ impl Checker {
                         AP::Wild => true,
                         AP::Type(pt) => {
                             let pt = *pt;
-                            self.trial(|c| c.assignable(t, pt))
+                            self.passes_test(t, pt)
                         }
                         _ => false,
                     })
@@ -607,6 +632,277 @@ impl Checker {
                     .collect()
             }
         }
+    }
+
+    // ---- type tests ------------------------------------------------------------------------
+    //
+    // `is`, `as?` and type patterns test a value's run-time type. Type arguments of generic
+    // classes, enums and interfaces, function types and type parameters are erased: at run time
+    // only the class (or "is a function", or nothing) is checked. Lists, sets, dictionaries and
+    // tuples are checked element by element.
+
+    /// Resolves the type named in a type test. A generic class, enum or interface named without
+    /// type arguments (`is Box`) is the erased form: it tests the class only and keeps the type
+    /// arguments the static type implies (`Box[Dyn]` when it implies none).
+    pub fn resolve_test_type(&mut self, te: &ast::TypeExpr) -> TestTy {
+        if let ast::TypeExprKind::Named { path, args } = &te.kind {
+            if args.is_empty() {
+                if let Some(t) = self.erased_generic(path) {
+                    return TestTy { ty: t, erased: true };
+                }
+            }
+        }
+        let ty = self.resolve_type(te, &mut self.type_scope());
+        TestTy { ty, erased: false }
+    }
+
+    /// `path` names a generic class, enum or interface: that type with `Dyn` arguments.
+    fn erased_generic(&mut self, path: &[ast::Ident]) -> Option<TyId> {
+        let name = &path.last()?.name;
+        if path.len() == 1 && self.type_scope().params.contains_key(name) {
+            return None;
+        }
+        let item = if path.len() == 1 {
+            self.lookup_name(self.cur_module, name)?
+        } else if path.len() == 2 {
+            match self.lookup_name(self.cur_module, &path[0].name)? {
+                ScopeItem::Module(target) => {
+                    let si = self.mods[target as usize].items.get(name).copied()?;
+                    if !self.item_is_pub(si) {
+                        return None;
+                    }
+                    si
+                }
+                _ => return None,
+            }
+        } else {
+            return None;
+        };
+        let dyn_ = self.types.dyn_;
+        match item {
+            ScopeItem::Class(c) if !self.classes[&c].params.is_empty() => {
+                let n = self.classes[&c].params.len();
+                Some(self.types.class(c, vec![dyn_; n]))
+            }
+            ScopeItem::Enum(e) if !self.enums[e as usize].params.is_empty() => {
+                let n = self.enums[e as usize].params.len();
+                Some(self.types.intern(Ty::Enum(e, vec![dyn_; n])))
+            }
+            ScopeItem::Iface(i) if !self.ifaces[i as usize].params.is_empty() => {
+                // The erased form of an interface is still a value type.
+                let span = path[0].span.to(path[path.len() - 1].span);
+                self.check_iface_value_type(i, span);
+                let n = self.ifaces[i as usize].params.len();
+                Some(self.types.intern(Ty::Iface(i, vec![dyn_; n])))
+            }
+            _ => None,
+        }
+    }
+
+    /// The type a bare type pattern (`Int`, `Point`, `Box`) tests for.
+    fn ctor_test_type(&mut self, path: &[ast::Ident], span: Span) -> TestTy {
+        let te = ast::TypeExpr { kind: ast::TypeExprKind::Named { path: path.to_vec(), args: vec![] }, span };
+        self.suppress_diags += 1;
+        let before = self.diags.len();
+        let t = self.resolve_test_type(&te);
+        self.diags.truncate(before);
+        self.suppress_diags -= 1;
+        t
+    }
+
+    /// Whether some value of type `cur` may pass the test.
+    fn test_can_match(&mut self, cur: TyId, t: TestTy) -> bool {
+        let cur = self.types.shallow_resolve(cur);
+        let members: Vec<TyId> = match self.types.get(cur) {
+            Ty::Union(p) => p.clone(),
+            _ => vec![cur],
+        };
+        members.into_iter().any(|m| self.passes_test(m, t) || self.may_pass_test(m, t.ty))
+    }
+
+    /// Whether every value of type `m` passes the test statically. For the erased form, any type
+    /// arguments do.
+    pub fn passes_test(&mut self, m: TyId, t: TestTy) -> bool {
+        if !t.erased {
+            return self.trial(|c| c.assignable(m, t.ty));
+        }
+        let cp = self.checkpoint();
+        self.suppress_diags += 1;
+        let pat = self.erase_args(t.ty);
+        let ok = self.assignable(m, pat);
+        self.suppress_diags -= 1;
+        self.rollback(cp);
+        ok
+    }
+
+    /// `t` with what the run-time test does not check replaced by fresh inference variables.
+    fn erase_args(&mut self, t: TyId) -> TyId {
+        let t = self.types.shallow_resolve(t);
+        match self.types.get(t).clone() {
+            Ty::Class(c, args) if matches!(c, builtin::LIST | builtin::SET | builtin::DICT) => {
+                let args = args.into_iter().map(|a| self.erase_args(a)).collect();
+                self.types.class(c, args)
+            }
+            Ty::Class(c, args) => {
+                let args = args.iter().map(|_| self.types.fresh_var()).collect();
+                self.types.class(c, args)
+            }
+            Ty::Enum(e, args) => {
+                let args = args.iter().map(|_| self.types.fresh_var()).collect();
+                self.types.intern(Ty::Enum(e, args))
+            }
+            Ty::Iface(i, args) => {
+                let args = args.iter().map(|_| self.types.fresh_var()).collect();
+                self.types.intern(Ty::Iface(i, args))
+            }
+            Ty::Fn(ps, _) => {
+                let ps = ps.iter().map(|_| self.types.fresh_var()).collect();
+                let r = self.types.fresh_var();
+                self.types.func(ps, r)
+            }
+            Ty::Tuple(ts) => {
+                let ts = ts.into_iter().map(|x| self.erase_args(x)).collect();
+                self.types.tuple(ts)
+            }
+            Ty::Union(ts) => {
+                let ts = ts.into_iter().map(|x| self.erase_args(x)).collect();
+                self.types.union(ts)
+            }
+            Ty::Frozen(i) => {
+                let i = self.erase_args(i);
+                self.freeze_ty(i)
+            }
+            Ty::Param(_) | Ty::Inter(_) | Ty::Never | Ty::Open(_) => self.types.fresh_var(),
+            _ => t,
+        }
+    }
+
+    /// Whether a value of static type `m` (that does not pass statically) may still pass the
+    /// run-time test for `t`.
+    fn may_pass_test(&mut self, m: TyId, t: TyId) -> bool {
+        let m = self.types.shallow_resolve(m);
+        match self.types.get(m) {
+            Ty::Error | Ty::Var(_) | Ty::Never => return false,
+            Ty::Dyn | Ty::Param(_) | Ty::Open(_) | Ty::Iface(..) | Ty::Inter(_) => return true,
+            _ => {}
+        }
+        let cp = self.checkpoint();
+        self.suppress_diags += 1;
+        let pat = self.erase_args(t);
+        let down = self.assignable(m, pat);
+        self.rollback(cp);
+        let pat = self.erase_args(t);
+        let up = !down && self.assignable(pat, m);
+        self.rollback(cp);
+        self.suppress_diags -= 1;
+        down || up
+    }
+
+    /// The name of a generic type without its arguments (`Box` for `Box[Int]`).
+    fn head_name(&mut self, t: TyId) -> String {
+        let shown = self.show(t);
+        shown.split('[').next().unwrap_or(&shown).to_string()
+    }
+
+    /// Why `t` cannot be fully checked at run time (`None` when it can).
+    fn unchecked_part(&mut self, t: TyId) -> Option<String> {
+        let t = self.types.shallow_resolve(t);
+        let dyn_ = self.types.dyn_;
+        match self.types.get(t).clone() {
+            Ty::Class(builtin::LIST | builtin::SET | builtin::DICT, args) => {
+                args.into_iter().find_map(|a| self.unchecked_part(a))
+            }
+            Ty::Class(_, args) | Ty::Enum(_, args) | Ty::Iface(_, args) => {
+                if args.iter().all(|&a| self.types.shallow_resolve(a) == dyn_) {
+                    return None;
+                }
+                let head = self.head_name(t);
+                Some(format!(
+                    "type arguments are erased at run time: the test checks only that the value is a `{head}`, so it cannot tell `{}` from other `{head}` types",
+                    self.show(t)
+                ))
+            }
+            Ty::Fn(..) => {
+                Some(format!("the test checks only that the value is a function, not that it is a `{}`", self.show(t)))
+            }
+            Ty::Param(_) => Some(format!(
+                "type parameters are erased at run time: every value passes a test for `{}`",
+                self.show(t)
+            )),
+            Ty::Inter(_) | Ty::Never | Ty::Open(_) => {
+                Some(format!("`{}` has no run-time test: every value passes it", self.show(t)))
+            }
+            Ty::Tuple(ts) | Ty::Union(ts) => ts.into_iter().find_map(|x| self.unchecked_part(x)),
+            Ty::Frozen(i) => self.unchecked_part(i),
+            _ => None,
+        }
+    }
+
+    /// Splits `cur` by a type test into what it is when the test passes and (if anything) when
+    /// it fails. The third result is a member of `cur` whose values could pass the run-time test
+    /// without having the tested type (the test is unsound; `check_type_test` reports it).
+    pub fn split_by_test(&mut self, cur: TyId, t: TestTy) -> (TyId, Option<TyId>, Option<TyId>) {
+        let cur = self.types.shallow_resolve(cur);
+        let members: Vec<TyId> = match self.types.get(cur) {
+            Ty::Union(p) => p.clone(),
+            _ => vec![cur],
+        };
+        let mut yes = Vec::new();
+        let mut no = Vec::new();
+        let mut maybe = None;
+        for m in members {
+            if self.passes_test(m, t) {
+                yes.push(m);
+            } else {
+                if maybe.is_none() && self.may_pass_test(m, t.ty) {
+                    maybe = Some(m);
+                }
+                no.push(m);
+            }
+        }
+        // A member whose values may pass at run time contributes the tested type itself.
+        if maybe.is_some() || yes.is_empty() {
+            yes.push(t.ty);
+        }
+        let y = self.types.union(yes);
+        let n = if no.is_empty() { None } else { Some(self.types.union(no)) };
+        let unsound = match maybe {
+            Some(m) if !t.erased && self.unchecked_part(t.ty).is_some() => Some(m),
+            _ => None,
+        };
+        (y, n, unsound)
+    }
+
+    /// Reports a type test whose tested type cannot be checked at run time for some value of
+    /// the subject's static type `cur` (E0374).
+    pub fn check_type_test(&mut self, cur: TyId, t: TestTy, te: Option<&ast::TypeExpr>, span: Span) {
+        let (_, _, unsound) = self.split_by_test(cur, t);
+        let Some(m) = unsound else { return };
+        let why = self.unchecked_part(t.ty).unwrap_or_default();
+        let msg = format!(
+            "cannot test for `{}` at run time: a `{}` value could pass the test without being one",
+            self.show(t.ty),
+            self.show(m)
+        );
+        let mut d = Diag::error("E0374", msg, span).note(why);
+        let rt = self.types.shallow_resolve(t.ty);
+        let erasable = match self.types.get(rt) {
+            Ty::Class(c, _) => !matches!(*c, builtin::LIST | builtin::SET | builtin::DICT),
+            Ty::Enum(..) | Ty::Iface(..) => true,
+            _ => false,
+        };
+        if let (true, Some(te)) = (erasable, te) {
+            let head = self.head_name(rt);
+            d = d.suggest(
+                format!("test for `{head}` (it keeps the type arguments the value's static type implies) and check the contents"),
+                te.span,
+                head,
+            );
+        }
+        if erasable {
+            d = d.note("or give each case its own class, or its own enum variant, and test for that");
+        }
+        self.emit(d);
     }
 }
 
@@ -625,12 +921,20 @@ fn path_expr(path: &[ast::Ident]) -> ExprKind {
     e
 }
 
+/// The type named in a type test: `erased` for a generic type named without type arguments
+/// (`is Box`), whose `ty` then has `Dyn` arguments.
+#[derive(Clone, Copy, Debug)]
+pub struct TestTy {
+    pub ty: TyId,
+    pub erased: bool,
+}
+
 /// Abstract pattern for exhaustiveness checking.
 #[derive(Clone, Debug)]
 enum AP {
     Wild,
     Ctor(Key, Vec<AP>),
-    Type(TyId),
+    Type(TestTy),
     Or(Vec<AP>),
     /// A literal or range: never covers a whole constructor.
     Lit,

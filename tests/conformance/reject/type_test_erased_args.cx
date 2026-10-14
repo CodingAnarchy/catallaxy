@@ -1,0 +1,12 @@
+# expect: E0374
+# Type arguments are erased: the test would pass for a `Box[Int]`.
+class Box[T] {
+  v: T
+}
+fn h(b: Box[Int] | Box[String]) -> Int {
+  if b is Box[String] {
+    return b.v.length
+  }
+  0
+}
+puts(h(Box.new(5)))

@@ -1,0 +1,10 @@
+# expect: E0300
+# `x` is an `Int` or a `String`: the subject's type arguments are not known at run time.
+fn t(n: Int) -> Int { n + 1 }
+fn v(r: Result[Int, String] | Result[String, Int]) -> Int {
+  match r {
+    Ok(x) => t(x)
+    Err(_) => 0
+  }
+}
+puts(v(Ok("s")))

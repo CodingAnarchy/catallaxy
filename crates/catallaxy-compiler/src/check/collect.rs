@@ -588,7 +588,7 @@ impl Checker {
     /// An interface whose methods take `Self` (a `Comparable`, a user `Merge`) cannot be a value
     /// type: two values of that type may be different implementors, so a `Self` parameter would
     /// receive an unrelated type (E0375). It can be a bound (`[T: Comparable]`).
-    fn check_iface_value_type(&mut self, i: IfaceId, span: Span) {
+    pub fn check_iface_value_type(&mut self, i: IfaceId, span: Span) {
         let Some((method, self_span)) = self.self_param_use(i) else { return };
         let name = self.ifaces[i as usize].name.clone();
         let msg =
