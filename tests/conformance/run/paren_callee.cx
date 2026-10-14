@@ -1,0 +1,22 @@
+# `(recv.f)(x)` calls the function stored in the field `f`, not a method named `f`.
+class Box {
+  f: fn(Int)
+  g: fn(Int) -> Int
+
+  fn run(self, x: Int) { (self.f)(x) }
+  fn twice(self, x: Int) -> Int { (self.g)((self.g)(x)) }
+  fn g_of(self, x: Int) -> Int { (self.g)(x) + 0 }
+}
+
+fn make(n: Int) -> fn(Int) -> Int { { |x: Int| x + n } }
+
+b = Box.new({ |x| print("called #{x}\n") }, { |x| x * 2 })
+b.run(21)
+print("#{b.twice(5)}\n")
+print("#{b.g_of(4)}\n")
+print("#{(b.g)(7)}\n")
+fs = [{ |x: Int| x + 1 }, { |x: Int| x + 2 }]
+print("#{(fs[1])(10)}\n")
+print("#{fs[0](10)}\n")
+print("#{(make(100))(1)}\n")
+print("#{Lazy.iterate(1, { |x| x * 3 }).take(4).to_list}\n")

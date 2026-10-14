@@ -21,6 +21,13 @@ use crate::types::*;
 use catallaxy_vm::bytecode::RtType;
 pub use env::*;
 
+/// A point to roll the checker's inference state back to (see [`Checker::trial`]).
+#[derive(Copy, Clone, Debug)]
+pub struct Checkpoint {
+    bindings: usize,
+    conforms: usize,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NameRes {
     Local(LocalId),
@@ -110,6 +117,14 @@ pub struct Checker {
     /// bound), the interface member the checker resolved it to. Editor
     /// queries (hover, definition, references) use it; codegen does not.
     pub dyn_targets: FxHashMap<NodeId, FnId>,
+    /// Conversions of a concrete type to an interface type that the checker kept (not rolled
+    /// back with a failed trial): arguments, assignments, returns, element coercions and bounds.
+    /// Each entry keys `conform_impls`. Editor queries (references and rename of interface
+    /// members) use it; codegen does not.
+    pub conform_log: Vec<(TyId, IfaceId)>,
+    /// For each conversion of `conform_log`, the methods of the type that implement the
+    /// interface's members: (interface member, implementing method).
+    pub conform_impls: FxHashMap<(TyId, IfaceId), Vec<(FnId, FnId)>>,
     pub bins: FxHashMap<NodeId, BinRes>,
     pub fors: FxHashMap<NodeId, ForKind>,
     pub assigns: FxHashMap<NodeId, AssignRes>,
@@ -221,6 +236,8 @@ impl Checker {
             names: FxHashMap::default(),
             calls: FxHashMap::default(),
             dyn_targets: FxHashMap::default(),
+            conform_log: Vec::new(),
+            conform_impls: FxHashMap::default(),
             bins: FxHashMap::default(),
             fors: FxHashMap::default(),
             assigns: FxHashMap::default(),
@@ -396,15 +413,31 @@ impl Checker {
 
     // ---- variable binding log for trial unification ---------------------------------------
 
-    pub fn checkpoint(&self) -> usize {
-        self.binding_log.len()
+    pub fn checkpoint(&self) -> Checkpoint {
+        Checkpoint { bindings: self.binding_log.len(), conforms: self.conform_log.len() }
     }
 
-    pub fn rollback(&mut self, cp: usize) {
-        while self.binding_log.len() > cp {
+    pub fn rollback(&mut self, cp: Checkpoint) {
+        while self.binding_log.len() > cp.bindings {
             let v = self.binding_log.pop().unwrap();
             self.types.vars[v as usize] = None;
         }
+        self.conform_log.truncate(cp.conforms);
+    }
+
+    /// The (interface member, implementing method) pairs of every kept conversion to an
+    /// interface type, without duplicates. For editor queries.
+    pub fn conformances(&self) -> Vec<(FnId, FnId)> {
+        let mut seen: FxHashSet<(TyId, IfaceId)> = FxHashSet::default();
+        let mut out: FxHashSet<(FnId, FnId)> = FxHashSet::default();
+        for key in &self.conform_log {
+            if seen.insert(*key) {
+                out.extend(self.conform_impls.get(key).into_iter().flatten().copied());
+            }
+        }
+        let mut out: Vec<(FnId, FnId)> = out.into_iter().collect();
+        out.sort_unstable();
+        out
     }
 
     pub fn bind_var(&mut self, v: VarId, t: TyId) {
