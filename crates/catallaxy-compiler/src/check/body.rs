@@ -1,5 +1,7 @@
 //! Function bodies: contexts, scopes, locals, narrowing and statements.
 
+use std::rc::Rc;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::*;
@@ -38,6 +40,7 @@ impl Checker {
             frame_local: None,
             self_local: None,
             moved: FxHashSet::default(),
+            scan: Default::default(),
             span,
         });
     }
@@ -95,7 +98,7 @@ impl Checker {
     pub fn local_ty(&self, id: LocalId) -> TyId {
         let n = self.ctxs.len();
         let owner = self.locals[id as usize].ctx as usize;
-        let reassigned = self.locals[id as usize].assigns > 1;
+        let reassigned = self.is_reassigned(id);
         for ci in (0..n).rev() {
             if ci < owner {
                 break;
@@ -154,10 +157,39 @@ impl Checker {
         }
     }
 
-    /// A call may change any field: drop the field-path narrowings that are not stable.
+    /// A call may change any field: drop the field-path narrowings that are not stable. It may
+    /// also run a closure that assigns a local, or (on another fiber) code that does: drop the
+    /// narrowings of such locals too.
     pub fn clear_unstable_paths(&mut self) {
         self.path_epoch += 1;
         self.clear_paths(|_, stable| !stable);
+        let Some(c) = self.ctxs.last() else { return };
+        let dying: Vec<LocalId> =
+            c.narrow.iter().flat_map(|l| l.keys().copied()).filter(|&l| self.dies_at_calls(l)).collect();
+        for l in dying {
+            for layer in self.ctx().narrow.iter_mut() {
+                layer.remove(&l);
+            }
+        }
+    }
+
+    /// Whether local `l` is, or may later be, assigned more than once in its function.
+    pub fn is_reassigned(&self, l: LocalId) -> bool {
+        let info = &self.locals[l as usize];
+        info.assigns > 1 || info.reassigned || info.closure_assigned
+    }
+
+    /// Whether a narrowing of local `l` in the current context ends at any call: a closure that
+    /// the call runs may assign it, or, inside a closure, its function or another closure may
+    /// have reassigned it meanwhile (a fiber runs other code during calls that wait).
+    pub fn dies_at_calls(&self, l: LocalId) -> bool {
+        let info = &self.locals[l as usize];
+        if info.closure_assigned {
+            return true;
+        }
+        // `for` bodies run inside the loop's call to `each`, while their function waits.
+        let owner = info.ctx as usize;
+        self.is_reassigned(l) && self.ctxs.iter().skip(owner + 1).any(|c| c.kind != CtxKind::ForBody)
     }
 
     // ---- bodies ------------------------------------------------------------------------------
@@ -225,6 +257,7 @@ impl Checker {
     fn check_decl_body(&mut self, fid: FnId, decl: &FnDecl, body: &Block) {
         let f = self.fns[fid as usize].clone();
         self.push_ctx(fid, CtxKind::Function, f.ret, decl.span);
+        self.ctx().scan = Rc::new(AssignScan::new(&body.stmts));
         if f.self_kind != SelfKind::None {
             let s = self.new_local("self", f.self_ty, decl.span, true);
             self.ctx().scopes[0].insert("self".into(), s);
@@ -333,6 +366,8 @@ impl Checker {
         let nil = self.types.nil;
         self.push_ctx(fid, CtxKind::Function, nil, Span::default());
         let items = self.mods[m as usize].ast.items.clone();
+        let stmts = items.iter().filter_map(|i| if let Item::Stmt(e) = i { Some(e) } else { None });
+        self.ctx().scan = Rc::new(AssignScan::new(stmts));
         let mut last = nil;
         for item in &items {
             match item {

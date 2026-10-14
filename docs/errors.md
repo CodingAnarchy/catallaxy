@@ -629,7 +629,8 @@ Annotate its parameters (`fn twice(x: Int) -> Int`), or pass a closure: `{ |x: I
 
 Value may be nil. A member, operator or index is used on an optional value (`T?`) without checking
 for `nil`. A call between a `!= nil` test on a field and its use also counts, because the call may
-have changed the field.
+have changed the field; so does a call between a test on a variable that a closure assigns and its
+use, because the call may have run the closure.
 
 ```cx
 x: String? = nil
