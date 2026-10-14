@@ -611,7 +611,12 @@ plus every open document, each with the modules it imports, whether or not the f
 Directories named `target` or `node_modules` and hidden directories (`.git` and the like) are
 skipped. An open document's text takes precedence over the file on disk. Each file's compilation is
 cached and reused while the files it loaded are unchanged, so after the first request only edited
-files and the files that import them are checked again. At most 2000 files are taken from the
+files and the files that import them are checked again. The cache is filled in the background after
+the server starts and whenever workspace folders are added, on half the cores and pausing while
+requests and diagnostics run, so the first request usually finds it ready; a request that comes
+earlier waits only for the files being compiled at that moment and compiles the rest itself. The
+client is shown its progress (`window/workDoneProgress`) and the time taken goes to the server's
+log. At most 2000 files are taken from the
 workspace folders (set `CATX_LSP_MAX_FILES` to change the limit); a larger workspace is cut, and the
 server says so in its log.
 
