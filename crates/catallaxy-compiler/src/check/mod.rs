@@ -56,6 +56,12 @@ pub enum CtxKind {
 /// A field path rooted at a local (or `self`): `n.next` is `(n, ["next"])`.
 pub type FieldPath = (LocalId, Vec<String>);
 
+/// The narrowings of a context: of locals, and of field paths (see `FnCtx`).
+pub type NarrowState = (Vec<FxHashMap<LocalId, TyId>>, Vec<FxHashMap<FieldPath, (TyId, bool)>>);
+
+/// The narrowings in effect at one point, without layers.
+pub type FlatNarrow = (FxHashMap<LocalId, TyId>, FxHashMap<FieldPath, (TyId, bool)>);
+
 /// What a narrowing applies to.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum NKey {
@@ -197,6 +203,9 @@ pub struct Checker {
     /// Locals whose narrowing a loop being checked dropped, because it assigns them a value that
     /// may not fit it (for diagnostics).
     pub loop_dropped: Vec<LocalId>,
+    /// Set to make the next `check_block` record the narrowings at its end in `block_end`.
+    pub capture_block_end: bool,
+    pub block_end: Option<FlatNarrow>,
     /// Every method name of every type (built on first use, for loop pre-scans).
     pub method_names: FxHashSet<String>,
     /// When set, `Open` requirements are recorded against this function.
@@ -302,6 +311,8 @@ impl Checker {
             path_epoch: 0,
             loop_facts: Vec::new(),
             loop_dropped: Vec::new(),
+            capture_block_end: false,
+            block_end: None,
             method_names: FxHashSet::default(),
             open_owner: None,
             well_known: WellKnown::default(),
