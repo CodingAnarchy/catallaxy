@@ -217,9 +217,20 @@ block cannot follow a call without parentheses: write `if xs.any() { ... }` not 
 | `Shape.Circle(r)` / `.Circle(r)` | enum variant, binding payload positionally |
 | `Ok(v)`, `Err(e)` | `Result` variants |
 | `(a, b)` | tuple |
-| `Int`, `s: String` | type test on a union / `Dyn` / supertype, optionally binding the narrowed value |
+| `Int`, `s: String`, `b: Box` | type test on a union / `Dyn` / supertype, optionally binding the narrowed value (see below) |
 | `p1 \| p2` | either (no bindings) |
 | `pattern if guard` | guard |
+
+Type tests (`x is T`, `x as? T`, and type patterns) check the value's run-time type. Type arguments are
+erased at run time: a test for `Box[String]` can check only that the value is a `Box`, a function type
+only that it is a function, and a type parameter nothing. Such a test is an error (E0374) unless the
+static type already determines the unchecked part (`x: Box[Int] | Foo` may be tested for `Box[Int]`).
+A generic type named without arguments is the erased test (`x is Box`, `x as? Box`, `b: Box =>`,
+`Box =>`): it narrows to the members of the static type that are a `Box` (with their own arguments), or
+to `Box[Dyn]` when the static type does not say (`Dyn`, an interface, a superclass). `List`, `Set`,
+`Dict` and tuple types are checked element by element, so `x is List[Int]` is allowed on any value.
+A variant pattern (`Ok(v)`) binds its payload with every instantiation the subject may have: on
+`Result[Int, String] | Result[String, Int]`, `v` is an `Int | String`, and on a `Dyn` it is a `Dyn`.
 
 Narrowing: after `if x != nil`, `if x is T`, `if let`, and in `match` arms on a variable subject, the
 variable has the narrowed type for the rest of that branch. `x ??= v` and `x = v` with a non-nil `v` also
@@ -420,6 +431,9 @@ resolve statically and are visible only in modules that declare or import them (
 fn max[T: Comparable](xs: List[T]) -> T? { ... }
 pub fn total(xs: Enumerable[Int]) -> Int { xs.reduce(0) { |a, b| a + b } }   # interface param = bound
 ```
+
+Type arguments are erased at run time: one compiled body serves every instantiation, and a type test
+cannot check them (see §4.4 and E0374).
 
 A member reached through a bound `T: I` (or `T: I & J`) is seen with `Self` replaced by `T`, so with
 `interface Clone { fn clone(self) -> Self }`, `fn dup[T: Clone](x: T) -> T { x.clone() }` checks.

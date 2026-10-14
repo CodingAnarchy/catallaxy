@@ -1,0 +1,9 @@
+# expect: E0374
+# `as? Box[String]` would accept any `Box` held in a `Dyn`.
+class Box[T] {
+  v: T
+}
+x: Dyn = Box.new(5)
+if let b = x as? Box[String] {
+  puts(b.v.length)
+}
