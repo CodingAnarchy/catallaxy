@@ -812,6 +812,9 @@ impl Checker {
                     self.bins.insert(e.id, BinRes::Compare(ArithKind::Generic));
                     return bool_;
                 }
+                if self.builtin_compare(e, op, r, lt, rt) {
+                    return bool_;
+                }
                 self.operator_method(e, op, l, r, lt, rt)
             }
             BinOp::Cmp => {
@@ -829,6 +832,9 @@ impl Checker {
                 let (ls, rs) = (self.types.shallow_resolve(lt), self.types.shallow_resolve(rt));
                 if (ls == string && rs == string) || self.is_dynamic(lt) || self.is_dynamic(rt) {
                     self.bins.insert(e.id, BinRes::Compare(ArithKind::Generic));
+                    return int;
+                }
+                if self.builtin_compare(e, op, r, lt, rt) {
                     return int;
                 }
                 self.operator_method(e, op, l, r, lt, rt)
@@ -912,6 +918,45 @@ impl Checker {
             };
             am.iter().any(|&x| bm.iter().any(|&y| x == y || self.trial(|c| c.assignable(x, y) || c.assignable(y, x))))
         }
+    }
+
+    /// `<`, `<=>`, ... on tuples and lists of comparable elements, which compare
+    /// lexicographically at run time. Returns false (nothing recorded) for other types.
+    fn builtin_compare(&mut self, e: &Expr, op: BinOp, r: &Expr, lt: TyId, rt: TyId) -> bool {
+        let lt_r = self.types.shallow_resolve(lt);
+        let is_seq = |c: &Self, t: TyId| match c.types.get(t) {
+            Ty::Tuple(_) | Ty::Class(builtin::LIST, _) => true,
+            Ty::Frozen(i) => {
+                matches!(c.types.get(c.types.shallow_resolve(*i)), Ty::Tuple(_) | Ty::Class(builtin::LIST, _))
+            }
+            _ => false,
+        };
+        if !is_seq(self, lt_r) {
+            return false;
+        }
+        if self.builtin_comparable(lt_r) != Some(true) {
+            let msg = format!(
+                "operator `{}` is not defined for `{}`: its elements are not `Comparable`",
+                op.symbol(),
+                self.show(lt)
+            );
+            self.err("E0316", msg, e.span);
+        } else if !self.trial(|c| c.assignable(rt, lt)) && !self.trial(|c| c.assignable(lt, rt)) && {
+            // Comparison only reads: a frozen side compares with an owned one.
+            let (fl, fr) = (self.freeze_ty(lt), self.freeze_ty(rt));
+            !self.trial(|c| c.assignable(fr, fl)) && !self.assignable(fl, fr)
+        } {
+            let msg = format!(
+                "`{}` {} `{}`: right side must be `{}`",
+                self.show(lt),
+                op.symbol(),
+                self.show(rt),
+                self.show(lt)
+            );
+            self.err("E0315", msg, r.span);
+        }
+        self.bins.insert(e.id, BinRes::Compare(ArithKind::Generic));
+        true
     }
 
     /// An operator implemented by a method (`+` on a class, `<` from Comparable, ...).
@@ -1697,6 +1742,18 @@ impl Checker {
                         if !self.item_is_pub(si) {
                             let msg = format!("`{}` is private to module `{}`", name.name, self.mods[m as usize].name);
                             self.err("E0202", msg, name.span);
+                        }
+                        // Record `module.Type` for tooling, like a bare type name above.
+                        let res = match si {
+                            ScopeItem::Class(c) => Some(NameRes::Class(c)),
+                            ScopeItem::Enum(en) => Some(NameRes::Enum(en)),
+                            ScopeItem::Iface(i) => Some(NameRes::Iface(i)),
+                            _ => None,
+                        };
+                        if let Some(r) = res {
+                            if e.id < u32::MAX - 2 {
+                                self.names.insert(e.id, r);
+                            }
                         }
                         Some(match si {
                             ScopeItem::Class(c) => PathRes::Class(c, None),
@@ -2800,6 +2857,25 @@ impl Checker {
                             return ret;
                         }
                     }
+                    // `E.values()`: every variant, when none has a payload (an enum's own static
+                    // `values` takes precedence, above).
+                    if name.name == "values" && args.is_empty() && block.is_none() {
+                        let ei = &self.enums[en as usize];
+                        if let Some(v) = ei.variants.iter().find(|v| !v.fields.is_empty()) {
+                            let msg = format!(
+                                "`{}.values()` needs payload-less variants, but `{}` has a payload",
+                                ei.name, v.name
+                            );
+                            self.err("E0367", msg, name.span);
+                            return self.types.error;
+                        }
+                        let classes: Vec<ClassId> = ei.variants.iter().map(|v| v.class_id).collect();
+                        let n = ei.params.len();
+                        let ta = targs.unwrap_or_else(|| (0..n).map(|_| self.types.fresh_var()).collect());
+                        let et = self.types.intern(Ty::Enum(en, ta));
+                        self.calls.insert(e.id, CallRes::EnumValues(classes));
+                        return self.types.intern(Ty::Class(builtin::LIST, vec![et]));
+                    }
                     let msg = format!("enum `{}` has no variant `{}`", self.enums[en as usize].name, name.name);
                     let mut d = Diag::error("E0343", msg, name.span);
                     let names: Vec<String> = self.enums[en as usize].variants.iter().map(|v| v.name.clone()).collect();
@@ -3059,6 +3135,9 @@ impl Checker {
         }
         let (slots, ret) = self.check_args(e, &m, args, block, expected, parallel);
         self.note_self_call(&m, recv);
+        if matches!(m.dispatch, Dispatch::Dynamic(..)) && matches!(f.owner, Owner::Iface(_)) {
+            self.dyn_targets.insert(e.id, m.fid);
+        }
         self.calls.insert(e.id, CallRes::Fn { dispatch: m.dispatch.clone(), recv: true, args: slots, safe: false });
         ret
     }
@@ -3107,6 +3186,12 @@ impl Checker {
         }
         let msg = format!("no method or field `{}` on `{}`", name.name, self.show(rt));
         let mut d = Diag::error("E0311", msg, name.span);
+        if let Some((req, actual)) = self.unmet_ext_bound(rt, &name.name) {
+            let iface = req.split_once(": ").map_or(req.as_str(), |(_, b)| b);
+            d = d.note(format!("`{}` needs `{req}`, and `{actual}` is not `{iface}`", name.name));
+            self.emit(d);
+            return;
+        }
         if let Some(s) = crate::util::suggest(&name.name, names.iter().map(|s| s.as_str())) {
             d = d.suggest(format!("did you mean `{s}`?"), name.span, s);
         }

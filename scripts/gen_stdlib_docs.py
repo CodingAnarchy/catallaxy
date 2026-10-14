@@ -33,7 +33,8 @@ for f in ["core.cx", "builtins.cx"]:
                 if modifier:
                     head += f" ({modifier})"
                 if kind.startswith("extend") and "[" in kind:
-                    head = f"{name} (where {kind[7:-1]})"
+                    bounded = [p.strip() for p in kind[7:-1].split(",") if ":" in p]
+                    head = f"{name} (where {', '.join(bounded)})"
                 out += ["", f"## {head}", ""]
                 section = head
             elif line.startswith(("pub native fn", "pub fn", "native fn", "fn")) and not is_internal(line):

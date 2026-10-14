@@ -92,6 +92,9 @@ catx repl                       interactive session
 catx lsp                        language server (stdio)
 ```
 
+For VS Code, [`editors/vscode`](editors/vscode) has an extension with syntax highlighting that runs
+`catx lsp`.
+
 ## Documentation
 
 - [Getting started](docs/getting-started.md) — install, a first program, a two-file project, tests and

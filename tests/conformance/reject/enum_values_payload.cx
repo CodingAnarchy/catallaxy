@@ -1,0 +1,7 @@
+# expect: E0367
+enum Shape {
+  Circle(r: Float)
+  Empty
+}
+
+puts(Shape.values())

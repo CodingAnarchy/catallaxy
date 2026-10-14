@@ -223,6 +223,13 @@ impl Builder<'_> {
 
     fn member_sym(&self, e: &Expr, recv: &Expr) -> Option<Symbol> {
         let ck = self.ck;
+        // `module.Type` used as a path (`m.Point.new(...)`).
+        match ck.names.get(&e.id) {
+            Some(NameRes::Class(c)) => return Some(Symbol::Class(*c)),
+            Some(NameRes::Enum(x)) => return Some(Symbol::Enum(*x)),
+            Some(NameRes::Iface(x)) => return Some(Symbol::Iface(*x)),
+            _ => {}
+        }
         match ck.calls.get(&e.id)? {
             CallRes::Field { index, .. } => field_sym(ck, class_of(ck, *ck.expr_ty.get(&recv.id)?)?, *index as usize),
             CallRes::Global(g) => Some(Symbol::Global(*g)),
@@ -473,7 +480,21 @@ impl Builder<'_> {
 
     fn decls(&mut self) {
         let ck = self.ck;
+        // A generated constructor's parameters are spanned by the fields they initialize: they
+        // are not source declarations, and would hide the field at its declaration.
+        let generated: FxHashSet<LocalId> = ck
+            .fns
+            .iter()
+            .enumerate()
+            .filter(|(_, fi)| matches!(fi.synth, Synth::Constructor(_)))
+            .filter_map(|(f, _)| ck.fn_locals.get(&(f as FnId)))
+            .flatten()
+            .copied()
+            .collect();
         for l in 0..ck.locals.len() {
+            if generated.contains(&(l as LocalId)) {
+                continue;
+            }
             let s = local_sym(ck, self.sm, l as LocalId);
             self.add(s, ck.locals[l].span, true);
         }

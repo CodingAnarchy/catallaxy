@@ -6,11 +6,21 @@ and the [standard library](stdlib.md).
 
 ## Install
 
-Catallaxy is written in Rust. With a Rust toolchain installed (from [rustup.rs](https://rustup.rs)):
+On Linux or macOS, the install script fetches a prebuilt binary (releases from 0.4.0 on) and
+checks its SHA-256:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/CodingAnarchy/catallaxy/main/install.sh | sh
+catx version                   # catx is now in ~/.local/bin
+```
+
+The [README](../README.md#install) lists the script's options and the Windows download.
+
+Catallaxy is written in Rust, so with a Rust toolchain (from [rustup.rs](https://rustup.rs)) you can
+also install it from crates.io:
 
 ```sh
 cargo install catallaxy        # installs the `catx` binary into ~/.cargo/bin
-catx version
 ```
 
 Or build from a checkout:
@@ -201,8 +211,17 @@ Emacs (29 or later, with Eglot):
   (add-to-list 'eglot-server-programs '(catallaxy-mode "catx" "lsp")))
 ```
 
-In VS Code, a generic LSP client extension can start `catx lsp` for `.cx` files. Ruby syntax
-highlighting is a reasonable stand-in until Catallaxy has a grammar of its own.
+VS Code has an extension in [`editors/vscode`](../editors/vscode) with syntax highlighting that
+starts `catx lsp` for you. It is not on the Marketplace yet; build and install it from a checkout:
+
+```sh
+cd editors/vscode
+npm ci
+npm run package                # writes catallaxy.vsix
+code --install-extension catallaxy.vsix
+```
+
+It runs the `catx` on your `PATH`; the `catallaxy.serverPath` setting points it at another binary.
 
 ## Next steps
 

@@ -32,11 +32,14 @@ program's main body; top-level statements in an imported module run once, when i
 import geometry                 # binds module `geometry`; use geometry.area(...)
 import geometry.{Point, area}   # binds selected public items directly
 import lib.shapes               # lib/shapes.cx, bound as `shapes`
+import shapes.geometry as geo   # shapes/geometry.cx, bound as `geo`
 ```
 
 Module paths are resolved relative to the importing file's directory (`a.b` → `a/b.cx`), then the
 entry file's directory. A module that cannot be found is error E0204. Only `pub` items are visible to
-importers. Cyclic imports are an error.
+importers. Cyclic imports are an error. A module is bound to the last segment of its path unless
+renamed with `as`; two imports may not bind the same name to different modules or items (E0206), so
+`import a.util` and `import b.util` need an `as` on one of them.
 
 The standard library (`docs/stdlib.md`) needs no import: `Json`, `File`, `Regex`, `Time` and the rest
 are in scope in every module, and there are no `std.*` modules to import. `Time.now()` (seconds,
@@ -56,7 +59,7 @@ Module-wide state uses:
 
 | Type | Meaning |
 | --- | --- |
-| `Int` | arbitrary-precision integer |
+| `Int` | arbitrary-precision integer (so there is no `Int.MAX` or `Int.MIN`: start a running extreme from `nil` or the first element, or use `min`/`max`/`min_by`/`max_by`) |
 | `Float` | IEEE 754 double |
 | `Bool` | `true` / `false` |
 | `String` | immutable UTF-8 text (always frozen); `s[i]` and slices index characters, in O(1) for ASCII text |
@@ -171,6 +174,11 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
 - Operators on class instances call methods named by the operator: `fn +(self, o: Vec) -> Vec`,
   `fn ==(self, o: Self) -> Bool`, `fn <=>(self, o: Self) -> Int`, `fn [](self, i: Int) -> T`,
   `fn []=(self, i: Int, v: T)`. Comparison operators on a type with `<=>` come from `Comparable`.
+- `Int`, `Float`, `String` and classes with `<=>` are `Comparable`; tuples and lists are `Comparable` when
+  their elements are, and order lexicographically (`(1, "b") < (1, "c")`, `[1, 2] < [1, 2, 0]`). Sorting
+  needs it: `sorted`, `sort`, `sort_in_place`, `min` and `max` require `Comparable` items, and `sort_by`,
+  `min_by` and `max_by` a `Comparable` key (`recs.sort_by { |r| (r.last, r.first) }`). Use `sort_with`
+  for any other order.
 
 ### 4.3 Control flow
 
@@ -353,7 +361,9 @@ s = Shape.Circle(2.0)
 area = match s { .Circle(r) => 3.14 * r * r, .Rect(w, h) => w * h, .Empty => 0.0 }
 ```
 
-Enums may be generic and have methods. Enum values are immutable.
+Enums may be generic and have methods. Enum values are immutable. When no variant has a payload,
+`E.values()` returns every variant in declaration order (`List[E]`), unless the enum declares its own
+static `values`; on an enum with payloads it is an error (E0367).
 
 `extend T { fn ... }` adds methods to an existing type (`String`, `List[T]`, a user class). Extensions
 resolve statically and are visible only in modules that declare or import them (`import m` brings

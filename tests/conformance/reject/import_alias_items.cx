@@ -1,0 +1,2 @@
+# expect: E0100
+import lib.secret.{shown} as s
