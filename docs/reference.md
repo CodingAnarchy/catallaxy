@@ -611,7 +611,8 @@ plus every open document, each with the modules it imports, whether or not the f
 Directories named `target` or `node_modules` and hidden directories (`.git` and the like) are
 skipped. An open document's text takes precedence over the file on disk. Each file's compilation is
 cached and reused while the files it loaded are unchanged, so after the first request only edited
-files and the files that import them are checked again. The cache is filled in the background after
+files and the files that import them are checked again. These compilations share one checked copy
+of the prelude rather than each checking it again. The cache is filled in the background after
 the server starts and whenever workspace folders are added, on half the cores and pausing while
 requests and diagnostics run, so the first request usually finds it ready; a request that comes
 earlier waits only for the files being compiled at that moment and compiles the rest itself. The
