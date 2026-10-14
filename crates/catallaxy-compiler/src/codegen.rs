@@ -1892,6 +1892,25 @@ impl<'a> Codegen<'a> {
                 self.emit(st, encode(Op::Closure, dst, 0, 0));
                 self.emit(st, f);
             }
+            CallRes::EnumValues(classes) => {
+                // One fresh instance per payload-less variant (as `E.Variant` evaluates), in order.
+                if classes.len() <= 200 {
+                    let base = self.alloc_n(st, classes.len());
+                    for (i, &c) in classes.iter().enumerate() {
+                        self.emit(st, encode(Op::New, base + i as u8, 0, 0));
+                        self.emit(st, c);
+                    }
+                    self.emit(st, encode(Op::NewList, dst, base, classes.len() as u8));
+                } else {
+                    let t = self.alloc(st);
+                    self.emit(st, encode(Op::NewList, dst, 0, 0));
+                    for &c in &classes {
+                        self.emit(st, encode(Op::New, t, 0, 0));
+                        self.emit(st, c);
+                        self.emit(st, encode(Op::ListPush, dst, t, 0));
+                    }
+                }
+            }
             CallRes::Freeze => {
                 if let Some(a) = args.first() {
                     let r = self.expr_reg(st, &a.value);
