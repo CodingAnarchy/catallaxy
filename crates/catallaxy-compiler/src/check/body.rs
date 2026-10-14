@@ -110,6 +110,14 @@ impl Checker {
                 }
             }
         }
+        // A narrowing that a loop being checked keeps holds throughout its body (every assignment
+        // to the local in the loop keeps it), even after an assignment in a branch dropped the
+        // layered one. Not in a closure, which may run after the loop.
+        for &(l, t, depth) in self.loop_facts.iter().rev() {
+            if l == id && self.ctxs[depth.min(n)..].iter().all(|c| c.kind == CtxKind::ForBody) {
+                return t;
+            }
+        }
         self.locals[id as usize].ty
     }
 
