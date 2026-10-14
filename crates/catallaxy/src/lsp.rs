@@ -5,24 +5,30 @@
 //! no bytecode) and publishes their diagnostics. Hover, go to definition and completion compile
 //! the requested document on demand and query the checker's side tables (see
 //! `catallaxy_compiler::query`). References, rename, signature help, inlay hints and symbol lists
-//! use the symbol index and outlines of `catallaxy_compiler::symbols`; references and rename cover
-//! the compilations of every open document (each document and the modules it imports), matching
-//! symbols across them by their declarations, and take along the methods that implement an
-//! interface member in the types used as that interface. Code actions
-//! offer the fixes attached to the document's diagnostics as quick fixes.
+//! use the symbol index and outlines of `catallaxy_compiler::symbols`. References, rename and
+//! `workspace/symbol` cover the workspace (see [`workspace`]): every `.cx` file under the
+//! workspace folders and every open document, each compiled with the modules it imports. They
+//! match symbols across those compilations by their declarations, and take along the methods that
+//! implement an interface member in the types used as that interface. Code actions offer the fixes
+//! attached to the document's diagnostics as quick fixes.
 
+mod workspace;
+
+use std::cell::RefCell;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use catallaxy_compiler::diag::{Severity, SourceFile};
 use catallaxy_compiler::driver::{compile_path, Compilation, Options, OverlayLoader, PRELUDE};
 use catallaxy_compiler::query::{self, CompletionKind as QK};
-use catallaxy_compiler::symbols::{self, Index, OutlineItem, OutlineKind, Symbol};
+use catallaxy_compiler::symbols::{self, OutlineItem, OutlineKind, Symbol};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types as lt;
 use rustc_hash::FxHashMap;
 use serde_json::Value as Json;
+use workspace::{Notes, Overlay, Unit, Workspace, ENTRY_FILE};
 
 pub fn cmd_lsp(_args: &[String]) -> i32 {
     let (conn, io) = Connection::stdio();
@@ -71,6 +77,13 @@ fn capabilities() -> lt::ServerCapabilities {
             resolve_provider: None,
             work_done_progress_options: Default::default(),
         })),
+        workspace: Some(lt::WorkspaceServerCapabilities {
+            workspace_folders: Some(lt::WorkspaceFoldersServerCapabilities {
+                supported: Some(true),
+                change_notifications: Some(lt::OneOf::Left(true)),
+            }),
+            file_operations: None,
+        }),
         ..Default::default()
     }
 }
@@ -79,6 +92,27 @@ struct Server<'a> {
     conn: &'a Connection,
     /// Open documents by file path: (uri, text).
     docs: FxHashMap<PathBuf, (lt::Uri, String)>,
+    /// The workspace folders, their files and the cached compilations of references and rename.
+    ws: RefCell<Workspace>,
+}
+
+/// The id of the request registering the file watcher.
+const WATCH_REQUEST: &str = "catx/watch-files";
+
+/// The workspace folders named by `initialize` (`workspaceFolders`, else `rootUri`, else
+/// `rootPath`).
+fn initial_roots(params: &Json) -> Vec<PathBuf> {
+    if let Some(folders) = params["workspaceFolders"].as_array() {
+        return folders.iter().filter_map(|f| folder_path(&f["uri"])).collect();
+    }
+    if let Some(p) = folder_path(&params["rootUri"]) {
+        return vec![p];
+    }
+    params["rootPath"].as_str().map(PathBuf::from).into_iter().collect()
+}
+
+fn folder_path(uri: &Json) -> Option<PathBuf> {
+    uri_to_path(&lt::Uri::from_str(uri.as_str()?).ok()?)
 }
 
 fn serve(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -87,9 +121,27 @@ fn serve(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Syn
         "capabilities": caps,
         "serverInfo": { "name": "catx", "version": env!("CARGO_PKG_VERSION") },
     });
-    let (id, _params) = conn.initialize_start()?;
+    let (id, params) = conn.initialize_start()?;
     conn.initialize_finish(id, init)?;
-    let mut s = Server { conn, docs: FxHashMap::default() };
+    let mut ws = Workspace::default();
+    ws.roots = initial_roots(&params);
+    // Ask to hear of created and deleted files, so the list of workspace files can be kept
+    // between requests (otherwise it is rebuilt for each).
+    if params["capabilities"]["workspace"]["didChangeWatchedFiles"]["dynamicRegistration"] == true {
+        let reg = lt::RegistrationParams {
+            registrations: vec![lt::Registration {
+                id: "catx-watch-files".into(),
+                method: "workspace/didChangeWatchedFiles".into(),
+                register_options: Some(serde_json::json!({
+                    "watchers": [{ "globPattern": "**/*", "kind": 5 }] // create | delete
+                })),
+            }],
+        };
+        let req = Request::new(WATCH_REQUEST.to_string().into(), "client/registerCapability".into(), reg);
+        conn.sender.send(Message::Request(req))?;
+        ws.watching = true;
+    }
+    let mut s = Server { conn, docs: FxHashMap::default(), ws: RefCell::new(ws) };
     for msg in &conn.receiver {
         match msg {
             Message::Request(req) => {
@@ -106,7 +158,13 @@ fn serve(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Syn
             Message::Notification(n) => {
                 let _ = std::panic::catch_unwind(AssertUnwindSafe(|| s.notification(n)));
             }
-            Message::Response(_) => {}
+            Message::Response(r) => {
+                if r.id == WATCH_REQUEST.to_string().into() && r.error.is_some() {
+                    let mut ws = s.ws.borrow_mut();
+                    ws.watching = false;
+                    ws.rescan();
+                }
+            }
         }
     }
     Ok(())
@@ -252,6 +310,14 @@ impl Server<'_> {
         let _ = self.conn.sender.send(Message::Notification(n));
     }
 
+    /// Sends the workspace's log lines to the client's log.
+    fn log(&self, notes: Notes) {
+        for w in notes.warnings {
+            let params = lt::LogMessageParams { typ: lt::MessageType::WARNING, message: w };
+            self.notify("window/logMessage", params);
+        }
+    }
+
     // ---- notifications -----------------------------------------------------------------------
 
     fn notification(&mut self, n: Notification) {
@@ -282,6 +348,25 @@ impl Server<'_> {
                 self.notify("textDocument/publishDiagnostics", params);
                 self.publish_all();
             }
+            "workspace/didChangeWorkspaceFolders" => {
+                let Ok(p) = serde_json::from_value::<lt::DidChangeWorkspaceFoldersParams>(n.params) else { return };
+                let mut ws = self.ws.borrow_mut();
+                for f in p.event.removed {
+                    if let Some(path) = uri_to_path(&f.uri) {
+                        ws.roots.retain(|r| *r != path);
+                    }
+                }
+                for f in p.event.added {
+                    if let Some(path) = uri_to_path(&f.uri) {
+                        if !ws.roots.contains(&path) {
+                            ws.roots.push(path);
+                        }
+                    }
+                }
+                ws.rescan();
+            }
+            // Contents are checked by each request; only the list of files can change here.
+            "workspace/didChangeWatchedFiles" => self.ws.borrow_mut().rescan(),
             _ => {}
         }
     }
@@ -482,11 +567,10 @@ impl Server<'_> {
 
 // ---- navigation: references, rename, signature help, inlay hints, symbols ------------------
 
-/// The symbol under a cursor, with the checked compilation and its index.
+/// The symbol under a cursor, with the unit of the cursor's document.
 struct AtSymbol {
     path: PathBuf,
-    ck: Checked,
-    index: Index,
+    unit: Arc<Unit>,
     sym: Symbol,
     /// The occurrence under the cursor.
     span: catallaxy_compiler::diag::Span,
@@ -500,84 +584,88 @@ struct Gathered {
     refusal: Option<String>,
 }
 
-/// A compilation with its symbol index, the canonical path of each of its files, and the
-/// symbols of the rename found in it.
-struct Unit {
-    ck: Checked,
-    index: Index,
-    files: Vec<PathBuf>,
-    syms: Vec<Symbol>,
-}
-
-impl Unit {
-    fn new(ck: Checked, index: Index) -> Unit {
-        let files = ck
-            .comp
-            .sm
-            .files
-            .iter()
-            .map(|f| {
-                let p = Path::new(&f.path);
-                std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
-            })
-            .collect();
-        Unit { ck, index, files, syms: Vec::new() }
-    }
-
-    /// A span as a position independent of the compilation's file numbering.
-    fn key(&self, sp: catallaxy_compiler::diag::Span) -> Option<(PathBuf, u32, u32)> {
-        Some((self.files.get(sp.file as usize)?.clone(), sp.start, sp.end))
-    }
-}
+type Key = (PathBuf, u32, u32);
 
 impl Server<'_> {
+    fn overlay(&self) -> Overlay {
+        Overlay::new(self.docs.iter().map(|(p, (_, t))| (p, t)))
+    }
+
+    /// The units of `first` and then, with `all`, of the open documents and the workspace files.
+    fn units(&self, first: Option<&Path>, all: bool) -> Vec<(PathBuf, Arc<Unit>)> {
+        let mut entries: Vec<PathBuf> = first.map(Path::to_path_buf).into_iter().collect();
+        if all {
+            let mut open: Vec<PathBuf> = self.docs.keys().cloned().collect();
+            open.sort();
+            entries.extend(open);
+        }
+        let mut notes = Notes::default();
+        let units = self.ws.borrow_mut().units(&self.overlay(), entries, all, &mut notes);
+        self.log(notes);
+        units
+    }
+
+    fn unit_location(u: &Unit, span: catallaxy_compiler::diag::Span) -> Option<lt::Location> {
+        let f = u.file(span.file)?;
+        let uri = path_to_uri(Path::new(&f.sf.path))?;
+        Some(lt::Location::new(uri, Self::range(&f.sf, span.start, span.end)))
+    }
+
     fn symbol_at(&self, pos: &lt::TextDocumentPositionParams) -> Option<AtSymbol> {
         let (path, _, off) = self.locate(pos)?;
-        let ck = self.compile(&path, None);
-        let index = Index::build(&ck.comp.ck, &ck.comp.sm);
-        let occ = *index.at(ck.file, off)?;
-        Some(AtSymbol { path, ck, index, sym: occ.sym, span: occ.span })
+        let (_, unit) = self.units(Some(&path), false).into_iter().next()?;
+        let occ = *unit.index.at(ENTRY_FILE, off)?;
+        Some(AtSymbol { path, unit, sym: occ.sym, span: occ.span })
     }
 
     /// The occurrences of `at`'s symbol and of the symbols renamed with it (the methods that
-    /// implement an interface member, see [`Index::family`]), in the compilation of `at`'s
-    /// document and in those of the other open documents, which may import it. Symbols are
-    /// matched across compilations by their declarations.
+    /// implement an interface member, see `Index::family`), in every compilation of the
+    /// workspace: those of the open documents and of the files under the workspace folders.
+    /// Symbols are matched across compilations by their declarations.
     fn gather(&self, at: AtSymbol) -> Gathered {
-        let AtSymbol { path, ck, index, sym, .. } = at;
-        let mut first = Unit::new(ck, index);
-        first.syms = first.index.family(sym);
-        let mut units = vec![first];
-        let mut others: Vec<&PathBuf> = self.docs.keys().filter(|p| **p != path).collect();
-        others.sort();
-        for p in others {
-            let ck = self.compile(p, None);
-            let index = Index::build(&ck.comp.ck, &ck.comp.sm);
-            units.push(Unit::new(ck, index));
+        let AtSymbol { path, sym, .. } = at;
+        let units: Vec<Arc<Unit>> = self.units(Some(&path), true).into_iter().map(|(_, u)| u).collect();
+        if units.is_empty() {
+            return Gathered { occs: Vec::new(), refusal: None };
         }
-        let mut keys: rustc_hash::FxHashSet<(PathBuf, u32, u32)> = Default::default();
+        // The symbols of the rename in each unit.
+        let mut syms: Vec<Vec<Symbol>> = vec![Vec::new(); units.len()];
+        syms[0] = units[0].index.family(sym);
+        let cursor_key = units[0].decl_key(sym);
+        // Each unit's declarations by key.
+        let decl_at: Vec<FxHashMap<Key, Vec<Symbol>>> = units
+            .iter()
+            .map(|u| {
+                let mut m: FxHashMap<Key, Vec<Symbol>> = FxHashMap::default();
+                for o in u.index.occs.iter().filter(|o| o.is_decl) {
+                    if let Some(k) = u.key(o.span) {
+                        m.entry(k).or_default().push(o.sym);
+                    }
+                }
+                m
+            })
+            .collect();
+        let mut keys: rustc_hash::FxHashSet<Key> = Default::default();
         let mut grew = true;
         while grew {
             grew = false;
-            for u in units.iter_mut() {
-                let found: Vec<Symbol> = u
-                    .index
-                    .occs
+            for (i, u) in units.iter().enumerate() {
+                let found: Vec<Symbol> = keys
                     .iter()
-                    .filter(|o| {
-                        o.is_decl && !u.syms.contains(&o.sym) && u.key(o.span).is_some_and(|k| keys.contains(&k))
-                    })
-                    .map(|o| o.sym)
+                    .filter_map(|k| decl_at[i].get(k))
+                    .flatten()
+                    .copied()
+                    .filter(|s| !syms[i].contains(s))
                     .collect();
                 for s in found {
                     for f in u.index.family(s) {
-                        if !u.syms.contains(&f) {
-                            u.syms.push(f);
+                        if !syms[i].contains(&f) {
+                            syms[i].push(f);
                         }
                     }
                 }
-                for s in &u.syms {
-                    if let Some(k) = symbols::decl_span(&u.ck.comp.ck, *s).and_then(|sp| u.key(sp)) {
+                for s in &syms[i] {
+                    if let Some(k) = u.decl_key(*s) {
                         grew |= keys.insert(k);
                     }
                 }
@@ -586,23 +674,24 @@ impl Server<'_> {
         let mut refusal = None;
         let mut seen = rustc_hash::FxHashSet::default();
         let mut occs = Vec::new();
-        for u in &units {
-            let c = &u.ck.comp;
-            for &s in &u.syms {
-                if refusal.is_none() && !u.index.renamable(&c.ck, s) {
-                    let name = symbols::symbol_name(&c.ck, &c.sm, s).unwrap_or_default();
-                    refusal = Some(match s {
-                        Symbol::Fn(f) if s != sym => format!(
-                            "renaming `{name}` would also rename `{}`, which is not declared in this program (it is built in or from the prelude)",
-                            query::fn_signature(&c.ck, f)
+        for (i, u) in units.iter().enumerate() {
+            for &s in &syms[i] {
+                if refusal.is_some() {
+                    break;
+                }
+                if let Some((name, sig)) = u.fixed.get(&s) {
+                    let is_cursor = if i == 0 { s == sym } else { cursor_key.is_some() && u.decl_key(s) == cursor_key };
+                    refusal = Some(match sig {
+                        Some(sig) if !is_cursor => format!(
+                            "renaming `{name}` would also rename `{sig}`, which is not declared in this program (it is built in or from the prelude)"
                         ),
                         _ => format!("`{name}` is not declared in this program (it is built in or from the prelude)"),
                     });
                 }
             }
-            for o in u.index.occs.iter().filter(|o| u.syms.contains(&o.sym)) {
-                let Some(loc) = Self::location(c, o.span) else { continue };
-                if seen.insert((loc.uri.as_str().to_string(), loc.range.start, loc.range.end)) {
+            for o in u.index.occs.iter().filter(|o| syms[i].contains(&o.sym)) {
+                let (Some(k), Some(loc)) = (u.key(o.span), Self::unit_location(u, o.span)) else { continue };
+                if seen.insert(k) {
                     occs.push((loc, o.is_decl));
                 }
             }
@@ -618,7 +707,8 @@ impl Server<'_> {
 
     fn prepare_rename(&self, p: lt::TextDocumentPositionParams) -> Result<Option<lt::PrepareRenameResponse>, String> {
         let Some(at) = self.symbol_at(&p) else { return Ok(None) };
-        let range = Self::range(at.ck.comp.sm.file(at.ck.file), at.span.start, at.span.end);
+        let Some(f) = at.unit.file(ENTRY_FILE) else { return Ok(None) };
+        let range = Self::range(&f.sf, at.span.start, at.span.end);
         if let Some(why) = self.gather(at).refusal {
             return Err(why);
         }
@@ -728,38 +818,30 @@ impl Server<'_> {
         Some(lt::DocumentSymbolResponse::Nested(items.into_iter().map(|i| document_symbol(sf, i)).collect()))
     }
 
-    /// Declarations matching the query in the open documents and the modules they import.
+    /// Declarations matching the query in the workspace: the files under the workspace folders,
+    /// the open documents, and the modules they import.
     fn workspace_symbols(&self, p: lt::WorkspaceSymbolParams) -> Option<lt::WorkspaceSymbolResponse> {
         let q = p.query.to_lowercase();
         let mut seen = rustc_hash::FxHashSet::default();
         let mut out = Vec::new();
-        let paths: Vec<PathBuf> = self.docs.keys().cloned().collect();
-        for path in paths {
-            let c = self.compile(&path, None);
-            for (m, md) in c.comp.ck.mods.iter().enumerate() {
-                if md.is_prelude {
+        for (_, u) in self.units(None, true) {
+            for item in &u.outline {
+                if !item.name.to_lowercase().contains(&q) {
                     continue;
                 }
-                let mut stack: Vec<(OutlineItem, Option<String>)> =
-                    symbols::outline(&c.comp.ck, &c.comp.sm, m as u32).into_iter().map(|i| (i, None)).collect();
-                while let Some((item, container)) = stack.pop() {
-                    stack.extend(item.children.iter().cloned().map(|ch| (ch, Some(item.name.clone()))));
-                    if !item.name.to_lowercase().contains(&q) {
-                        continue;
-                    }
-                    let Some(loc) = Self::location(&c.comp, item.name_span) else { continue };
-                    if !seen.insert((loc.uri.as_str().to_string(), loc.range.start)) {
-                        continue;
-                    }
-                    out.push(lt::WorkspaceSymbol {
-                        name: item.name,
-                        kind: symbol_kind(item.kind),
-                        tags: None,
-                        container_name: container,
-                        location: lt::OneOf::Left(loc),
-                        data: None,
-                    });
+                let Some(k) = u.key(item.name_span) else { continue };
+                if !seen.insert(k) {
+                    continue;
                 }
+                let Some(loc) = Self::unit_location(&u, item.name_span) else { continue };
+                out.push(lt::WorkspaceSymbol {
+                    name: item.name.clone(),
+                    kind: symbol_kind(item.kind),
+                    tags: None,
+                    container_name: item.container.clone(),
+                    location: lt::OneOf::Left(loc),
+                    data: None,
+                });
             }
         }
         Some(lt::WorkspaceSymbolResponse::Nested(out))
