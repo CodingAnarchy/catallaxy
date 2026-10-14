@@ -45,6 +45,9 @@ pub struct Index {
     pub occs: Vec<Occurrence>,
     /// Source files of user (non-prelude) modules.
     pub user_files: FxHashSet<u32>,
+    /// Interface members and the methods that implement them in types used as the interface
+    /// (both ways): classes conform structurally, so these must be renamed together.
+    pub links: FxHashMap<Symbol, Vec<Symbol>>,
 }
 
 fn text_at(sm: &SourceMap, span: Span) -> Option<&str> {
@@ -544,7 +547,32 @@ impl Index {
         occs.sort_by_key(|o| (o.span.file, o.span.start, o.span.end, !o.is_decl));
         // One entry per (span, symbol), a declaration if any source of it is.
         occs.dedup_by(|b, a| a.span == b.span && a.sym == b.sym);
-        Index { occs, user_files: user }
+        let mut links: FxHashMap<Symbol, Vec<Symbol>> = FxHashMap::default();
+        for (member, imp) in ck.conformances() {
+            let (Some(a), Some(b)) = (fn_sym(ck, member), fn_sym(ck, imp)) else { continue };
+            if a != b {
+                links.entry(a).or_default().push(b);
+                links.entry(b).or_default().push(a);
+            }
+        }
+        Index { occs, user_files: user, links }
+    }
+
+    /// `sym` and every symbol that must be renamed with it: for an interface member, the
+    /// methods implementing it in the types converted to the interface, and transitively the
+    /// members of other interfaces those methods implement (and the reverse from a method).
+    pub fn family(&self, sym: Symbol) -> Vec<Symbol> {
+        let mut out = vec![sym];
+        let mut i = 0;
+        while i < out.len() {
+            for &s in self.links.get(&out[i]).into_iter().flatten() {
+                if !out.contains(&s) {
+                    out.push(s);
+                }
+            }
+            i += 1;
+        }
+        out
     }
 
     /// The occurrence under `offset` of `file` (end inclusive, so a cursor just past a name
