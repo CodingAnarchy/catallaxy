@@ -55,8 +55,25 @@ pub(crate) fn after_collection(live_bytes: usize, mutators: usize) {
     // 2) and with the number of allocating threads, so adding threads does not multiply pauses.
     let per_thread = MIN_THRESHOLD * mutators.clamp(1, 32);
     let t = if floor < MIN_THRESHOLD { floor } else { live_bytes.max(per_thread) };
-    THRESHOLD.store(t, Ordering::Relaxed);
+    THRESHOLD.store(crate::limits::cap_budget(t, live_bytes), Ordering::Relaxed);
+    crate::limits::after_collection(live_bytes);
     COLLECTIONS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// The allocation budget until the next major collection.
+pub(crate) fn threshold() -> usize {
+    THRESHOLD.load(Ordering::Relaxed)
+}
+
+static RELEASED: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn note_released(bytes: usize) {
+    RELEASED.fetch_add(bytes, Ordering::Relaxed);
+}
+
+/// Heap bytes returned to the OS so far.
+pub fn released_bytes() -> usize {
+    RELEASED.load(Ordering::Relaxed)
 }
 
 /// Records one stop-the-world pause.

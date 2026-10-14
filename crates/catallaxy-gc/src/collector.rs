@@ -275,6 +275,11 @@ fn minor_collect(rec: &ThreadRecord) {
     let Some(roots) = (unsafe { *rec.roots.get() }) else { return };
     let mut tracer = Tracer::minor(rec.tid);
     unsafe { (*roots).trace_roots(&mut tracer) };
+    // Large objects the roots reach directly. Marking from the heap below removes the ones a
+    // heap object also references; the rest may stay young (see `LocalHeap::sweep_young`).
+    if let Some(m) = tracer.minor.as_mut() {
+        m.root_large = heap.marked_young_large();
+    }
     for &o in heap.remembered() {
         unsafe { ((*(*o).vtable()).trace)(o, &mut tracer) };
     }
@@ -284,7 +289,8 @@ fn minor_collect(rec: &ThreadRecord) {
     }
     let marked = start.elapsed();
     let remembered = heap.remembered().len();
-    let (freed, promoted) = unsafe { heap.sweep_young() };
+    let keep_young = tracer.minor.take().map(|m| m.root_large).unwrap_or_default();
+    let (freed, promoted) = unsafe { heap.sweep_young(&keep_young) };
     stats::note_minor(start.elapsed().as_nanos() as usize, freed, promoted);
     if trace_enabled() {
         let total = start.elapsed();
@@ -526,6 +532,10 @@ fn collect(me: &ThreadRecord) {
     POOL.sweep_large(color);
     POOL.mark_all_unswept();
     stats::after_collection(GLOBAL.mark.marked_bytes.load(Ordering::SeqCst), threads.len());
+    // Every page is swept now (step 2), so wholly empty segments are known; keep enough empty
+    // pages for the allocation budget until the next collection and return the rest.
+    let released = POOL.release_empty_segments(stats::threshold() + crate::heap::nursery_reserve(threads.len()));
+    stats::note_released(released);
 
     // 5. Resume the world.
     for t in threads.iter() {
@@ -539,13 +549,14 @@ fn collect(me: &ThreadRecord) {
     stats::note_pause(start.elapsed().as_nanos() as usize);
     if trace_enabled() {
         eprintln!(
-            "gc: major #{}: stop {:.2} ms, finish sweep {:.2} ms, mark {:.2} ms ({} markers), total {:.2} ms",
+            "gc: major #{}: stop {:.2} ms, finish sweep {:.2} ms, mark {:.2} ms ({} markers), total {:.2} ms, released {:.1} MB",
             stats::collections(),
             t_stopped.as_secs_f64() * 1e3,
             (t_swept - t_stopped).as_secs_f64() * 1e3,
             (t_marked - t_swept).as_secs_f64() * 1e3,
             GLOBAL.mark.markers_seen.load(Ordering::Relaxed),
-            start.elapsed().as_secs_f64() * 1e3
+            start.elapsed().as_secs_f64() * 1e3,
+            released as f64 / 1e6
         );
     }
     let mut coord = GLOBAL.coord.lock();
@@ -567,6 +578,9 @@ pub struct Tracer {
 struct MinorMark {
     tid: u16,
     stack: Vec<usize>,
+    /// Sorted addresses of young large objects marked from the roots and not (yet) found
+    /// referenced by a heap object.
+    root_large: Vec<usize>,
 }
 
 impl Tracer {
@@ -575,7 +589,7 @@ impl Tracer {
     }
 
     fn minor(tid: u16) -> Self {
-        Tracer { color: 0, local: None, minor: Some(MinorMark { tid, stack: Vec::new() }) }
+        Tracer { color: 0, local: None, minor: Some(MinorMark { tid, stack: Vec::new(), root_large: Vec::new() }) }
     }
 
     /// Marks `obj` reachable. Null pointers are ignored. Tracers are only handed to root sources
@@ -592,8 +606,15 @@ impl Tracer {
             // Old objects are not traced: their young referents are found through the
             // remembered set.
             let meta = h.meta_relaxed();
-            if meta & crate::header::YOUNG_BIT != 0 && Header::owner_of(meta) == m.tid && h.try_minor_mark() {
-                m.stack.push(obj as usize);
+            if meta & crate::header::YOUNG_BIT != 0 && Header::owner_of(meta) == m.tid {
+                if h.try_minor_mark() {
+                    m.stack.push(obj as usize);
+                } else if !m.root_large.is_empty() {
+                    // A heap reference to a large object the roots also reach.
+                    if let Ok(i) = m.root_large.binary_search(&(obj as usize)) {
+                        m.root_large.remove(i);
+                    }
+                }
             }
             return;
         }

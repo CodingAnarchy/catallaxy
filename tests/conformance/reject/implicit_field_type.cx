@@ -1,0 +1,5 @@
+# expect: E0342
+# A field read through an untyped parameter must have the type the body uses it at.
+class U { name: Int }
+fn greet(p) { "hi " + p.name }
+greet(U.new(1))

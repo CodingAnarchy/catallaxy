@@ -231,28 +231,18 @@ pub fn dict_set(vm: &mut Vm, d: Value, k: Value, v: Value) -> RtResult<()> {
     }
 }
 
-fn char_at(s: &str, i: Value) -> RtResult<Option<&str>> {
+fn char_at(s: &StrObj, i: Value) -> RtResult<Option<&str>> {
     let Some(mut idx) = (if ops::is_int(i) { ops::int_as_i64(i) } else { None }) else {
         return panic(format!("TypeError: string index must be Int, got {}", type_name(i)));
     };
-    if s.is_ascii() {
-        if idx < 0 {
-            idx += s.len() as i64;
-        }
-        if idx < 0 || idx as usize >= s.len() {
-            return Ok(None);
-        }
-        return Ok(Some(&s[idx as usize..idx as usize + 1]));
-    }
-    let n = s.chars().count() as i64;
+    let n = s.char_count() as i64;
     if idx < 0 {
         idx += n;
     }
     if idx < 0 || idx >= n {
         return Ok(None);
     }
-    let (start, ch) = s.char_indices().nth(idx as usize).unwrap();
-    Ok(Some(&s[start..start + ch.len_utf8()]))
+    Ok(Some(s.char_at(idx as usize)))
 }
 
 /// The [start, end) bounds selected by a range over a sequence of `len` items, clamped.
@@ -282,15 +272,12 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
             ObjKind::List => {
                 let items = ownership::read_list(&vm.m, x)?.to_vec();
                 let (a, b) = range_bounds(i, items.len())?;
-                return Ok(vm.m.alloc_list(items[a..b].to_vec()));
+                return Ok(vm.m.alloc_list_from_slice(&items[a..b], b - a));
             }
             ObjKind::Str => {
-                let s = unsafe { as_str_obj(x) }.as_str();
-                let n = unsafe { as_str_obj(x) }.char_count();
-                let (a, b) = range_bounds(i, n)?;
-                let sub: String =
-                    if s.is_ascii() { s[a..b].to_string() } else { s.chars().skip(a).take(b - a).collect() };
-                return Ok(vm.m.alloc_str(&sub));
+                let s = unsafe { as_str_obj(x) };
+                let (a, b) = range_bounds(i, s.char_count())?;
+                return Ok(vm.m.alloc_str(s.char_slice(a, b)));
             }
             _ => {}
         }
@@ -299,12 +286,9 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
         ObjKind::List => list_get(vm, x, i),
         ObjKind::Dict => Ok(dict_get(vm, x, i)?.unwrap_or(Value::NIL)),
         ObjKind::Str => {
-            let s = unsafe { as_str_obj(x) }.as_str();
+            let s = unsafe { as_str_obj(x) };
             match char_at(s, i)? {
-                Some(c) => {
-                    let c = c.to_string();
-                    Ok(vm.m.alloc_str(&c))
-                }
+                Some(c) => Ok(vm.m.alloc_str(c)),
                 None => Ok(Value::NIL),
             }
         }

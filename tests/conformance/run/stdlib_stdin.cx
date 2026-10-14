@@ -1,0 +1,32 @@
+# Reading standard input: a line at a time, lazily by iteration, and all at once. Every reader
+# shares one buffered stream.
+
+puts(Stdin.read_line())
+puts(read_line())
+
+# `Stdin.lines()` reads only as far as it is iterated.
+n = 0
+for line in Stdin.lines() {
+  puts("line: #{line}")
+  n += 1
+  if n == 2 { break }
+}
+
+# Inside a fiber the read runs on the I/O pool while the other fibers continue.
+ticks = 0
+ticker = Fiber.start {
+  3.times {
+    ticks += 1
+    Fiber.yield()
+  }
+}
+reader = Fiber.start { Stdin.lines().first()!.upcase }
+puts(reader.join().unwrap())
+ticker.join().unwrap()
+puts(ticks)
+
+rest = Stdin.read_lines()
+puts(rest)
+puts(Stdin.read_all() == "")
+puts(Stdin.read_line())
+puts(Stdin.read_bytes().length)

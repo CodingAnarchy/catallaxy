@@ -1,0 +1,5 @@
+# expect: E0342
+# `y.n` is resolved from `y`'s argument before `x + y.n` is checked.
+class C { n: String }
+fn add(x, y) { x + y.n }
+add(1, C.new("s"))

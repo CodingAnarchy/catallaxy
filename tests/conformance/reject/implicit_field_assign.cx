@@ -1,0 +1,2 @@
+# expect: E0369
+fn reset(x) { x.n = 0 }

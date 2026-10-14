@@ -44,7 +44,7 @@ pub fn children(e: &Expr) -> Vec<&Expr> {
         | ExprKind::Error => {}
         ExprKind::Str(parts) => {
             for p in parts {
-                if let StrPart::Expr(x) = p {
+                if let StrPart::Expr(x) | StrPart::Fmt(x, ..) = p {
                     out.push(x);
                 }
             }
@@ -323,7 +323,7 @@ pub fn called_fn(ck: &Checker, e: &Expr) -> Option<u32> {
     match ck.calls.get(&e.id)? {
         CallRes::Fn { dispatch, .. } => match dispatch {
             Dispatch::Static(f) | Dispatch::Virtual(f, _) => Some(*f),
-            Dispatch::Dynamic(_, f) => *f,
+            Dispatch::Dynamic(_, f) => f.or_else(|| ck.dyn_targets.get(&e.id).copied()),
         },
         CallRes::FnValue(f) => Some(*f),
         CallRes::Construct { ctor, .. } => Some(*ctor),

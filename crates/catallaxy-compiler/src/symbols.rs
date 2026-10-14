@@ -480,7 +480,21 @@ impl Builder<'_> {
 
     fn decls(&mut self) {
         let ck = self.ck;
+        // A generated constructor's parameters are spanned by the fields they initialize: they
+        // are not source declarations, and would hide the field at its declaration.
+        let generated: FxHashSet<LocalId> = ck
+            .fns
+            .iter()
+            .enumerate()
+            .filter(|(_, fi)| matches!(fi.synth, Synth::Constructor(_)))
+            .filter_map(|(f, _)| ck.fn_locals.get(&(f as FnId)))
+            .flatten()
+            .copied()
+            .collect();
         for l in 0..ck.locals.len() {
+            if generated.contains(&(l as LocalId)) {
+                continue;
+            }
             let s = local_sym(ck, self.sm, l as LocalId);
             self.add(s, ck.locals[l].span, true);
         }
@@ -733,6 +747,8 @@ fn shown_param(ck: &Checker, t: TyId) -> Option<String> {
                 format!("fn {name}({}){}", ps.join(", "), ret(*r))
             }
             OpenReq::BinOp { op, rhs, ret: r, .. } => format!("fn {}(self, {}){}", op.symbol(), show(*rhs), ret(*r)),
+            OpenReq::BinOpRhs { op, lhs, ret: r, .. } => format!("{} {} self{}", show(*lhs), op.symbol(), ret(*r)),
+            OpenReq::SetIndex { index, value, .. } => format!("fn []=(self, {}, {})", show(*index), show(*value)),
             OpenReq::Unary { op, ret: r, .. } => {
                 let sym = match op {
                     crate::ast::UnOp::Neg => "-",

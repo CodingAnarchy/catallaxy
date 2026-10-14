@@ -1,0 +1,5 @@
+# expect: E0342
+# Int arguments are not converted to Float through an untyped parameter.
+class P { fn scale(self, k: Float) -> Float { k } }
+fn f(x) { x.scale(2) }
+f(P.new())
