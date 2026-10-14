@@ -1,0 +1,8 @@
+filled: MemoryError: cannot allocate 800000000000000 bytes, traced: true
+overflow: MemoryError: cannot allocate 4000000000000000000 items of 8 bytes, traced: true
+repeat: MemoryError: cannot allocate 200000000000000 bytes, traced: true
+ljust: MemoryError: cannot allocate 99999999999999 bytes, traced: true
+center: MemoryError: cannot allocate 199999999999998 bytes, traced: true
+negative capacity: ArgumentError: negative capacity, traced: true
+negative size: ArgumentError: negative size, traced: true
+small: ok 31
