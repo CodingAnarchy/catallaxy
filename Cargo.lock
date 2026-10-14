@@ -127,6 +127,7 @@ dependencies = [
  "regex",
  "ring",
  "rustc-hash",
+ "serde",
  "serde_json",
  "ureq",
 ]

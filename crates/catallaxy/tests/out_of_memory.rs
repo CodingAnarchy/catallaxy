@@ -268,3 +268,125 @@ grow_list()
         "{ctx}"
     );
 }
+
+/// What natives that build a collection raise when the allocator refuses one of its buffers:
+/// the vector they collect into, the list they make of it, its strings, a file's contents
+/// (`cannot allocate ...`, `cannot read ...`), or the list the program keeps them in (`cannot
+/// grow a list ...`).
+const NATIVE: [&str; 2] = ["MemoryError: cannot ", OOM];
+
+/// Strings split into lists: `split`, `chars` and `lines`.
+#[test]
+fn string_lists() {
+    let src = r#"fn grow() -> Int {
+  text = "ab cd\n" * 500_000
+  keep: List[List[String]] = []
+  while true {
+    keep.push(text.split(" "))
+    keep.push(text.chars())
+    keep.push(text.lines())
+  }
+  keep.length
+}
+t = spawn { grow() }
+match t.join() {
+  Ok(n) => puts("grew to #{n}")
+  Err(e) => puts("join: #{e}")
+}
+text = "ab cd\n" * 100_000
+puts("after: #{text.split(" ").length + text.chars().length + text.lines().length}")
+text = ""
+grow()
+"#;
+    let o = run_limited("string_lists.cx", src);
+    check(&o, &NATIVE, "after: 800001", &NATIVE, "grow");
+}
+
+/// Parsers: `Json.parse` and `Csv.parse`.
+#[test]
+fn parsers() {
+    let src = r#"fn grow() -> Int {
+  json = "[" + "0," * 1_000_000 + "0]"
+  csv = "a,b,c,d\n" * 250_000
+  docs: List[Dyn] = []
+  tables: List[List[List[String]]] = []
+  while true {
+    docs.push(Json.parse(json).unwrap())
+    tables.push(Csv.parse(csv).unwrap())
+  }
+  docs.length
+}
+t = spawn { grow() }
+match t.join() {
+  Ok(n) => puts("grew to #{n}")
+  Err(e) => puts("join: #{e}")
+}
+doc = Json.parse("[" + "1," * 100_000 + "1]").unwrap()
+rows = Csv.parse("a,b\n" * 100_000).unwrap()
+puts("after: #{if doc == nil { 0 } else { 1 } + rows.length}")
+grow()
+"#;
+    let o = run_limited("parsers.cx", src);
+    check(&o, &NATIVE, "after: 100001", &NATIVE, "grow");
+}
+
+/// Copies of lists and dicts: `sorted`, `reverse`, `+` and `keys`.
+#[test]
+fn list_copies() {
+    let src = r#"fn grow() -> Int {
+  xs = (0...1_000_000).to_list()
+  d: Dict[Int, Int] = [:]
+  for i in 0...200_000 { d[i] = i }
+  keep: List[List[Int]] = []
+  while true {
+    keep.push(xs.sorted())
+    keep.push(xs.reverse())
+    keep.push(xs + xs)
+    keep.push(d.keys())
+  }
+  keep.length
+}
+t = spawn { grow() }
+match t.join() {
+  Ok(n) => puts("grew to #{n}")
+  Err(e) => puts("join: #{e}")
+}
+xs = (0...100_000).to_list()
+puts("after: #{xs.sorted().length + xs.reverse().length + (xs + xs).length}")
+grow()
+"#;
+    let o = run_limited("list_copies.cx", src);
+    check(&o, &NATIVE, "after: 400000", &NATIVE, "grow");
+}
+
+/// Files read whole: `File.read`, `File.read_bytes` and `File.read_lines`.
+#[test]
+fn files() {
+    let dir = std::env::temp_dir().join(format!("catx-oom-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let data = dir.join("files.txt");
+    std::fs::write(&data, "abcdefghi\n".repeat(1_600_000)).unwrap();
+    let src = r#"fn grow(path: String) -> Int {
+  texts: List[String] = []
+  blobs: List[Bytes] = []
+  lines: List[List[String]] = []
+  while true {
+    texts.push(File.read(path).unwrap())
+    blobs.push(File.read_bytes(path).unwrap())
+    lines.push(File.read_lines(path).unwrap())
+  }
+  texts.length
+}
+path = "PATH"
+t = spawn { grow(path) }
+match t.join() {
+  Ok(n) => puts("grew to #{n}")
+  Err(e) => puts("join: #{e}")
+}
+puts("after: #{File.read(path).unwrap().length + File.read_lines(path).unwrap().length}")
+grow(path)
+"#
+    .replace("PATH", data.to_str().unwrap());
+    let o = run_limited("files.cx", &src);
+    check(&o, &NATIVE, "after: 17600000", &NATIVE, "grow");
+}

@@ -9,7 +9,7 @@ use catallaxy_runtime::class::class_of;
 use catallaxy_runtime::dict::DictTable;
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ops;
-use catallaxy_runtime::{intern, panic, ObjKind, RtResult, Value};
+use catallaxy_runtime::{intern, panic, try_push, try_vec, ObjKind, RtResult, Value};
 use catallaxy_vm::slow;
 use catallaxy_vm::{NativeFn, Vm};
 use parking_lot::RwLock;
@@ -33,25 +33,25 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "File.read" => |vm, a| {
             let p = s(a[0])?.to_string();
             let r = crate::fiber::blocking_io(vm, || std::fs::read_to_string(&p));
-            Ok(match r {
+            match r {
                 Ok(text) => {
-                    let v = new_str(vm, &text);
-                    ok(vm, v)
+                    let v = vm.m.try_alloc_str(&text)?;
+                    Ok(ok(vm, v))
                 }
-                Err(e) => err(vm, &format!("{p}: {e}")),
-            })
+                Err(e) => io_err(vm, &p, e),
+            }
         },
         "File.read_lines" => |vm, a| {
             let p = s(a[0])?.to_string();
             let r = crate::fiber::blocking_io(vm, || std::fs::read_to_string(&p));
-            Ok(match r {
+            match r {
                 Ok(text) => {
-                    let items: Vec<Value> = text.lines().map(|l| vm.m.alloc_str(l)).collect();
-                    let l = new_list(vm, items);
-                    ok(vm, l)
+                    vm.m.collect_if_refused();
+                    let l = new_str_list(vm, text.lines())?;
+                    Ok(ok(vm, l))
                 }
-                Err(e) => err(vm, &format!("{p}: {e}")),
-            })
+                Err(e) => io_err(vm, &p, e),
+            }
         },
         "File.write" => |vm, a| {
             let p = s(a[0])?.to_string();
@@ -98,8 +98,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             });
             Ok(match r {
                 Ok(names) => {
-                    let items: Vec<Value> = names.iter().map(|n| vm.m.alloc_str(n)).collect();
-                    let l = new_list(vm, items);
+                    let l = new_str_list(vm, names.iter().map(|n| n.as_str()))?;
                     ok(vm, l)
                 }
                 Err(e) => err(vm, &format!("{p}: {e}")),
@@ -131,19 +130,20 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "Random.float" => |_, _| Ok(Value::from_f64((next_u64() >> 11) as f64 / (1u64 << 53) as f64)),
         "Random.shuffle" => |vm, a| {
-            let mut items = list_read(vm, a[0])?.to_vec();
+            let mut items = list_read(vm, a[0])?.try_to_vec()?;
             for i in (1..items.len()).rev() {
                 let j = (next_u64() % (i as u64 + 1)) as usize;
                 items.swap(i, j);
             }
-            Ok(new_list(vm, items))
+            new_list(vm, items)
         },
         "Random.choice" => |vm, a| {
-            let items = list_read(vm, a[0])?.to_vec();
-            if items.is_empty() {
+            let l = list_read(vm, a[0])?;
+            let n = l.len();
+            if n == 0 {
                 return Ok(Value::NIL);
             }
-            Ok(items[(next_u64() % items.len() as u64) as usize])
+            Ok(l.get((next_u64() % n as u64) as usize).unwrap_or(Value::NIL))
         },
 
         "Env.get" => |vm, a| {
@@ -177,10 +177,11 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
                     None => all.remove(k),
                 };
             }
+            // Nothing roots the new dict: its inserts must not collect.
             let d = vm.m.alloc_dict(DictTable::new());
             for (k, v) in all {
                 let (kv, vv) = (new_str(vm, &k), new_str(vm, &v));
-                slow::dict_set(vm, d, kv, vv)?;
+                slow::dict_set_unrooted(vm, d, kv, vv)?;
             }
             Ok(d)
         },
@@ -193,13 +194,13 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             let v = to_json(vm, a[0], 0)?;
             let mut text = String::new();
             v.write(&mut text, None);
-            Ok(new_str(vm, &text))
+            vm.m.try_alloc_str(&text)
         },
         "Json.pretty" => |vm, a| {
             let v = to_json(vm, a[0], 0)?;
             let mut text = String::new();
             v.write(&mut text, Some(0));
-            Ok(new_str(vm, &text))
+            vm.m.try_alloc_str(&text)
         },
 
         "__dyn_member" => dyn_member,
@@ -343,15 +344,62 @@ fn json_parse(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let text = s(a[0])?;
     // serde_json checks the text and words the errors; `Pj` then reads the checked text
     // again so that integers keep every digit.
-    if let Err(e) = serde_json::from_str::<serde_json::Value>(text) {
+    if let Err(e) = serde_json::from_str::<JsonCheck>(text) {
         return Ok(err(vm, &format!("invalid JSON: {e}")));
     }
-    let j = Pj::parse(text);
-    let v = from_json(vm, &j)?;
+    vm.m.collect_if_refused();
+    let j = Pj::parse(text)?;
+    let v = from_json(vm, j)?;
     vm.extra_roots().push(v);
     let r = ok(vm, v);
     vm.extra_roots().pop();
     Ok(r)
+}
+
+/// Checks JSON text as parsing it into a `serde_json::Value` would (the same errors, including
+/// numbers out of range), without building anything.
+struct JsonCheck;
+
+impl<'de> serde::Deserialize<'de> for JsonCheck {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        d.deserialize_any(JsonCheck)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for JsonCheck {
+    type Value = JsonCheck;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("any valid JSON value")
+    }
+    fn visit_bool<E>(self, _: bool) -> Result<JsonCheck, E> {
+        Ok(JsonCheck)
+    }
+    fn visit_i64<E>(self, _: i64) -> Result<JsonCheck, E> {
+        Ok(JsonCheck)
+    }
+    fn visit_u64<E>(self, _: u64) -> Result<JsonCheck, E> {
+        Ok(JsonCheck)
+    }
+    fn visit_f64<E>(self, _: f64) -> Result<JsonCheck, E> {
+        Ok(JsonCheck)
+    }
+    fn visit_str<E>(self, _: &str) -> Result<JsonCheck, E> {
+        Ok(JsonCheck)
+    }
+    fn visit_unit<E>(self) -> Result<JsonCheck, E> {
+        Ok(JsonCheck)
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<JsonCheck, A::Error> {
+        while seq.next_element::<JsonCheck>()?.is_some() {}
+        Ok(JsonCheck)
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<JsonCheck, A::Error> {
+        while map.next_key::<JsonCheck>()?.is_some() {
+            map.next_value::<JsonCheck>()?;
+        }
+        Ok(JsonCheck)
+    }
 }
 
 /// A parsed JSON value whose numbers are kept as their source text. serde_json's `Value`
@@ -370,8 +418,9 @@ enum Pj<'a> {
 
 impl<'a> Pj<'a> {
     /// Parses text that serde_json has already accepted, so it does no error checking
-    /// (and nests no deeper than serde_json's recursion limit).
-    fn parse(text: &'a str) -> Pj<'a> {
+    /// (and nests no deeper than serde_json's recursion limit). Arrays raise a `MemoryError`
+    /// if they cannot grow.
+    fn parse(text: &'a str) -> RtResult<Pj<'a>> {
         let mut pos = 0;
         Pj::value(text, &mut pos)
     }
@@ -382,10 +431,10 @@ impl<'a> Pj<'a> {
         }
     }
 
-    fn value(text: &'a str, pos: &mut usize) -> Pj<'a> {
+    fn value(text: &'a str, pos: &mut usize) -> RtResult<Pj<'a>> {
         let b = text.as_bytes();
         Pj::skip_ws(b, pos);
-        match b[*pos] {
+        Ok(match b[*pos] {
             b'n' => {
                 *pos += 4;
                 Pj::Null
@@ -407,10 +456,10 @@ impl<'a> Pj<'a> {
                     match b[*pos] {
                         b']' => {
                             *pos += 1;
-                            return Pj::Arr(items);
+                            return Ok(Pj::Arr(items));
                         }
                         b',' => *pos += 1,
-                        _ => items.push(Pj::value(text, pos)),
+                        _ => try_push(&mut items, Pj::value(text, pos)?)?,
                     }
                 }
             }
@@ -422,14 +471,14 @@ impl<'a> Pj<'a> {
                     match b[*pos] {
                         b'}' => {
                             *pos += 1;
-                            return Pj::Obj(map);
+                            return Ok(Pj::Obj(map));
                         }
                         b',' => *pos += 1,
                         _ => {
                             let k = Pj::string(text, pos);
                             Pj::skip_ws(b, pos);
                             *pos += 1; // the `:`
-                            map.insert(k, Pj::value(text, pos));
+                            map.insert(k, Pj::value(text, pos)?);
                         }
                     }
                 }
@@ -441,7 +490,7 @@ impl<'a> Pj<'a> {
                 }
                 Pj::Num(&text[start..*pos])
             }
-        }
+        })
     }
 
     /// Reads the string literal at `pos` (its opening quote) and decodes its escapes.
@@ -457,10 +506,12 @@ impl<'a> Pj<'a> {
     }
 }
 
-fn from_json(vm: &mut Vm, j: &Pj) -> RtResult<Value> {
+/// Builds the value, consuming the tree as it goes. Nothing roots the values built so far, so
+/// nothing here may collect: allocations that are refused raise a `MemoryError` at once.
+fn from_json(vm: &mut Vm, j: Pj) -> RtResult<Value> {
     Ok(match j {
         Pj::Null => Value::NIL,
-        Pj::Bool(b) => Value::bool(*b),
+        Pj::Bool(b) => Value::bool(b),
         Pj::Num(t) => {
             // A literal without a fraction or exponent is an `Int`, however wide.
             if t.bytes().any(|c| matches!(c, b'.' | b'e' | b'E')) {
@@ -471,21 +522,24 @@ fn from_json(vm: &mut Vm, j: &Pj) -> RtResult<Value> {
                 vm.m.int_from_big(t.parse().unwrap_or_default())
             }
         }
-        Pj::Str(s) => new_str(vm, s),
+        Pj::Str(s) => vm.m.try_alloc_str_nogc(&s)?,
         Pj::Arr(items) => {
-            let mut out = Vec::with_capacity(items.len());
+            let mut out = try_vec(items.len())?;
             for x in items {
                 out.push(from_json(vm, x)?);
             }
-            // No user code runs while building, so the elements need no rooting.
-            new_list(vm, out)
+            new_list(vm, out)?
         }
         Pj::Obj(map) => {
-            let d = vm.m.alloc_dict(DictTable::record(map.len()));
+            let table = match DictTable::try_record(map.len()) {
+                Ok(t) => t,
+                Err(l) => return catallaxy_runtime::refused(format!("cannot allocate a table of {} bytes", l.size())),
+            };
+            let d = vm.m.alloc_dict(table);
             for (k, x) in map {
-                let kv = new_str(vm, k);
+                let kv = vm.m.try_alloc_str_nogc(&k)?;
                 let xv = from_json(vm, x)?;
-                slow::dict_set(vm, d, kv, xv)?;
+                slow::dict_set_unrooted(vm, d, kv, xv)?;
             }
             d
         }
@@ -587,9 +641,9 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
             let items: Vec<Value> = if kind_of(v) == ObjKind::Tuple {
                 unsafe { as_tuple(v) }.elems().to_vec()
             } else {
-                list_read(vm, v)?.to_vec()
+                list_read(vm, v)?.try_to_vec()?
             };
-            let mut out = Vec::with_capacity(items.len());
+            let mut out = try_vec(items.len())?;
             for x in items {
                 out.push(to_json(vm, x, depth + 1)?);
             }
