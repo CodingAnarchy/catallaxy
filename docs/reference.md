@@ -225,6 +225,14 @@ Narrowing: after `if x != nil`, `if x is T`, `if let`, and in `match` arms on a 
 variable has the narrowed type for the rest of that branch. `x ??= v` and `x = v` with a non-nil `v` also
 narrow `x` to non-nil.
 
+A loop body runs again after itself, so a narrowing from before a loop holds in the loop (condition
+included) only if every assignment to the variable in the loop visibly keeps it: `x -= 1`, `x = x * 2`,
+`x ??= 0`, a literal, `T.new(...)`, `v!` or a call of a function whose declared result fits. Otherwise,
+as for `x = maybe()` or an assignment inside a closure, the narrowing does not apply in the loop or after
+it, and the body must check `x` again. A narrowing the loop keeps also holds after the loop. In the rare
+case where a kept narrowing is broken by the checked type of an assignment (an operator method that
+returns an optional, say), the assignment is E0324.
+
 A field path on a local or `self` (`n.next`, `self.head.next`) is narrowed by `!= nil` / `== nil` tests
 and by assigning it a non-nil value, as long as nothing could have changed it since: the narrowing ends at
 any assignment to a field of that name, a reassignment of the root variable, any call (unless every field
