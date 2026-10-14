@@ -177,16 +177,11 @@ mod tests {
 
     #[test]
     fn refused_buffers_are_reported() {
-        // Sizes that do not fit an allocation at all.
+        // Sizes that do not fit an allocation at all. (A size the allocator refuses is covered
+        // by the out-of-memory tests of the `catallaxy` crate: Miri and the sanitizers stop at
+        // such an attempt instead of returning null.)
         for cap in [usize::MAX / 8, usize::MAX] {
             assert!(WordBuf::try_alloc(cap, 0).is_err(), "{cap}");
-        }
-        // More than any machine has: the allocator refuses. (Miri stops at the attempt instead.)
-        // (The buffer goes through `black_box` so the optimizer cannot drop the allocation.)
-        #[cfg(not(miri))]
-        if let Ok(b) = WordBuf::try_alloc(std::hint::black_box(1 << 56), 0) {
-            std::hint::black_box(b);
-            panic!("allocated 2^59 bytes");
         }
         let b = WordBuf::try_alloc_from(4, [1, 2], 9).unwrap();
         // SAFETY: just allocated, never published.
