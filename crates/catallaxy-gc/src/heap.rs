@@ -180,27 +180,83 @@ const RESERVE_SEGMENTS: usize = 16;
 const HEADROOM: usize = 2 << 20;
 static HEADROOM_BLOCK: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
 
-/// Hands the headroom block back to the OS, if it is still held. Called where an allocation is
-/// refused, before reporting it. A later collection maps it again if it can.
-pub fn release_headroom() {
+/// Hands the headroom block back to the OS, if it is still held, and returns whether it was.
+/// Called where an allocation is refused, before reporting or retrying it; the next major
+/// collection maps it again, and if it cannot, the heap is out of memory. Takes no locks and
+/// does not allocate, so the global allocator can call it.
+pub fn release_headroom() -> bool {
     let p = HEADROOM_BLOCK.swap(ptr::null_mut(), Ordering::AcqRel);
-    if !p.is_null() {
-        // SAFETY: the block came from `os::map` and was never used.
-        unsafe { os::unmap(p, HEADROOM) };
+    if p.is_null() {
+        return false;
     }
+    // SAFETY: the block came from `os::map` and was never used.
+    unsafe { os::unmap(p, HEADROOM) };
+    // Collect soon: that restores the block, or finds the heap out of memory.
+    stats::force_collection();
+    true
 }
 
-/// Maps the headroom block if it is not held (at startup, and after collections that find
-/// memory again).
-pub(crate) fn restore_headroom() {
-    if !HEADROOM_BLOCK.load(Ordering::Acquire).is_null() {
-        return;
+/// Whether the headroom block is held.
+pub(crate) fn headroom_held() -> bool {
+    !HEADROOM_BLOCK.load(Ordering::Acquire).is_null()
+}
+
+/// Maps the headroom block if it is not held (at startup, and in collections). Returns whether
+/// it is held now.
+pub(crate) fn restore_headroom() -> bool {
+    if headroom_held() {
+        return true;
     }
     let p = os::map(HEADROOM);
-    if !p.is_null() && HEADROOM_BLOCK.compare_exchange(ptr::null_mut(), p, Ordering::AcqRel, Ordering::Acquire).is_err()
-    {
+    if p.is_null() {
+        return false;
+    }
+    if HEADROOM_BLOCK.compare_exchange(ptr::null_mut(), p, Ordering::AcqRel, Ordering::Acquire).is_err() {
         // SAFETY: just mapped, never used.
         unsafe { os::unmap(p, HEADROOM) };
+    }
+    true
+}
+
+/// The global allocator for programs that embed the runtime (`catx` uses it): the system
+/// allocator, except that a refused request releases the headroom block and is retried once.
+/// The refusal also schedules a collection, which raises a `MemoryError` at a safepoint if
+/// memory does not come back (see the module docs). So allocations the runtime does not check
+/// itself, in the standard library's collections, get one more chance before the process aborts.
+pub struct Allocator;
+
+// SAFETY: every call is forwarded to the system allocator with the same arguments.
+unsafe impl std::alloc::GlobalAlloc for Allocator {
+    #[inline]
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let p = std::alloc::System.alloc(layout);
+        if p.is_null() && release_headroom() {
+            return std::alloc::System.alloc(layout);
+        }
+        p
+    }
+
+    #[inline]
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        let p = std::alloc::System.alloc_zeroed(layout);
+        if p.is_null() && release_headroom() {
+            return std::alloc::System.alloc_zeroed(layout);
+        }
+        p
+    }
+
+    #[inline]
+    unsafe fn dealloc(&self, p: *mut u8, layout: Layout) {
+        std::alloc::System.dealloc(p, layout)
+    }
+
+    #[inline]
+    unsafe fn realloc(&self, p: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let q = std::alloc::System.realloc(p, layout, new_size);
+        if q.is_null() && release_headroom() {
+            return std::alloc::System.realloc(p, layout, new_size);
+        }
+        q
     }
 }
 

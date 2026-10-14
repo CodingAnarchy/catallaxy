@@ -437,18 +437,19 @@ Annotate the parameter to use any of these.
   thread `join` returns it as `Err`, and the program can carry on once the data is dropped):
   - A single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,
     `s * n` or `s.ljust(n)` with a huge `n`, is refused up front.
-  - When the system refuses memory for the heap, the runtime keeps going on a small emergency reserve,
-    collects, and if the collection frees too little, the next thread to reach a safepoint (a call or a
-    loop iteration) panics. With `CATX_MAX_HEAP` set, a collection that finds more live data than the
-    limit does the same.
+  - When the system refuses memory for the heap, or for one of the runtime's internal buffers, the runtime
+    keeps going on a small emergency reserve, collects, and if the collection frees too little, the next
+    thread to reach a safepoint (a call or a loop iteration) panics. With `CATX_MAX_HEAP` set, a
+    collection that finds more live data than the limit does the same.
   - Building strings (`+`, interpolation, `*`, padding, `StringBuilder`) panics where the allocator
     refuses the string, after a collection and one retry.
   - Starting a thread or fiber whose stacks cannot be allocated panics in `spawn` or `Fiber.start`
     (neither returns a `Result`). For a thread, the OS may refuse it instead, for lack of memory or a
     thread limit: that panic starts `ThreadError:`.
-- What is not covered: an allocation inside the runtime that the runtime does not check (Rust's
-  standard collections, used for things like list and dict buffers, still abort the process when the
-  allocator fails), and an emergency reserve used up before a safepoint is reached. On Linux with memory
+- What is not covered: an internal allocation refused again after the reserve is used up, before a
+  safepoint is reached, still aborts the process (`memory allocation of N bytes failed`). That includes
+  list and dict buffers, which the runtime does not yet check itself. A program embedding the runtime
+  through the C API uses its own allocator and gets no second chance for these. On Linux with memory
   overcommit, and under memory pressure on macOS, a program that grows gradually is usually killed by the
   OS before any allocation fails; set `CATX_MAX_HEAP` below the machine's memory to turn that into a
   `MemoryError`.

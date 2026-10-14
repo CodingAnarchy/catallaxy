@@ -19,7 +19,7 @@ pub use collector::{
     RootSource, ThreadRecord, ThreadState, Tracer,
 };
 pub use header::{GcVTable, Header, ObjLockGuard, ObjState, HEADER_SIZE};
-pub use heap::{set_generational, size_class_of, total_heap_bytes, LocalHeap, MAX_SMALL, SIZE_CLASSES};
+pub use heap::{set_generational, size_class_of, total_heap_bytes, Allocator, LocalHeap, MAX_SMALL, SIZE_CLASSES};
 
 /// Runs `f` with the thread marked as in native code (blocking I/O, waiting on locks or
 /// channels). `f` must not touch the heap.

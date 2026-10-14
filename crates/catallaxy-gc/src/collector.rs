@@ -545,19 +545,21 @@ fn collect(me: &ThreadRecord) {
     POOL.sweep_large(color);
     POOL.mark_all_unswept();
     stats::after_collection(GLOBAL.mark.marked_bytes.load(Ordering::SeqCst), threads.len());
-    // If an allocation drew on the emergency reserve (the OS refused a segment), sweep now, so
-    // that segments this collection emptied are known, and refill it (`collect_to_free` asks
-    // for the sweep too). If that fails the heap
-    // is out of memory: the next thread at a safepoint raises a MemoryError. A collection that
-    // finds the reserve whole withdraws an error no thread has raised yet.
+    // If the OS refused memory (an allocation drew on the emergency reserve, or released the
+    // headroom block), sweep now, so that the memory this collection freed is known, then refill
+    // the reserve and map the headroom again (`collect_to_free` asks for the sweep too). If that
+    // fails the heap is out of memory: the next thread at a safepoint raises a MemoryError, and
+    // the next collection comes soon. A collection that finds memory again withdraws an error no
+    // thread has raised yet.
     let sweep_all = SWEEP_ALL.swap(false, Ordering::SeqCst);
-    if sweep_all || POOL.reserve_short() {
+    let refused = POOL.reserve_short() || !crate::heap::headroom_held();
+    if sweep_all || refused {
         POOL.finish_sweeping();
     }
-    let out_of_memory = POOL.reserve_short() && !POOL.refill_reserve();
+    let out_of_memory = refused && !(POOL.refill_reserve() && crate::heap::restore_headroom());
     crate::limits::note_out_of_memory(out_of_memory);
-    if !out_of_memory {
-        crate::heap::restore_headroom();
+    if out_of_memory {
+        stats::collect_soon();
     }
     // Every page is swept now (step 2), so wholly empty segments are known; keep enough empty
     // pages for the allocation budget until the next collection and return the rest.

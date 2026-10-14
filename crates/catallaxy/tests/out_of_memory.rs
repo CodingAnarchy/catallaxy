@@ -18,6 +18,12 @@ const CATX: &str = env!("CARGO_BIN_EXE_catx");
 /// 256 MB native stack, reserved but untouched), which leaves a few hundred MB to fill.
 const LIMIT: u64 = 768 << 20;
 
+/// The error raised at a safepoint when the system refuses memory the runtime cannot report on
+/// the spot (a heap segment, or an allocation inside a standard collection, which the global
+/// allocator retries once with the headroom released). Any site may end up with it, when the
+/// system refuses one of those allocations first.
+const OOM: &str = "MemoryError: out of memory: the system refused an allocation";
+
 /// The programs fill memory, so they run one at a time.
 static SERIAL: Mutex<()> = Mutex::new(());
 
@@ -119,8 +125,7 @@ head = nil
 grow()
 "#;
     let o = run_limited("segments.cx", src);
-    let msg = "MemoryError: out of memory: the system refused to grow the heap";
-    check(&o, &[msg], "after: 999999", &[msg], "grow");
+    check(&o, &[OOM], "after: 999999", &[OOM], "grow");
 }
 
 /// Strings: a concatenation and a `StringBuilder` grown until the allocator refuses.
@@ -151,16 +156,12 @@ s = ""
 grow()
 "#;
     let o = run_limited("strings.cx", src);
-    check(
-        &o,
-        &["MemoryError: cannot allocate a string of "],
-        "after: 32768000",
-        &["MemoryError: cannot allocate a string of "],
-        "grow",
-    );
+    let errs = ["MemoryError: cannot allocate a string of ", OOM];
+    check(&o, &errs, "after: 32768000", &errs, "grow");
     let ctx = format!("{}{}", o.stdout, o.stderr);
+    let built = o.stdout.lines().nth(1).unwrap_or("");
     assert!(
-        o.stdout.lines().nth(1).is_some_and(|l| l.starts_with("join: MemoryError: cannot grow a StringBuilder")),
+        ["MemoryError: cannot grow a StringBuilder", OOM].iter().any(|e| built.starts_with(&format!("join: {e}"))),
         "{ctx}"
     );
 }
@@ -196,7 +197,7 @@ puts("after: #{(spawn { 6 * 7 }).join().unwrap()}")
 start_all(Channel.new(), Channel.new())
 "#;
     let o = run_limited("threads.cx", src);
-    let errs = ["ThreadError: cannot start a thread", "MemoryError: cannot allocate a 8192 KB register stack"];
+    let errs = ["ThreadError: cannot start a thread", "MemoryError: cannot allocate a 8192 KB register stack", OOM];
     check(&o, &errs, "after: 42", &errs, "start_all");
 }
 
@@ -217,7 +218,10 @@ puts("after: #{Fiber.start { 6 * 7 }.join().unwrap()}")
 start_all()
 "#;
     let o = run_limited("fibers.cx", src);
-    let errs =
-        ["MemoryError: cannot allocate a 256 KB fiber stack", "MemoryError: cannot allocate a 512 KB register stack"];
+    let errs = [
+        "MemoryError: cannot allocate a 256 KB fiber stack",
+        "MemoryError: cannot allocate a 512 KB register stack",
+        OOM,
+    ];
     check(&o, &errs, "after: 42", &errs, "start_all");
 }

@@ -140,7 +140,7 @@ fn take_pending_slow() -> Option<String> {
     }
     if OUT_OF_MEMORY.swap(false, Ordering::AcqRel) {
         return Some(format!(
-            "MemoryError: out of memory: the system refused to grow the heap ({:.1} MB live after collection)",
+            "MemoryError: out of memory: the system refused an allocation ({:.1} MB live after collection)",
             crate::stats::live_bytes() as f64 / 1e6
         ));
     }

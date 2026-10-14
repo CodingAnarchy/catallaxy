@@ -47,6 +47,12 @@ pub fn note_allocated(bytes: usize) {
 
 pub(crate) fn note_freed(_bytes: usize) {}
 
+/// Makes the next allocation that is counted request a collection (memory is short). Takes no
+/// locks, so the global allocator may call it.
+pub(crate) fn force_collection() {
+    THRESHOLD.store(0, Ordering::Relaxed);
+}
+
 pub(crate) fn after_collection(live_bytes: usize, mutators: usize) {
     LIVE_AFTER_GC.store(live_bytes, Ordering::Relaxed);
     ALLOCATED.store(0, Ordering::Relaxed);
@@ -58,6 +64,12 @@ pub(crate) fn after_collection(live_bytes: usize, mutators: usize) {
     THRESHOLD.store(crate::limits::cap_budget(t, live_bytes), Ordering::Relaxed);
     crate::limits::after_collection(live_bytes);
     COLLECTIONS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// After a collection that found the heap out of memory: the next one comes after a small
+/// budget, to notice soon when the program has let go of memory.
+pub(crate) fn collect_soon() {
+    THRESHOLD.fetch_min(min_threshold(), Ordering::Relaxed);
 }
 
 /// The allocation budget until the next major collection.

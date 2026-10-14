@@ -10,6 +10,10 @@ mod run;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+/// The system allocator, with the runtime's out-of-memory headroom (see `catallaxy_gc::Allocator`).
+#[global_allocator]
+static ALLOC: catallaxy_gc::Allocator = catallaxy_gc::Allocator;
+
 const USAGE: &str = "\
 catx — the Catallaxy language
 
