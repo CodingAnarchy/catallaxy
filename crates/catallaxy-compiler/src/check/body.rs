@@ -1,6 +1,6 @@
 //! Function bodies: contexts, scopes, locals, narrowing and statements.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -257,7 +257,7 @@ impl Checker {
     fn check_decl_body(&mut self, fid: FnId, decl: &FnDecl, body: &Block) {
         let f = self.fns[fid as usize].clone();
         self.push_ctx(fid, CtxKind::Function, f.ret, decl.span);
-        self.ctx().scan = Rc::new(AssignScan::new(&body.stmts));
+        self.ctx().scan = Arc::new(AssignScan::new(&body.stmts));
         if f.self_kind != SelfKind::None {
             let s = self.new_local("self", f.self_ty, decl.span, true);
             self.ctx().scopes[0].insert("self".into(), s);
@@ -367,7 +367,7 @@ impl Checker {
         self.push_ctx(fid, CtxKind::Function, nil, Span::default());
         let items = self.mods[m as usize].ast.items.clone();
         let stmts = items.iter().filter_map(|i| if let Item::Stmt(e) = i { Some(e) } else { None });
-        self.ctx().scan = Rc::new(AssignScan::new(stmts));
+        self.ctx().scan = Arc::new(AssignScan::new(stmts));
         let mut last = nil;
         for item in &items {
             match item {

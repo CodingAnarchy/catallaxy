@@ -62,6 +62,7 @@ pub mod builtin {
     pub const FIRST_USER: u32 = 19;
 }
 
+#[derive(Clone)]
 pub struct Types {
     list: Vec<Ty>,
     map: FxHashMap<Ty, TyId>,

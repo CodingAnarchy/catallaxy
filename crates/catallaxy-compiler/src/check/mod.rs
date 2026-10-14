@@ -71,6 +71,7 @@ impl From<LocalId> for NKey {
     }
 }
 
+#[derive(Clone)]
 pub struct FnCtx {
     pub fn_id: FnId,
     pub kind: CtxKind,
@@ -91,7 +92,7 @@ pub struct FnCtx {
     /// Locals whose values were moved away.
     pub moved: FxHashSet<LocalId>,
     /// The assignments in this context's body (closures included), for the locals it declares.
-    pub scan: std::rc::Rc<AssignScan>,
+    pub scan: std::sync::Arc<AssignScan>,
     pub span: Span,
 }
 
@@ -127,6 +128,7 @@ impl AssignScan {
     }
 }
 
+#[derive(Clone)]
 pub struct Checker {
     pub types: Types,
     pub diags: Vec<Diagnostic>,
@@ -199,6 +201,11 @@ pub struct Checker {
     pub loop_dropped: Vec<LocalId>,
     /// Every method name of every type (built on first use, for loop pre-scans).
     pub method_names: FxHashSet<String>,
+    /// While set, member names that the loop pre-scan read as fields because no type had a
+    /// method of that name are collected in `method_name_misses`: a later module declaring such
+    /// a method would have changed the scan (see `driver::Prelude`).
+    pub record_method_name_misses: bool,
+    pub method_name_misses: FxHashSet<String>,
     /// When set, `Open` requirements are recorded against this function.
     pub open_owner: Option<FnId>,
     pub well_known: WellKnown,
@@ -239,13 +246,14 @@ pub enum Control {
     ReturnUnwind(LocalId),
 }
 
+#[derive(Clone)]
 pub struct LoopCtx {
     pub breaks: Vec<TyId>,
     /// The `for` body block itself (break/continue unwind instead of jumping).
     pub is_foreach: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct WellKnown {
     pub result: Option<EnumId>,
     pub enumerable: Option<IfaceId>,
@@ -303,6 +311,8 @@ impl Checker {
             loop_facts: Vec::new(),
             loop_dropped: Vec::new(),
             method_names: FxHashSet::default(),
+            record_method_name_misses: false,
+            method_name_misses: FxHashSet::default(),
             open_owner: None,
             well_known: WellKnown::default(),
             checked_bodies: FxHashSet::default(),
