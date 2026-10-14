@@ -307,17 +307,35 @@ impl ListObj {
     /// `p` must point to freshly allocated, unpublished list memory of
     /// [`ListObj::size_for`]`(icap)` bytes.
     pub(crate) unsafe fn init(p: *mut ListObj, items: Vec<Value>, icap: usize) {
+        if let Err(layout) = Self::try_init(p, items, icap) {
+            std::alloc::handle_alloc_error(layout);
+        }
+    }
+
+    /// As [`ListObj::init`], but if the buffer cannot be had, frees `items`, leaves an empty
+    /// list and returns the layout the allocator refused.
+    ///
+    /// # Safety
+    /// As for [`ListObj::init`].
+    pub(crate) unsafe fn try_init(p: *mut ListObj, items: Vec<Value>, icap: usize) -> Result<(), std::alloc::Layout> {
         let len = items.len();
         if icap >= len && icap > 0 {
             // Small: copy into the object and give the vector's allocation back.
             Self::init_inline(p, items.iter().map(|v| v.0), icap, len);
-            return;
+            return Ok(());
         }
         Self::init_inline(p, std::iter::empty(), 0, 0);
         // `Value` is a transparent `u64`, so the vector's allocation is reused as is.
         let mut items = std::mem::ManuallyDrop::new(items);
         let words = Vec::from_raw_parts(items.as_mut_ptr() as *mut u64, len, items.capacity());
-        Self::init_buf(p, WordBuf::from_vec(words, Value::NIL.0), len);
+        match WordBuf::try_from_vec(words, Value::NIL.0) {
+            Ok(buf) => Self::init_buf(p, buf, len),
+            Err(layout) => {
+                Self::init_buf(p, WordBuf::empty(), 0);
+                return Err(layout);
+            }
+        }
+        Ok(())
     }
 
     /// As [`ListObj::init`], copying `items` into a buffer of `cap` (at least `items.len()`):
@@ -326,14 +344,36 @@ impl ListObj {
     /// # Safety
     /// As for [`ListObj::init`].
     pub(crate) unsafe fn init_from_slice(p: *mut ListObj, items: &[Value], cap: usize, icap: usize) {
+        if let Err(layout) = Self::try_init_from_slice(p, items, cap, icap) {
+            std::alloc::handle_alloc_error(layout);
+        }
+    }
+
+    /// As [`ListObj::init_from_slice`], but if the buffer cannot be had, leaves an empty list
+    /// and returns the layout the allocator refused.
+    ///
+    /// # Safety
+    /// As for [`ListObj::init`].
+    pub(crate) unsafe fn try_init_from_slice(
+        p: *mut ListObj,
+        items: &[Value],
+        cap: usize,
+        icap: usize,
+    ) -> Result<(), std::alloc::Layout> {
         let cap = cap.max(items.len());
         if icap >= cap && icap > 0 {
             Self::init_inline(p, items.iter().map(|v| v.0), icap, items.len());
-            return;
+            return Ok(());
         }
         Self::init_inline(p, std::iter::empty(), 0, 0);
-        let buf = WordBuf::alloc_from(cap, items.iter().map(|v| v.0), Value::NIL.0);
-        Self::init_buf(p, buf, items.len());
+        match WordBuf::try_alloc_from(cap, items.iter().map(|v| v.0), Value::NIL.0) {
+            Ok(buf) => Self::init_buf(p, buf, items.len()),
+            Err(layout) => {
+                Self::init_buf(p, WordBuf::empty(), 0);
+                return Err(layout);
+            }
+        }
+        Ok(())
     }
 
     /// Writes the inline buffer (`icap` slots holding `items`, then nil) and, if `icap > 0`,
@@ -402,6 +442,16 @@ impl ListObj {
         let n = self.len();
         let slots = self.slots();
         slots[..n.min(slots.len())].iter().map(|x| Value(x.load(Ordering::Acquire))).collect()
+    }
+
+    /// As [`ListObj::to_vec`], raising a `MemoryError` if the vector cannot be had.
+    pub fn try_to_vec(&self) -> crate::RtResult<Vec<Value>> {
+        let n = self.len();
+        let slots = self.slots();
+        let items = &slots[..n.min(slots.len())];
+        let mut v = crate::try_vec(items.len())?;
+        v.extend(items.iter().map(|x| Value(x.load(Ordering::Acquire))));
+        Ok(v)
     }
 
     pub fn capacity(&self) -> usize {
@@ -520,7 +570,15 @@ impl ListObj {
         access: Access,
         f: impl FnOnce(&mut Vec<Value>) -> R,
     ) -> Result<R, std::alloc::Layout> {
-        let mut items = self.to_vec();
+        // The copy, with room for one more item (`insert`, `unshift`), is refused like the
+        // buffer is.
+        let slots = self.slots();
+        let old = &slots[..self.len().min(slots.len())];
+        let mut items = Vec::new();
+        if items.try_reserve_exact(old.len() + 1).is_err() {
+            return Err(std::alloc::Layout::array::<Value>(old.len() + 1).unwrap_or(std::alloc::Layout::new::<u8>()));
+        }
+        items.extend(old.iter().map(|x| Value(x.load(Ordering::Acquire))));
         let r = f(&mut items);
         self.try_replace(&items, access)?;
         Ok(r)

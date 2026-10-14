@@ -6,7 +6,7 @@ use catallaxy_runtime::dict::DictTable;
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership::{self, Access};
-use catallaxy_runtime::{panic, try_vec, ObjKind, RtResult, Trap, Value};
+use catallaxy_runtime::{panic, try_push, try_vec, ObjKind, RtResult, Trap, Value};
 use catallaxy_vm::slow;
 use catallaxy_vm::{NativeFn, Vm};
 
@@ -17,7 +17,7 @@ const MAX_RESERVED: usize = 1 << 24;
 
 pub fn lookup(name: &str) -> Option<NativeFn> {
     Some(match name {
-        "List.new" => |vm, _| Ok(new_list(vm, Vec::new())),
+        "List.new" => |vm, _| new_list(vm, Vec::new()),
         "List.with_capacity" => |vm, a| {
             let n = int(a[0])?;
             if n < 0 {
@@ -25,16 +25,17 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             }
             // A hint: at most MAX_RESERVED items are reserved up front, so a large guess
             // cannot claim memory the list never uses.
-            Ok(new_list(vm, try_vec((n as usize).min(MAX_RESERVED))?))
+            let items = vm.m.try_vec_collecting((n as usize).min(MAX_RESERVED))?;
+            new_list(vm, items)
         },
         "List.filled" => |vm, a| {
             let n = int(a[0])?;
             if n < 0 {
                 return panic("ArgumentError: negative size");
             }
-            let mut items = try_vec(n as usize)?;
+            let mut items = vm.m.try_vec_collecting(n as usize)?;
             items.resize(n as usize, a[1]);
-            Ok(new_list(vm, items))
+            new_list(vm, items)
         },
         "List.length" => |vm, a| Ok(Value::small_int(list_read(vm, a[0])?.len() as i64)),
         "List.push" => |vm, a| {
@@ -90,10 +91,11 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
                     ownership::publish_into_shared(&vm.m, x)?;
                 }
             }
-            list_write(vm, a[0], &[], |v| {
-                v.extend_from_slice(&other);
-                Value::NIL
-            })
+            let grown = list_write(vm, a[0], &[], |v| v.try_reserve(other.len()).map(|_| v.extend_from_slice(&other)))?;
+            match grown {
+                Ok(()) => Ok(Value::NIL),
+                Err(_) => catallaxy_runtime::refused(format!("cannot grow a list by {} items", other.len())),
+            }
         },
         "List.[]" => |vm, a| slow::list_get(vm, a[0], a[1]),
         "__vacant" => |_, _| Ok(Value::NIL),
@@ -114,16 +116,16 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             let n = items.len() as i64;
             let s0 = if start < 0 { (start + n).max(0) } else { start.min(n) };
             let e0 = s0.saturating_add(len.max(0)).min(n);
-            Ok(new_list(vm, items[s0 as usize..e0 as usize].to_vec()))
+            vm.m.try_alloc_list_from_slice(&items[s0 as usize..e0 as usize], (e0 - s0) as usize)
         },
         "List.dup" => |vm, a| {
             let items = list_items(vm, a[0])?;
-            Ok(new_list(vm, items))
+            new_list(vm, items)
         },
         "List.reverse" => |vm, a| {
             let mut items = list_items(vm, a[0])?;
             items.reverse();
-            Ok(new_list(vm, items))
+            new_list(vm, items)
         },
         "List.reverse_in_place" => |vm, a| {
             list_write(vm, a[0], &[], |v| {
@@ -159,7 +161,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "List.sorted" => |vm, a| {
             let items = list_items(vm, a[0])?;
             let sorted = sort_values(vm, items)?;
-            Ok(new_list(vm, sorted))
+            new_list(vm, sorted)
         },
         "List.sort_in_place" => |vm, a| {
             let items = list_items(vm, a[0])?;
@@ -177,8 +179,9 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
                 return panic("ArgumentError: keys and items differ in length");
             }
             let order = sort_indices(vm, &keys)?;
-            let out = order.into_iter().map(|i| items[i]).collect();
-            Ok(new_list(vm, out))
+            let mut out = try_vec(order.len())?;
+            out.extend(order.into_iter().map(|i| items[i]));
+            new_list(vm, out)
         },
 
         "Dict.new" => |vm, _| Ok(vm.m.alloc_dict(DictTable::new())),
@@ -197,24 +200,25 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             Ok(Value::NIL)
         },
         "Dict.keys" | "Set.to_list" => |vm, a| {
-            let keys = dict_read(vm, a[0], |t| t.iter().map(|e| e.key).collect::<Vec<_>>())?;
-            Ok(new_list(vm, keys))
+            let keys = dict_read(vm, a[0], |t| table_items(t, |e| e.key))??;
+            new_list(vm, keys)
         },
         "Dict.values" => |vm, a| {
-            let vals = dict_read(vm, a[0], |t| t.iter().map(|e| e.value).collect::<Vec<_>>())?;
-            Ok(new_list(vm, vals))
+            let vals = dict_read(vm, a[0], |t| table_items(t, |e| e.value))??;
+            new_list(vm, vals)
         },
         "Dict.entries" => |vm, a| {
-            let pairs = dict_read(vm, a[0], |t| t.iter().map(|e| (e.key, e.value)).collect::<Vec<_>>())?;
-            let items: Vec<Value> = pairs.into_iter().map(|(k, v)| vm.m.alloc_tuple(&[k, v])).collect();
-            Ok(new_list(vm, items))
+            let pairs = dict_read(vm, a[0], |t| table_items(t, |e| (e.key, e.value)))??;
+            let mut items = try_vec(pairs.len())?;
+            items.extend(pairs.into_iter().map(|(k, v)| vm.m.alloc_tuple(&[k, v])));
+            new_list(vm, items)
         },
         "Dict.dup" => |vm, a| {
-            let t = dict_read(vm, a[0], |t| t.clone())?;
+            let t = dict_read(vm, a[0], |t| t.try_clone())?.or_else(table_refused)?;
             Ok(vm.m.alloc_dict(t))
         },
         "Set.dup" => |vm, a| {
-            let t = dict_read(vm, a[0], |t| t.clone())?;
+            let t = dict_read(vm, a[0], |t| t.try_clone())?.or_else(table_refused)?;
             Ok(vm.m.alloc_set(t))
         },
         "Set.add" => |vm, a| {
@@ -226,7 +230,8 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "Set.from" => |vm, a| {
             let items = list_items(vm, a[0])?;
-            let set = vm.m.alloc_set(DictTable::with_capacity(items.len()));
+            let table = DictTable::try_with_capacity(items.len()).or_else(table_refused)?;
+            let set = vm.m.alloc_set(table);
             vm.extra_roots().push(set);
             let mut res = Ok(());
             for x in items {
@@ -319,6 +324,20 @@ fn dict_read<R>(vm: &Vm, d: Value, f: impl Fn(&DictTable) -> R) -> RtResult<R> {
     ownership::read_dict(&vm.m, d, f)
 }
 
+/// `f` of each entry of `t`, or a `MemoryError` panic if the vector cannot be had.
+fn table_items<T>(t: &DictTable, f: impl Fn(catallaxy_runtime::dict::Entry) -> T) -> RtResult<Vec<T>> {
+    let mut out = try_vec(t.len())?;
+    for e in t.iter() {
+        try_push(&mut out, f(e))?;
+    }
+    Ok(out)
+}
+
+#[cold]
+fn table_refused<T>(layout: std::alloc::Layout) -> RtResult<T> {
+    catallaxy_runtime::refused(format!("cannot allocate a table of {} bytes", layout.size()))
+}
+
 /// Removes `k`; returns its value, nil (dict, absent) or the empty marker (absent, for sets).
 fn dict_delete(vm: &mut Vm, d: Value, k: Value) -> RtResult<Value> {
     loop {
@@ -366,9 +385,13 @@ fn sb_write(vm: &Vm, b: Value, f: impl FnOnce(&mut String)) -> RtResult<Value> {
 /// Sorts values by `<=>` (stable). Fast paths avoid callbacks for primitive lists.
 pub(crate) fn sort_values(vm: &mut Vm, mut items: Vec<Value>) -> RtResult<Vec<Value>> {
     if items.iter().all(|v| v.is_small_int()) {
-        items.sort_by_key(|v| v.as_small_int());
+        // Equal small ints are the same value, so an unstable sort (which needs no buffer) is
+        // as good as a stable one.
+        items.sort_unstable_by_key(|v| v.as_small_int());
         return Ok(items);
     }
+    // The stable sorts below allocate a buffer of up to `items.len()` values.
+    check_sort_buffer(items.len())?;
     if items.iter().all(|v| v.is_float() || v.is_small_int()) {
         let mut err = false;
         items.sort_by(|a, b| {
@@ -388,7 +411,19 @@ pub(crate) fn sort_values(vm: &mut Vm, mut items: Vec<Value>) -> RtResult<Vec<Va
         return Ok(items);
     }
     let order = sort_indices(vm, &items)?;
-    Ok(order.into_iter().map(|i| items[i]).collect())
+    let mut out = try_vec(order.len())?;
+    out.extend(order.into_iter().map(|i| items[i]));
+    Ok(out)
+}
+
+/// Raises a `MemoryError` if a stable sort of `n` values could not have its buffer now. The
+/// standard library's sort allocates it without a way to report refusal: this takes and frees
+/// one as large first (sorts of up to 512 values use a buffer on the stack).
+fn check_sort_buffer(n: usize) -> RtResult<()> {
+    if n > 512 {
+        drop(try_vec::<Value>(n)?);
+    }
+    Ok(())
 }
 
 fn as_f(v: Value) -> f64 {
@@ -401,21 +436,25 @@ fn as_f(v: Value) -> f64 {
 
 /// Stable sort order of `keys`, calling user `<=>` where needed. The keys stay rooted.
 pub(crate) fn sort_indices(vm: &mut Vm, keys: &[Value]) -> RtResult<Vec<usize>> {
-    let mut idx: Vec<usize> = (0..keys.len()).collect();
+    let mut idx: Vec<usize> = try_vec(keys.len())?;
+    idx.extend(0..keys.len());
+    // Ties broken by index make an unstable sort (which needs no buffer) stable.
     if keys.iter().all(|v| v.is_small_int()) {
-        idx.sort_by_key(|&i| keys[i].as_small_int());
+        idx.sort_unstable_by_key(|&i| (keys[i].as_small_int(), i));
         return Ok(idx);
     }
     if keys.iter().all(|v| str_of(*v).is_some()) {
-        idx.sort_by(|&a, &b| str_of(keys[a]).unwrap().cmp(str_of(keys[b]).unwrap()));
+        idx.sort_unstable_by(|&a, &b| str_of(keys[a]).unwrap().cmp(str_of(keys[b]).unwrap()).then(a.cmp(&b)));
         return Ok(idx);
     }
+    let mut buf = try_vec(idx.len())?;
+    buf.extend_from_slice(&idx);
     // Keys may be compared by user code, which can run the collector: root them.
     let base = vm.extra_roots().len();
     vm.extra_roots().extend_from_slice(keys);
     let mut error: Option<Trap> = None;
     // Merge sort on indices (no unsafe partial states visible to the collector).
-    let r = merge_sort(vm, keys, &mut idx, &mut error);
+    let r = merge_sort(vm, keys, &mut idx, buf, &mut error);
     vm.extra_roots().truncate(base);
     let _ = r;
     match error {
@@ -424,9 +463,15 @@ pub(crate) fn sort_indices(vm: &mut Vm, keys: &[Value]) -> RtResult<Vec<usize>> 
     }
 }
 
-fn merge_sort(vm: &mut Vm, keys: &[Value], idx: &mut Vec<usize>, error: &mut Option<Trap>) -> bool {
+/// Sorts `idx` by `keys`; `buf` is scratch space holding a copy of `idx`.
+fn merge_sort(
+    vm: &mut Vm,
+    keys: &[Value],
+    idx: &mut Vec<usize>,
+    mut buf: Vec<usize>,
+    error: &mut Option<Trap>,
+) -> bool {
     let n = idx.len();
-    let mut buf = idx.clone();
     let mut width = 1;
     while width < n {
         let mut i = 0;

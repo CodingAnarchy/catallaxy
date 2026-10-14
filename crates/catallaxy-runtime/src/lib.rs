@@ -16,8 +16,8 @@ pub mod value;
 
 pub use class::{class_of, Class, ObjKind, BUILTINS};
 pub use mutator::{
-    check_alloc, note_external, panic, refused, try_string, try_vec, Handle, HandleScope, Local, Mutator, RtResult,
-    Trap,
+    check_alloc, note_external, panic, refused, try_collect, try_push, try_string, try_vec, Handle, HandleScope, Local,
+    Mutator, RtResult, Trap,
 };
 pub use ops::Interop;
 pub use symbol::{intern, Sym};

@@ -6,7 +6,7 @@
 use base64::Engine as _;
 use catallaxy_runtime::class::class_of;
 use catallaxy_runtime::object::kind_of;
-use catallaxy_runtime::{ops, ownership, panic, ObjKind, RtResult, Value};
+use catallaxy_runtime::{check_alloc, ops, ownership, panic, try_push, try_string, try_vec, ObjKind, RtResult, Value};
 use catallaxy_vm::{NativeFn, Vm};
 
 use crate::fiber::blocking_io;
@@ -18,7 +18,9 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "Bytes.new" => |vm, a| {
             let mut out = Vec::new();
             if let Some(l) = arg(a, 0) {
-                for v in list_items(vm, l)? {
+                let items = list_items(vm, l)?;
+                out = try_vec(items.len())?;
+                for v in items {
                     let b = int(v)?;
                     if !(0..=255).contains(&b) {
                         return panic(format!("ArgumentError: byte value {b} is not in 0..255"));
@@ -61,12 +63,11 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             let n = b.len() as i64;
             let s0 = if start < 0 { (start + n).max(0) } else { start.min(n) };
             let e0 = s0.saturating_add(len.max(0)).min(n);
-            let out = b[s0 as usize..e0 as usize].to_vec();
+            let out = bytes_from(&[&b[s0 as usize..e0 as usize]])?;
             new_bytes(vm, out)
         },
         "Bytes.+" => |vm, a| {
-            let mut out = bytes_of(a[0])?.to_vec();
-            out.extend_from_slice(bytes_of(a[1])?);
+            let out = bytes_from(&[bytes_of(a[0])?, bytes_of(a[1])?])?;
             new_bytes(vm, out)
         },
         "Bytes.==" => |_, a| {
@@ -75,35 +76,40 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "Bytes.hash" => |_, a| Ok(Value::small_int((ops::hash_bytes(bytes_of(a[0])?) >> 17) as i64)),
         "Bytes.to_list" => |vm, a| {
-            let items = bytes_of(a[0])?.iter().map(|&b| Value::small_int(b as i64)).collect();
-            Ok(new_list(vm, items))
+            let b = bytes_of(a[0])?;
+            let mut items = vm.m.try_vec_collecting(b.len())?;
+            items.extend(b.iter().map(|&x| Value::small_int(x as i64)));
+            new_list(vm, items)
         },
         "Bytes.to_hex" => |vm, a| {
-            let r = hex_encode(bytes_of(a[0])?);
-            Ok(new_str(vm, &r))
+            let r = hex_encode(bytes_of(a[0])?)?;
+            vm.m.try_alloc_str(&r)
         },
         "Bytes.to_base64" => |vm, a| {
-            let r = base64::engine::general_purpose::STANDARD.encode(bytes_of(a[0])?);
-            Ok(new_str(vm, &r))
+            let b = bytes_of(a[0])?;
+            let len = base64::encoded_len(b.len(), true).unwrap_or(usize::MAX);
+            let mut r = try_string(len)?;
+            base64::engine::general_purpose::STANDARD.encode_string(b, &mut r);
+            vm.m.try_alloc_str(&r)
         },
         "Bytes.to_s" => |vm, a| {
-            let r = format!("Bytes({})", hex_encode(bytes_of(a[0])?));
-            Ok(new_str(vm, &r))
+            let r = format!("Bytes({})", hex_encode(bytes_of(a[0])?)?);
+            vm.m.try_alloc_str(&r)
         },
         "String.to_bytes" => |vm, a| {
-            let b = s(a[0])?.as_bytes().to_vec();
+            let b = bytes_from(&[s(a[0])?.as_bytes()])?;
             new_bytes(vm, b)
         },
         "String.from_bytes" => |vm, a| match std::str::from_utf8(bytes_of(a[0])?) {
             Ok(text) => {
-                let v = new_str(vm, text);
+                let v = vm.m.try_alloc_str(text)?;
                 Ok(ok(vm, v))
             }
             Err(e) => Ok(err(vm, &format!("invalid UTF-8: {e}"))),
         },
         "String.from_bytes_lossy" => |vm, a| {
-            let text = String::from_utf8_lossy(bytes_of(a[0])?).into_owned();
-            Ok(new_str(vm, &text))
+            let text = String::from_utf8_lossy(bytes_of(a[0])?);
+            vm.m.try_alloc_str(&text)
         },
 
         "File.read_bytes" => |vm, a| {
@@ -113,13 +119,13 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
                     let v = new_bytes(vm, b)?;
                     Ok(ok(vm, v))
                 }
-                Err(e) => Ok(err(vm, &format!("{p}: {e}"))),
+                Err(e) => io_err(vm, &p, e),
             }
         },
         "File.write_bytes" => |vm, a| {
             let p = s(a[0])?.to_string();
             // Blocking jobs must not touch the heap (a collection may run meanwhile): copy out.
-            let data = bytes_of(a[1])?.to_vec();
+            let data = bytes_from(&[bytes_of(a[1])?])?;
             Ok(match blocking_io(vm, || std::fs::write(&p, data)) {
                 Ok(()) => ok(vm, Value::NIL),
                 Err(e) => err(vm, &format!("{p}: {e}")),
@@ -127,7 +133,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
 
         "Stdin.read_bytes" => |vm, _| {
-            let b = crate::core::read_stdin_to_end(vm);
+            let b = crate::core::read_stdin_to_end(vm)?;
             new_bytes(vm, b)
         },
 
@@ -184,14 +190,23 @@ fn norm_index(i: i64, len: usize) -> Option<usize> {
     (0..n).contains(&ix).then_some(ix as usize)
 }
 
-fn hex_encode(b: &[u8]) -> String {
+/// The concatenation of `parts`, or a `MemoryError` panic.
+fn bytes_from(parts: &[&[u8]]) -> RtResult<Vec<u8>> {
+    let mut out = try_vec(parts.iter().fold(0usize, |n, p| n.saturating_add(p.len())))?;
+    for p in parts {
+        out.extend_from_slice(p);
+    }
+    Ok(out)
+}
+
+fn hex_encode(b: &[u8]) -> RtResult<String> {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(b.len() * 2);
+    let mut out = try_string(check_alloc(b.len(), 2)?)?;
     for &x in b {
         out.push(DIGITS[(x >> 4) as usize] as char);
         out.push(DIGITS[(x & 15) as usize] as char);
     }
-    out
+    Ok(out)
 }
 
 fn hex_decode(text: &str) -> Result<Vec<u8>, String> {
@@ -208,7 +223,7 @@ fn hex_decode(text: &str) -> Result<Vec<u8>, String> {
 // ---- Digests ---------------------------------------------------------------------------------
 
 fn digest(vm: &mut Vm, v: Value, f: impl FnOnce(&[u8]) -> Vec<u8>) -> RtResult<Value> {
-    let r = hex_encode(&f(data_of(v)?));
+    let r = hex_encode(&f(data_of(v)?))?;
     Ok(new_str(vm, &r))
 }
 
@@ -273,7 +288,8 @@ fn csv_sep(a: &[Value], i: usize) -> RtResult<char> {
 }
 
 /// Parses RFC 4180 text (with any line ending). Blank lines are skipped.
-fn parse_csv(text: &str, sep: char) -> Result<Vec<Vec<String>>, String> {
+/// The outer `Result` is a `MemoryError` panic; the inner one, invalid text.
+fn parse_csv(text: &str, sep: char) -> RtResult<Result<Vec<Vec<String>>, String>> {
     let mut rows = Vec::new();
     let mut row: Vec<String> = Vec::new();
     let mut field = String::new();
@@ -298,18 +314,18 @@ fn parse_csv(text: &str, sep: char) -> Result<Vec<Vec<String>>, String> {
                             }
                             field.push(c);
                         }
-                        None => return Err(format!("line {start_line}: unterminated quoted field")),
+                        None => return Ok(Err(format!("line {start_line}: unterminated quoted field"))),
                     }
                 }
                 match chars.peek() {
                     None | Some('\n' | '\r') => {}
                     Some(&c) if c == sep => {}
-                    Some(_) => return Err(format!("line {line}: unexpected text after a closing quote")),
+                    Some(_) => return Ok(Err(format!("line {line}: unexpected text after a closing quote"))),
                 }
                 started = true;
             }
             c if c == sep => {
-                row.push(std::mem::take(&mut field));
+                try_push(&mut row, std::mem::take(&mut field))?;
                 started = true;
             }
             '\r' | '\n' => {
@@ -318,8 +334,8 @@ fn parse_csv(text: &str, sep: char) -> Result<Vec<Vec<String>>, String> {
                 }
                 line += 1;
                 if started || !field.is_empty() {
-                    row.push(std::mem::take(&mut field));
-                    rows.push(std::mem::take(&mut row));
+                    try_push(&mut row, std::mem::take(&mut field))?;
+                    try_push(&mut rows, std::mem::take(&mut row))?;
                 }
                 started = false;
             }
@@ -327,25 +343,25 @@ fn parse_csv(text: &str, sep: char) -> Result<Vec<Vec<String>>, String> {
         }
     }
     if started || !field.is_empty() {
-        row.push(field);
-        rows.push(row);
+        try_push(&mut row, field)?;
+        try_push(&mut rows, row)?;
     }
-    Ok(rows)
+    Ok(Ok(rows))
 }
 
 fn csv_parse(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let sep = csv_sep(a, 1)?;
-    match parse_csv(s(a[0])?, sep) {
+    vm.m.collect_if_refused();
+    match parse_csv(s(a[0])?, sep)? {
         Ok(rows) => {
-            // Allocation never collects, so the partial lists need no rooting.
-            let rows: Vec<Value> = rows
-                .iter()
-                .map(|r| {
-                    let fields = r.iter().map(|f| vm.m.alloc_str(f)).collect();
-                    new_list(vm, fields)
-                })
-                .collect();
-            let l = new_list(vm, rows);
+            // Nothing here collects, so the partial lists need no rooting. Each parsed row is
+            // freed once converted.
+            let mut out = try_vec(rows.len())?;
+            for r in rows {
+                let l = new_str_list(vm, r.iter().map(|f| f.as_str()))?;
+                out.push(l);
+            }
+            let l = new_list(vm, out)?;
             Ok(ok(vm, l))
         }
         Err(e) => Ok(err(vm, &e)),
@@ -384,7 +400,7 @@ fn csv_format(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
         csv_write_row(&mut out, &row, sep)?;
         out.push('\n');
     }
-    Ok(new_str(vm, &out))
+    vm.m.try_alloc_str(&out)
 }
 
 #[cfg(test)]
@@ -393,19 +409,19 @@ mod tests {
 
     #[test]
     fn md5_vectors() {
-        assert_eq!(hex_encode(&md5(b"")), "d41d8cd98f00b204e9800998ecf8427e");
-        assert_eq!(hex_encode(&md5(b"abc")), "900150983cd24fb0d6963f7d28e17f72");
+        assert_eq!(hex_encode(&md5(b"")).unwrap(), "d41d8cd98f00b204e9800998ecf8427e");
+        assert_eq!(hex_encode(&md5(b"abc")).unwrap(), "900150983cd24fb0d6963f7d28e17f72");
         let long = b"12345678901234567890123456789012345678901234567890123456789012345678901234567890";
-        assert_eq!(hex_encode(&md5(long)), "57edf4a22be3c955ac49da2e2107b67a");
+        assert_eq!(hex_encode(&md5(long)).unwrap(), "57edf4a22be3c955ac49da2e2107b67a");
     }
 
     #[test]
     fn csv_round_trip() {
-        let rows = parse_csv("a,\"b,c\",\"d\"\"e\"\r\n\n\"x\ny\",,\n\"\"\n", ',').unwrap();
+        let rows = parse_csv("a,\"b,c\",\"d\"\"e\"\r\n\n\"x\ny\",,\n\"\"\n", ',').unwrap().unwrap();
         assert_eq!(rows, vec![vec!["a", "b,c", "d\"e"], vec!["x\ny", "", ""], vec![""]]);
-        assert!(parse_csv("\"abc", ',').is_err());
-        assert!(parse_csv("\"a\"b", ',').is_err());
-        assert_eq!(parse_csv("5\" pipe,x", ',').unwrap(), vec![vec!["5\" pipe", "x"]]);
+        assert!(parse_csv("\"abc", ',').unwrap().is_err());
+        assert!(parse_csv("\"a\"b", ',').unwrap().is_err());
+        assert_eq!(parse_csv("5\" pipe,x", ',').unwrap().unwrap(), vec![vec!["5\" pipe", "x"]]);
     }
 
     #[test]

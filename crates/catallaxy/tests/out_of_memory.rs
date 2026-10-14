@@ -268,3 +268,138 @@ grow_list()
         "{ctx}"
     );
 }
+
+/// What natives that build a collection raise when the allocator refuses one of its buffers:
+/// the vector they collect into, the list they make of it, its strings, a file's contents
+/// (`cannot allocate ...`, `cannot read ...`), or the list the program keeps them in (`cannot
+/// grow a list ...`).
+///
+/// No list in these programs holds more than a few thousand objects. Marking a list pushes the
+/// objects it holds on the collector's mark stack, whose growth is not checked: a collection
+/// that runs while memory is exhausted could abort on a list of a hundred thousand strings.
+/// Results are kept in a linked list whose `next` field comes first, so that marking it does
+/// not stack up one entry per node.
+const NATIVE: [&str; 2] = ["MemoryError: cannot ", OOM];
+
+/// Strings split into lists: `split`, `chars` and `lines`.
+#[test]
+fn string_lists() {
+    let src = r#"class Kept {
+  next: Kept?
+  items: List[String]
+}
+fn grow() -> Int {
+  text = "ab cd\n" * 400
+  kept: Kept? = nil
+  n = 0
+  while true {
+    kept = Kept.new(kept, text.split(" "))
+    kept = Kept.new(kept, text.chars())
+    kept = Kept.new(kept, text.lines())
+    n += 1
+  }
+  n
+}
+t = spawn { grow() }
+match t.join() {
+  Ok(n) => puts("grew to #{n}")
+  Err(e) => puts("join: #{e}")
+}
+text = "ab cd\n" * 1000
+puts("after: #{text.split(" ").length + text.chars().length + text.lines().length}")
+grow()
+"#;
+    let o = run_limited("string_lists.cx", src);
+    check(&o, &NATIVE, "after: 8001", &NATIVE, "grow");
+}
+
+/// Parsers: `Json.parse` (an array of a million numbers) and `Csv.parse` (2,000 rows of 200
+/// fields).
+#[test]
+fn parsers() {
+    let src = r#"fn grow() -> Int {
+  json = "[" + "0," * 1_000_000 + "0]"
+  csv = ("a," * 199 + "a\n") * 2_000
+  docs: List[Dyn] = []
+  tables: List[List[List[String]]] = []
+  while true {
+    docs.push(Json.parse(json).unwrap())
+    tables.push(Csv.parse(csv).unwrap())
+  }
+  docs.length
+}
+t = spawn { grow() }
+match t.join() {
+  Ok(n) => puts("grew to #{n}")
+  Err(e) => puts("join: #{e}")
+}
+doc = Json.parse("[" + "1," * 100_000 + "1]").unwrap()
+rows = Csv.parse("a,b\n" * 2_000).unwrap()
+puts("after: #{if doc == nil { 0 } else { 1 } + rows.length}")
+grow()
+"#;
+    let o = run_limited("parsers.cx", src);
+    check(&o, &NATIVE, "after: 2001", &NATIVE, "grow");
+}
+
+/// Copies of lists and dicts: `sorted`, `reverse`, `+` and `keys`.
+#[test]
+fn list_copies() {
+    let src = r#"fn grow() -> Int {
+  xs = (0...1_000_000).to_list()
+  d: Dict[Int, Int] = [:]
+  for i in 0...200_000 { d[i] = i }
+  keep: List[List[Int]] = []
+  while true {
+    keep.push(xs.sorted())
+    keep.push(xs.reverse())
+    keep.push(xs + xs)
+    keep.push(d.keys())
+  }
+  keep.length
+}
+t = spawn { grow() }
+match t.join() {
+  Ok(n) => puts("grew to #{n}")
+  Err(e) => puts("join: #{e}")
+}
+xs = (0...100_000).to_list()
+puts("after: #{xs.sorted().length + xs.reverse().length + (xs + xs).length}")
+grow()
+"#;
+    let o = run_limited("list_copies.cx", src);
+    check(&o, &NATIVE, "after: 400000", &NATIVE, "grow");
+}
+
+/// Files read whole: `File.read`, `File.read_bytes` and `File.read_lines` (2,000 lines of 500
+/// bytes).
+#[test]
+fn files() {
+    let dir = std::env::temp_dir().join(format!("catx-oom-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let data = dir.join("files.txt");
+    std::fs::write(&data, format!("{}\n", "x".repeat(500)).repeat(2_000)).unwrap();
+    let src = r#"fn grow(path: String) -> Int {
+  texts: List[String] = []
+  blobs: List[Bytes] = []
+  lines: List[List[String]] = []
+  while true {
+    texts.push(File.read(path).unwrap())
+    blobs.push(File.read_bytes(path).unwrap())
+    lines.push(File.read_lines(path).unwrap())
+  }
+  texts.length
+}
+path = "PATH"
+t = spawn { grow(path) }
+match t.join() {
+  Ok(n) => puts("grew to #{n}")
+  Err(e) => puts("join: #{e}")
+}
+puts("after: #{File.read(path).unwrap().length + File.read_lines(path).unwrap().length}")
+grow(path)
+"#
+    .replace("PATH", data.to_str().unwrap());
+    let o = run_limited("files.cx", &src);
+    check(&o, &NATIVE, "after: 1004000", &NATIVE, "grow");
+}

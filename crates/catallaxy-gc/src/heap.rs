@@ -180,6 +180,13 @@ const RESERVE_SEGMENTS: usize = 16;
 const HEADROOM: usize = 2 << 20;
 static HEADROOM_BLOCK: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
 
+/// Whether the OS has refused memory since the last collection: until a collection looks
+/// again, new heap segments come from the reserve (or, for `try_` allocations, are refused).
+/// A native about to allocate much, holding no unrooted values, can collect first.
+pub fn memory_refused() -> bool {
+    !headroom_held() || POOL.reserve_short()
+}
+
 /// Hands the headroom block back to the OS, if it is still held, and returns whether it was.
 /// Called where an allocation is refused, before reporting or retrying it; the next major
 /// collection maps it again, and if it cannot, the heap is out of memory. Takes no locks and
@@ -441,12 +448,19 @@ impl PagePool {
         pool
     }
 
-    fn new_segment(&self) {
+    /// Adds a segment of empty pages. Returns false, adding none, if the OS refuses one (or has
+    /// refused one since the last collection) and `may_draw` does not allow the reserve.
+    fn new_segment(&self, may_draw: bool) -> bool {
         // Once the OS has refused memory, segments come from the reserve until a collection has
         // looked again: mapping more would take the room the headroom block just made.
         let refused = self.reserve_short() || !headroom_held();
         let mut base = if refused { ptr::null_mut() } else { map_segment() };
         if base.is_null() {
+            if !may_draw {
+                // As `draw_reserve` does: room for reporting, and a collection soon.
+                release_headroom();
+                return false;
+            }
             base = self.draw_reserve();
         }
         let pages: [*mut Page; PAGES_PER_SEGMENT] = std::array::from_fn(|i| {
@@ -465,6 +479,7 @@ impl PagePool {
             empty.push(unsafe { &*page });
         }
         TOTAL_PAGES.fetch_add(PAGES_PER_SEGMENT, Ordering::Relaxed);
+        true
     }
 
     /// The OS refused a segment: takes one from the reserve, releases the headroom block and asks
@@ -570,7 +585,14 @@ impl PagePool {
         TOTAL_PAGES.fetch_sub(doomed.len() * PAGES_PER_SEGMENT, Ordering::Relaxed);
     }
 
+    #[cfg(test)]
     fn take_empty(&self, class: usize) -> &'static Page {
+        self.try_take_empty(class, true).expect("the reserve stands in")
+    }
+
+    /// An empty page for `class`, or `None` if it would need a segment the OS refuses and
+    /// `may_draw` does not allow the reserve (see [`PagePool::new_segment`]).
+    fn try_take_empty(&self, class: usize, may_draw: bool) -> Option<&'static Page> {
         loop {
             if let Some(p) = self.empty.lock().pop() {
                 unsafe {
@@ -578,9 +600,11 @@ impl PagePool {
                     *p.class.get() = class;
                 }
                 p.state.store(PageState::Current as u8, Ordering::Relaxed);
-                return p;
+                return Some(p);
             }
-            self.new_segment();
+            if !self.new_segment(may_draw) {
+                return None;
+            }
         }
     }
 
@@ -801,12 +825,19 @@ impl LocalHeap {
     /// thread. Never runs a collection; it may request one.
     /// `vtable` must point to a `GcVTable` that outlives the object (in practice, a class).
     #[inline]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn alloc(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
         debug_assert!(size >= HEADER_SIZE);
         if size > MAX_SMALL {
             return self.alloc_large(size, vtable, true);
         }
+        self.alloc_small::<true>(size, vtable)
+    }
+
+    /// A small object from this thread's pages. Without `MAY_DRAW`, returns null where it
+    /// would take a segment from the reserve.
+    #[inline(always)]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn alloc_small<const MAY_DRAW: bool>(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
         let class = size_class_of(size);
         let slot_size = SIZE_CLASSES[class];
         let slot = {
@@ -824,7 +855,11 @@ impl LocalHeap {
                     self.bump[class] = unsafe { b.add(slot_size) };
                     b
                 } else {
-                    self.refill(class)
+                    let s = self.refill(class, MAY_DRAW);
+                    if !MAY_DRAW && s.is_null() {
+                        return ptr::null_mut();
+                    }
+                    s
                 }
             }
         };
@@ -849,15 +884,17 @@ impl LocalHeap {
     }
 
     /// As [`LocalHeap::alloc_uninit`], but returns null instead of aborting when the allocator
-    /// refuses a large object, for callers that can raise a `MemoryError` where they allocate
-    /// (the reserve is left for those that cannot). Small objects come from pages as usual.
+    /// refuses a large object, or the OS a segment for a small one, for callers that can raise
+    /// a `MemoryError` where they allocate (the reserve is left for those that cannot). Once the
+    /// OS has refused a segment, small objects that need a new one get null until the next
+    /// collection.
     ///
     /// # Safety
     /// As for [`LocalHeap::alloc_uninit`].
     #[inline]
     pub unsafe fn try_alloc_uninit(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
         if size <= MAX_SMALL {
-            return self.alloc(size, vtable);
+            return self.alloc_small::<false>(size, vtable);
         }
         self.try_alloc_large(size, vtable)
     }
@@ -874,8 +911,10 @@ impl LocalHeap {
         self.init_large(p, layout, vtable)
     }
 
+    /// A slot of `class` from a page that is not yet this thread's current one. Null only if
+    /// a new segment is needed and `may_draw` does not allow the reserve.
     #[cold]
-    fn refill(&mut self, class: usize) -> *mut u8 {
+    fn refill(&mut self, class: usize, may_draw: bool) -> *mut u8 {
         let slot_size = SIZE_CLASSES[class];
         if !self.current[class].is_null() {
             let p = unsafe { &*self.current[class] };
@@ -922,7 +961,9 @@ impl LocalHeap {
             }
             return head;
         }
-        let p = POOL.take_empty(class);
+        let Some(p) = POOL.try_take_empty(class, may_draw) else {
+            return ptr::null_mut();
+        };
         self.note_young(PAGE_SIZE);
         self.current[class] = p;
         unsafe {
@@ -1211,6 +1252,25 @@ mod tests {
         assert!(pool.refill_reserve());
         assert!(!pool.reserve_short());
         assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS);
+    }
+
+    #[test]
+    fn try_allocations_leave_the_reserve_alone() {
+        let pool = PagePool::new();
+        fail::MAPS.with(|f| f.set(true));
+        // Allocations that can report a refusal get none, and the reserve stays whole.
+        assert!(pool.try_take_empty(0, false).is_none());
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS);
+        assert!(!pool.reserve_short());
+        // The others still draw on it.
+        let page = pool.try_take_empty(0, true).expect("a reserve segment");
+        // SAFETY: the page is ours and mapped.
+        unsafe { ptr::write_bytes(page.base, 0xA5, PAGE_SIZE) };
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS - 1);
+        // Its other pages are free to take, either way.
+        assert!(pool.try_take_empty(0, false).is_some());
+        fail::MAPS.with(|f| f.set(false));
+        restore_headroom();
     }
 
     #[test]
