@@ -145,6 +145,11 @@ Everything here is available in every module without an import.
 - `fn map_err[F](self, f: fn(E) -> F) -> Result[T, F]`
 - `fn and_then[U](self, f: fn(T) -> Result[U, E]) -> Result[U, E]`
 
+## T?
+
+- `fn ok_or[E](self, error: E) -> Result[T, E]`
+- `fn ok_or_else[E](self, f: fn() -> E) -> Result[T, E]`
+
 ## Int
 
 - `fn to_s(self, base: Int = 10) -> String`

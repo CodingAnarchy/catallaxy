@@ -1,0 +1,58 @@
+# `!= nil` narrows field paths until something could change them; `??=` narrows its target and
+# works on fields and elements; `ok_or` turns an optional into a Result for `?`.
+class Node {
+  v: Int
+  next: Node?
+
+  fn second(self) -> Int {
+    if self.next == nil { return -1 }
+    self.next.v
+  }
+}
+
+frozen class Pair {
+  a: Int
+  b: Pair?
+}
+
+n = Node.new(1, Node.new(2, nil))
+if n.next != nil { puts(n.next.v) }
+if n.next != nil and n.next.v > 1 { puts("big") }
+puts(n.second())
+puts(Node.new(9, nil).second())
+cur = n
+while cur.next != nil {
+  cur = cur.next
+}
+puts(cur.v)
+
+m = Node.new(3, nil)
+m.next ??= Node.new(4, nil)
+m.next ??= Node.new(5, nil)
+puts(m.next.v)
+
+p = Pair.new(1, Pair.new(2, nil))
+if p.b != nil {
+  puts("frozen fields stay narrowed across calls")
+  puts(p.b.a)
+}
+
+x: Int? = nil
+x ??= 5
+puts(x + 1)
+counts: Dict[String, Int] = [:]
+counts["a"] ??= 1
+counts["a"] ??= 2
+puts(counts)
+flags = [false, true]
+flags[0] ||= true
+puts(flags)
+
+fn port(env: Dict[String, String]) -> Result[Int, String] {
+  raw = env["PORT"].ok_or("PORT is not set")?
+  num = raw.to_i().ok_or_else { "PORT is not a number: #{raw}" }?
+  Ok(num)
+}
+puts(port(["PORT": "80"]))
+puts(port([:]))
+puts(port(["PORT": "x"]))
