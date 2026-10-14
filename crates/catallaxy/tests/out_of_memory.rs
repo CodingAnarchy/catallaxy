@@ -274,44 +274,52 @@ grow_list()
 /// (`cannot allocate ...`, `cannot read ...`), or the list the program keeps them in (`cannot
 /// grow a list ...`).
 ///
-/// The programs keep each list to about 100,000 items: marking a list pushes its items on the
-/// collector's mark stack, whose growth is not checked, so a collection while memory is
-/// exhausted could abort on a list of millions of strings.
+/// No list in these programs holds more than a few thousand objects. Marking a list pushes the
+/// objects it holds on the collector's mark stack, whose growth is not checked: a collection
+/// that runs while memory is exhausted could abort on a list of a hundred thousand strings.
+/// Results are kept in a linked list whose `next` field comes first, so that marking it does
+/// not stack up one entry per node.
 const NATIVE: [&str; 2] = ["MemoryError: cannot ", OOM];
 
 /// Strings split into lists: `split`, `chars` and `lines`.
 #[test]
 fn string_lists() {
-    let src = r#"fn grow() -> Int {
-  text = "ab cd\n" * 20_000
-  keep: List[List[String]] = []
+    let src = r#"class Kept {
+  next: Kept?
+  items: List[String]
+}
+fn grow() -> Int {
+  text = "ab cd\n" * 400
+  kept: Kept? = nil
+  n = 0
   while true {
-    keep.push(text.split(" "))
-    keep.push(text.chars())
-    keep.push(text.lines())
+    kept = Kept.new(kept, text.split(" "))
+    kept = Kept.new(kept, text.chars())
+    kept = Kept.new(kept, text.lines())
+    n += 1
   }
-  keep.length
+  n
 }
 t = spawn { grow() }
 match t.join() {
   Ok(n) => puts("grew to #{n}")
   Err(e) => puts("join: #{e}")
 }
-text = "ab cd\n" * 10_000
+text = "ab cd\n" * 1000
 puts("after: #{text.split(" ").length + text.chars().length + text.lines().length}")
-text = ""
 grow()
 "#;
     let o = run_limited("string_lists.cx", src);
-    check(&o, &NATIVE, "after: 80001", &NATIVE, "grow");
+    check(&o, &NATIVE, "after: 8001", &NATIVE, "grow");
 }
 
-/// Parsers: `Json.parse` and `Csv.parse`.
+/// Parsers: `Json.parse` (an array of a million numbers) and `Csv.parse` (2,000 rows of 200
+/// fields).
 #[test]
 fn parsers() {
     let src = r#"fn grow() -> Int {
   json = "[" + "0," * 1_000_000 + "0]"
-  csv = "a,b,c,d\n" * 50_000
+  csv = ("a," * 199 + "a\n") * 2_000
   docs: List[Dyn] = []
   tables: List[List[List[String]]] = []
   while true {
@@ -326,12 +334,12 @@ match t.join() {
   Err(e) => puts("join: #{e}")
 }
 doc = Json.parse("[" + "1," * 100_000 + "1]").unwrap()
-rows = Csv.parse("a,b\n" * 50_000).unwrap()
+rows = Csv.parse("a,b\n" * 2_000).unwrap()
 puts("after: #{if doc == nil { 0 } else { 1 } + rows.length}")
 grow()
 "#;
     let o = run_limited("parsers.cx", src);
-    check(&o, &NATIVE, "after: 50001", &NATIVE, "grow");
+    check(&o, &NATIVE, "after: 2001", &NATIVE, "grow");
 }
 
 /// Copies of lists and dicts: `sorted`, `reverse`, `+` and `keys`.
@@ -363,13 +371,14 @@ grow()
     check(&o, &NATIVE, "after: 400000", &NATIVE, "grow");
 }
 
-/// Files read whole: `File.read`, `File.read_bytes` and `File.read_lines`.
+/// Files read whole: `File.read`, `File.read_bytes` and `File.read_lines` (2,000 lines of 500
+/// bytes).
 #[test]
 fn files() {
     let dir = std::env::temp_dir().join(format!("catx-oom-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let data = dir.join("files.txt");
-    std::fs::write(&data, "abcdefghi\n".repeat(100_000)).unwrap();
+    std::fs::write(&data, format!("{}\n", "x".repeat(500)).repeat(2_000)).unwrap();
     let src = r#"fn grow(path: String) -> Int {
   texts: List[String] = []
   blobs: List[Bytes] = []
@@ -392,5 +401,5 @@ grow(path)
 "#
     .replace("PATH", data.to_str().unwrap());
     let o = run_limited("files.cx", &src);
-    check(&o, &NATIVE, "after: 1100000", &NATIVE, "grow");
+    check(&o, &NATIVE, "after: 1004000", &NATIVE, "grow");
 }
