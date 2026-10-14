@@ -1,0 +1,6 @@
+# expect: E0227
+# A call through `Animal` passes an `Int` to the override, which expects a `String`.
+class Animal { fn feed(self, food: Int) -> Int { food } }
+class Cat < Animal { fn feed(self, food: String) -> Int { food.length } }
+pet: Animal = Cat.new()
+puts(pet.feed(3))

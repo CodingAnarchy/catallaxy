@@ -374,7 +374,11 @@ p = Point.new(x: 3.0, y: 4.0)            # generated constructor: fields in orde
 - A class may define `fn init(self, ...)`; then `Class.new(...)` takes `init`'s parameters, and `init` must
   assign every field that has no default.
 - `class Admin < User { ... }`: single inheritance; `super.method(...)` calls the parent version.
-  Methods may be overridden with a compatible signature. Fields are inherited.
+  Methods may be overridden with a compatible signature: the same number of parameters (E0226), each
+  accepting the overridden parameter's type, a result that fits the overridden result, a default
+  wherever the overridden method has one, the same type parameters with no stronger bounds, and no
+  parameter renamed to another parameter's name (E0227). A call through the superclass type may run the
+  override, so an override that mutates `self` makes the overridden method mutating. Fields are inherited.
 - `frozen class P { ... }`: instances are deeply immutable (field types must be frozen); `P` is frozen.
 - `shared class C { ... }`: instances may be used from any thread; field types must be frozen or
   shareable; each field read/write is atomic. `with lock(c) { ... }` makes a compound update atomic.

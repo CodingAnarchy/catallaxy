@@ -5,6 +5,9 @@ use rustc_hash::FxHashMap;
 use super::*;
 use crate::ast::{ClassModifier, Item, SelfKind, TypeExpr, TypeExprKind};
 
+/// A suggested edit: message, span, replacement.
+type Suggestion = (String, Span, String);
+
 /// Names in scope while resolving a type expression.
 #[derive(Clone, Default)]
 pub struct TypeScope {
@@ -1245,6 +1248,157 @@ impl Checker {
                 )
                 .note_at("overridden method", p.span),
             );
+            return;
+        }
+        self.overrides.push((parent, child));
+    }
+
+    /// Compares each override's signature with the method it overrides, once every body is
+    /// checked (results and mutability may be inferred). A call through the superclass type is
+    /// checked against the overridden signature but runs the override, so the override must
+    /// accept every argument that signature accepts and produce a result it promises (E0227).
+    pub fn check_overrides(&mut self) {
+        while self.overrides_checked < self.overrides.len() {
+            let (parent, child) = self.overrides[self.overrides_checked];
+            self.overrides_checked += 1;
+            self.check_override_sig(parent, child);
+        }
+    }
+
+    fn check_override_sig(&mut self, parent: FnId, child: FnId) {
+        let (p, c) = (self.fns[parent as usize].clone(), self.fns[child as usize].clone());
+        let (Owner::Class(pc), Owner::Class(cc)) = (p.owner, c.owner) else { return };
+        let child_ty = c.self_ty;
+        // The superclass as the subclass sees it: its type parameters in the subclass's terms.
+        let view = self.upcast(child_ty, pc).unwrap_or(p.self_ty);
+        let mut psub: FxHashMap<ParamId, TyId> = match self.types.get(view).clone() {
+            Ty::Class(_, args) => self.classes[&pc].params.iter().copied().zip(args).collect(),
+            _ => FxHashMap::default(),
+        };
+        let mut csub: FxHashMap<ParamId, TyId> = FxHashMap::default();
+        let (cname, pname) = (self.classes[&cc].name.clone(), self.classes[&pc].name.clone());
+        let what = format!("`{cname}.{}` overrides `{pname}.{}`", c.name, p.name);
+        // (message, span, suggested fix: message, span, replacement)
+        let mut problems: Vec<(String, Span, Option<Suggestion>)> = Vec::new();
+        let decl = self.fn_decl(child);
+        if p.type_params.len() != c.type_params.len() {
+            // The parameters cannot be compared either; this is the one problem to report.
+            let msg = format!(
+                "{what} but takes {} type parameter(s) instead of {}",
+                c.type_params.len(),
+                p.type_params.len()
+            );
+            self.emit(
+                Diag::error("E0227", msg, c.span)
+                    .note_at("overridden method", p.span)
+                    .note("declare the same type parameters as the overridden method"),
+            );
+            return;
+        }
+        // Method type parameters: each pair becomes one fresh parameter with the overridden
+        // method's bounds; the override's bounds must follow from those.
+        let fresh: Vec<ParamId> = p
+            .type_params
+            .iter()
+            .map(|&tp| {
+                let name = self.params[tp as usize].name.clone();
+                self.new_param(&name, Vec::new())
+            })
+            .collect();
+        for (i, &f) in fresh.iter().enumerate() {
+            let t = self.param_ty(f);
+            psub.insert(p.type_params[i], t);
+            csub.insert(c.type_params[i], t);
+        }
+        for (i, &f) in fresh.iter().enumerate() {
+            let bounds: Vec<TyId> = self.params[p.type_params[i] as usize].bounds.clone();
+            let bounds = bounds.into_iter().map(|b| self.types.subst(b, &psub, Some(view))).collect();
+            self.params[f as usize].bounds = bounds;
+        }
+        for (i, &f) in fresh.iter().enumerate() {
+            let t = self.param_ty(f);
+            let cbounds: Vec<TyId> = self.params[c.type_params[i] as usize].bounds.clone();
+            for b in cbounds {
+                let b = self.types.subst(b, &csub, Some(child_ty));
+                if !self.trial(|ck| ck.assignable(t, b)) {
+                    let msg = format!(
+                        "{what} but requires type parameter `{}` to be `{}`, which the overridden method does not",
+                        self.params[c.type_params[i] as usize].name,
+                        self.show(b)
+                    );
+                    problems.push((msg, c.span, None));
+                }
+            }
+        }
+        for (i, (pp, cp)) in p.params.iter().zip(c.params.iter()).enumerate() {
+            let pt = self.types.subst(pp.ty, &psub, Some(view));
+            let ct = self.types.subst(cp.ty, &csub, Some(child_ty));
+            if !self.trial(|ck| ck.assignable(pt, ct)) {
+                let (ps, cs) = (self.show(pt), self.show(ct));
+                let fix = decl
+                    .as_ref()
+                    .and_then(|d| d.params.get(i)?.ty.as_ref())
+                    .map(|t| (format!("accept `{ps}` (or a wider type)"), t.span, ps.clone()));
+                problems.push((
+                    format!("{what} but parameter `{}` takes `{cs}`, which does not accept every `{ps}`", cp.name),
+                    cp.span,
+                    fix,
+                ));
+            }
+            if pp.has_default && !cp.has_default {
+                problems.push((
+                    format!("{what} but parameter `{}` has no default; the overridden one does", cp.name),
+                    cp.span,
+                    Some((
+                        "give the parameter a default (it is used when a call leaves the argument out)".into(),
+                        cp.span.after(),
+                        " = <default>".into(),
+                    )),
+                ));
+            }
+            // A named argument is bound by the overridden method's parameter names, and the
+            // override receives the arguments by position: the same name elsewhere would get
+            // another parameter's value.
+            if pp.name != cp.name {
+                if let Some(j) = p.params.iter().position(|q| q.name == cp.name) {
+                    problems.push((
+                        format!(
+                            "{what} but its parameter {} is `{}`, which is parameter {} of the overridden method",
+                            i + 1,
+                            cp.name,
+                            j + 1
+                        ),
+                        cp.span,
+                        decl.as_ref().and_then(|d| d.params.get(i)).map(|dp| {
+                            ("keep the parameters in the overridden order".into(), dp.name.span, pp.name.clone())
+                        }),
+                    ));
+                }
+            }
+        }
+        let pr = self.types.subst(p.ret, &psub, Some(view));
+        let cr = self.types.subst(c.ret, &csub, Some(child_ty));
+        if !self.trial(|ck| ck.assignable(cr, pr)) {
+            let (ps, cs) = (self.show(pr), self.show(cr));
+            let fix = decl
+                .as_ref()
+                .and_then(|d| d.ret.as_ref())
+                .map(|t| (format!("return `{ps}` (or a narrower type)"), t.span, ps.clone()));
+            let span = decl.as_ref().and_then(|d| d.ret.as_ref()).map_or(c.span, |t| t.span);
+            problems.push((
+                format!("{what} but returns `{cs}` where the overridden method promises `{ps}`"),
+                span,
+                fix,
+            ));
+        }
+        for (msg, span, fix) in problems {
+            let mut d = Diag::error("E0227", msg, span).note_at("overridden method", p.span).note(
+                "a call through the superclass runs the override, so it must accept the same arguments and return a compatible result",
+            );
+            if let Some((m, s, r)) = fix {
+                d = d.suggest(m, s, r);
+            }
+            self.emit(d);
         }
     }
 }
