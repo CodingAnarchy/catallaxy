@@ -1,0 +1,9 @@
+# expect: E0374
+# `Ok(1)` is a `Result[Int, String]`, but the arm's test sees only a `Result`.
+fn m(r: Result[Int, String] | Result[String, Int]) -> String {
+  match r {
+    a: Result[String, Int] => "si"
+    _ => "other"
+  }
+}
+puts(m(Ok(1)))

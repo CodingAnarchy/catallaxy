@@ -470,20 +470,24 @@ impl Checker {
                 self.types.nil
             }
             ExprKind::Is { expr, ty } => {
-                self.check_expr(expr, None);
-                let t = self.resolve_type(ty, &mut self.type_scope());
-                let rt = self.rt_of(t);
+                let src = self.check_expr(expr, None);
+                let t = self.resolve_test_type(ty);
+                self.check_type_test(src, t, Some(ty), ty.span);
+                let rt = self.rt_of(t.ty);
                 let idx = self.rt_type(rt);
                 self.pats.insert(e.id, PatRes::Type { rt: idx, bind: None });
                 self.types.bool
             }
             ExprKind::AsCast { expr, ty } => {
-                self.check_expr(expr, None);
-                let t = self.resolve_type(ty, &mut self.type_scope());
-                let rt = self.rt_of(t);
+                let src = self.check_expr(expr, None);
+                let t = self.resolve_test_type(ty);
+                self.check_type_test(src, t, Some(ty), ty.span);
+                let rt = self.rt_of(t.ty);
                 let idx = self.rt_type(rt);
                 self.pats.insert(e.id, PatRes::Type { rt: idx, bind: None });
-                self.types.optional(t)
+                // The erased form keeps the type arguments the value's type implies.
+                let res = if t.erased { self.split_by_test(src, t).0 } else { t.ty };
+                self.types.optional(res)
             }
             ExprKind::Unwrap(x) => {
                 let t = self.check_expr(x, None);
@@ -1334,9 +1338,11 @@ impl Checker {
                 let mut tn = Vec::new();
                 let mut fne = Vec::new();
                 if let Some(l) = self.narrowable_local(expr) {
-                    let target = self.resolve_type(ty, &mut self.type_scope());
+                    self.suppress_diags += 1;
+                    let target = self.resolve_test_type(ty);
+                    self.suppress_diags -= 1;
                     let cur = self.local_ty(l);
-                    let (yes, no) = self.split_by_type(cur, target);
+                    let (yes, no, _) = self.split_by_test(cur, target);
                     tn.push((l.into(), yes));
                     if let Some(no) = no {
                         fne.push((l.into(), no));
@@ -1349,27 +1355,6 @@ impl Checker {
                 (Vec::new(), Vec::new())
             }
         }
-    }
-
-    /// Splits a (union) type into the part matching `target` and the rest.
-    pub fn split_by_type(&mut self, cur: TyId, target: TyId) -> (TyId, Option<TyId>) {
-        let cur = self.types.shallow_resolve(cur);
-        let members: Vec<TyId> = match self.types.get(cur) {
-            Ty::Union(p) => p.clone(),
-            _ => vec![cur],
-        };
-        let mut yes = Vec::new();
-        let mut no = Vec::new();
-        for m in members {
-            if self.trial(|c| c.assignable(m, target)) {
-                yes.push(m);
-            } else {
-                no.push(m);
-            }
-        }
-        let y = if yes.is_empty() { target } else { self.types.union(yes) };
-        let n = if no.is_empty() { None } else { Some(self.types.union(no)) };
-        (y, n)
     }
 
     /// The field path `e` reads (`n.next`, `self.head.next`) when it is a plain field read on a

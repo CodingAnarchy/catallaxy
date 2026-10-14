@@ -1377,6 +1377,29 @@ key.push(3)
 
 Use frozen keys (`Set[frozen List[Int]]`, filled with `freeze(k)`) or tuples.
 
+## E0374
+
+Type test that cannot be checked at run time. Type arguments of generic classes, enums and interfaces
+are erased, so `is`, `as?` and type patterns check only the class (`Box`), not `Box[String]`; a
+function type is checked only as "a function", and a type parameter not at all. A test is allowed
+when the value's static type already determines what is not checked (`x: Box[Int] | Foo` tested for
+`Box[Int]`), but not when a value could pass the test without having the tested type. Lists, sets,
+dictionaries and tuples are checked element by element, so `is List[Int]` is allowed.
+
+```cx
+class Box[T] {
+  v: T
+}
+fn h(b: Box[Int] | Box[String]) -> Int {
+  if b is Box[String] { return b.v.length }
+  0
+}
+```
+
+Test for the class alone (`is Box`, `as? Box`, `b: Box =>`), which keeps the type arguments the static
+type implies (`Box[Int] | Box[String]` here, `Box[Dyn]` for a `Dyn` value), and check the contents; or
+give each case its own class or enum variant and test for that.
+
 ## E0380
 
 Format spec does not apply to the type. The spec is valid but not for this value: `.2f` on a
