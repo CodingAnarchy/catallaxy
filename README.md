@@ -101,6 +101,7 @@ For VS Code, [`editors/vscode`](editors/vscode) has an extension with syntax hig
   editor setup.
 - [Language reference](docs/reference.md) — syntax, types and semantics.
 - [Standard library](docs/stdlib.md) — every builtin type, method and function.
+- [Error codes](docs/errors.md) — what each diagnostic code means, an example, and how to fix it.
 - [Design](docs/design.md) — why the language and runtime look the way they do.
 - [Examples](examples/) — complete programs, each with its expected output.
 - Evaluations of ideas not adopted (yet), with measurements: [escape analysis](docs/escape-analysis.md),
