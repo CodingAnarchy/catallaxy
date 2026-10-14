@@ -491,6 +491,7 @@ impl Checker {
             self_ty: self.types.error,
             dispatch: Dispatch::Static(f),
             frozen: false,
+            alts: Vec::new(),
         };
         let (ps, r) = self.instantiate_sig(&m);
         let pts = ps.iter().map(|p| p.ty).collect();
@@ -1973,6 +1974,7 @@ impl Checker {
                         self_ty: self.types.error,
                         dispatch: Dispatch::Static(f),
                         frozen: false,
+                        alts: Vec::new(),
                     };
                     let (slots, ret) = self.check_args(e, &m, args, block, expected, false);
                     self.calls.insert(
@@ -2075,7 +2077,14 @@ impl Checker {
         let (params, ret) = self.instantiate_sig(m);
         let inst = std::mem::take(&mut self.last_inst);
         let inst_subst = std::mem::take(&mut self.last_inst_subst);
+        let sigs = std::mem::take(&mut self.last_sigs);
         let fname = self.fns[m.fid as usize].name.clone();
+        // A union receiver: arguments are matched and checked against the first member's
+        // parameters, then against each other member's below.
+        let params = match sigs.first() {
+            Some((_, ps, _)) => ps.clone(),
+            None => params,
+        };
         // Early: use the expected result type to inform inference.
         if let Some(exp) = expected {
             if self.types.has_vars(ret) {
@@ -2147,6 +2156,15 @@ impl Checker {
                 }
             }
         }
+        if ok && sigs.len() > 1 {
+            let omitted: Vec<bool> = slots.iter().map(|s| matches!(s, Some(ArgSlot::Missing))).collect();
+            if !self.union_sigs_agree(call, m, &sigs, &omitted) {
+                self.check_args_loose(args, block);
+                return (Vec::new(), self.types.error);
+            }
+        }
+        // Each member's parameters, when the call matched the first member's.
+        let union_sigs = ok && sigs.len() > 1;
         // Check closures last so their parameter types are known.
         let order: Vec<usize> = {
             let mut o: Vec<usize> = (0..params.len()).collect();
@@ -2180,9 +2198,9 @@ impl Checker {
             } else {
                 self.check_expr(expr, Some(pt))
             };
-            if !self.require_assignable(expr, t, pt, &format!("argument `{}`", p.name)) {
-                ok = false;
-            }
+            let fits = self.require_assignable(expr, t, pt, &format!("argument `{}`", p.name))
+                && (!union_sigs || self.union_arg_fits(expr, t, j, m, &sigs));
+            ok &= fits;
             if p.is_move {
                 self.check_move_arg(expr, t);
             }
@@ -2219,6 +2237,127 @@ impl Checker {
         }
         let slots = slots.into_iter().map(|s| s.unwrap_or(ArgSlot::Missing)).collect();
         (slots, ret)
+    }
+
+    /// For a member reached on a union receiver: each member's method must be an instance method
+    /// that the by-name call can reach at runtime, and not a mutating one on a frozen member.
+    fn check_union_method(&mut self, m: &MethodRef, rt: TyId, name: &ast::Ident) -> bool {
+        let fallback = match &m.dispatch {
+            Dispatch::Dynamic(_, f) => *f,
+            _ => None,
+        };
+        let mut ok = true;
+        for a in &m.alts {
+            let f = self.fns[a.fid as usize].clone();
+            let part = format!("`{}` (part of `{}`)", self.show(a.self_ty), self.show(rt));
+            if f.self_kind == ast::SelfKind::None {
+                let msg = format!("{part} has `{}` only as a static function", name.name);
+                self.err("E0346", msg, name.span);
+                ok = false;
+                continue;
+            }
+            let needs = self.union_fallback(a, &name.name);
+            if needs.is_some() && needs != fallback {
+                let msg = format!(
+                    "{part} has `{}` only as an extension or interface default method, and another member needs a different one; a call on a union value can fall back to only one",
+                    name.name
+                );
+                self.err("E0311", msg, name.span);
+                ok = false;
+                continue;
+            }
+            if a.frozen {
+                if f.mutating {
+                    let msg = format!("cannot call mutating method `{}` on frozen {part}", name.name);
+                    self.emit(
+                        Diag::error("E0614", msg, name.span)
+                            .note("frozen values are deeply immutable; use `.dup()` for a mutable copy"),
+                    );
+                    ok = false;
+                } else if !f.is_native {
+                    let shown = self.show(a.self_ty);
+                    self.frozen_calls.push((name.span, a.fid, shown));
+                }
+            }
+        }
+        ok
+    }
+
+    /// For a call on a union receiver: whether each member's method takes the parameters of the
+    /// first member's (the same names in the same order), so the arguments, matched once by name
+    /// and position, suit every member, and has a default for each `omitted` argument.
+    fn union_sigs_agree(
+        &mut self,
+        call: &Expr,
+        m: &MethodRef,
+        sigs: &[(MethodRef, Vec<PInfo>, TyId)],
+        omitted: &[bool],
+    ) -> bool {
+        let (first, ps0, _) = &sigs[0];
+        let shape = |ps: &[PInfo]| {
+            ps.iter()
+                .map(|p| if p.has_default { format!("{} = ...", p.name) } else { p.name.clone() })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        for (a, ps, _) in &sigs[1..] {
+            let agree = ps.len() == ps0.len()
+                && ps.iter().zip(ps0).zip(omitted).all(|((p, q), &o)| p.name == q.name && (p.has_default || !o));
+            if agree {
+                continue;
+            }
+            let name = &self.fns[m.fid as usize].name;
+            let msg = format!(
+                "`{name}` takes different parameters on the members of `{}`: `({})` on `{}`, `({})` on `{}`",
+                self.show(m.self_ty),
+                shape(ps0),
+                self.show(first.self_ty),
+                shape(ps),
+                self.show(a.self_ty)
+            );
+            self.emit(
+                Diag::error("E0332", msg, call.span)
+                    .note("a call on a union value must suit the method of every member"),
+            );
+            return false;
+        }
+        true
+    }
+
+    /// For a call on a union receiver: whether argument `t`, already checked against parameter `j`
+    /// of the first member's method, also suits parameter `j` of every other member's.
+    fn union_arg_fits(
+        &mut self,
+        expr: &Expr,
+        t: TyId,
+        j: usize,
+        m: &MethodRef,
+        sigs: &[(MethodRef, Vec<PInfo>, TyId)],
+    ) -> bool {
+        // The value passed after any conversion made for the first member's parameter: the call is
+        // dispatched at runtime and passes the same value to every member.
+        let passed = if self.coerce.get(&expr.id) == Some(&Coercion::IntToFloat) { self.types.float } else { t };
+        for (a, ps, _) in &sigs[1..] {
+            let pt = ps[j].ty;
+            if self.assignable(passed, pt) {
+                continue;
+            }
+            let name = self.fns[m.fid as usize].name.clone();
+            let msg = format!(
+                "mismatched types in argument `{}`: `{name}` on `{}` expects `{}`, found `{}`",
+                ps[j].name,
+                self.show(a.self_ty),
+                self.show(pt),
+                self.show(passed)
+            );
+            let note = format!(
+                "the receiver is `{}`, so the argument must suit `{name}` on every member",
+                self.show(m.self_ty)
+            );
+            self.emit(Diag::error("E0300", msg, expr.span).note(note));
+            return false;
+        }
+        true
     }
 
     /// Owned values passed to a `move` parameter must be fresh or explicitly moved.
@@ -2868,7 +3007,7 @@ impl Checker {
     /// once and calls methods by name, so it reaches a class's own methods and getters, and an
     /// extension of a class or enum when it is the only extension method of that name for it;
     /// interface default methods and extensions of other types are resolved statically only.
-    fn runtime_dispatchable(&self, recv: TyId, name: &str, d: &Dispatch) -> bool {
+    pub fn runtime_dispatchable(&self, recv: TyId, name: &str, d: &Dispatch) -> bool {
         let f = match d {
             Dispatch::Virtual(..) | Dispatch::Dynamic(_, None) => return true,
             Dispatch::Dynamic(_, Some(_)) => return false,
@@ -2979,7 +3118,14 @@ impl Checker {
                             let params = self.enums[en as usize].params.clone();
                             let subst = params.into_iter().zip(ta.iter().copied()).collect();
                             let self_ty = self.types.intern(Ty::Enum(en, ta));
-                            let m = MethodRef { fid: f, subst, self_ty, dispatch: Dispatch::Static(f), frozen: false };
+                            let m = MethodRef {
+                                fid: f,
+                                subst,
+                                self_ty,
+                                dispatch: Dispatch::Static(f),
+                                frozen: false,
+                                alts: Vec::new(),
+                            };
                             let (slots, ret) = self.check_args(e, &m, args, block, expected, false);
                             self.calls.insert(
                                 e.id,
@@ -3041,6 +3187,7 @@ impl Checker {
                                 self_ty: self.types.error,
                                 dispatch: Dispatch::Static(f),
                                 frozen: false,
+                                alts: Vec::new(),
                             };
                             let (slots, ret) = self.check_args(e, &m, args, block, expected, false);
                             self.calls.insert(
@@ -3249,14 +3396,20 @@ impl Checker {
             self.check_args_loose(args, block);
             return self.types.error;
         };
+        if !m.alts.is_empty() && !self.check_union_method(&m, rt, name) {
+            self.check_args_loose(args, block);
+            return self.types.error;
+        }
         let f = self.fns[m.fid as usize].clone();
-        if f.self_kind == ast::SelfKind::None {
+        // For a union receiver, `check_union_method` did these checks for each member.
+        let single = m.alts.is_empty();
+        if single && f.self_kind == ast::SelfKind::None {
             let msg = format!("`{}` is a static function; call it as `{}.{}(...)`", f.name, self.show(rt), f.name);
             self.err("E0346", msg, name.span);
             self.check_args_loose(args, block);
             return self.types.error;
         }
-        if m.frozen {
+        if single && m.frozen {
             if f.mutating {
                 let msg = format!("cannot call mutating method `{}` on frozen `{}`", f.name, self.show(rt));
                 self.emit(
@@ -3334,6 +3487,32 @@ impl Checker {
         for i in &self.ifaces {
             names.extend(i.by_name.keys().cloned());
         }
+        // On a union, name the members that lack it.
+        if let Ty::Union(parts) = self.types.get(self.types.shallow_resolve(rt)).clone() {
+            let cp = self.checkpoint();
+            self.suppress_diags += 1;
+            let missing: Vec<TyId> = parts
+                .into_iter()
+                .filter(|&p| {
+                    self.lookup_field(p, &name.name).is_none() && self.lookup_method(p, &name.name, true).is_none()
+                })
+                .collect();
+            self.suppress_diags -= 1;
+            self.rollback(cp);
+            if !missing.is_empty() && !(missing.len() == 1 && missing[0] == self.types.nil) {
+                let shown: Vec<String> = missing.iter().map(|&p| format!("`{}`", self.show(p))).collect();
+                let msg = format!(
+                    "no method or field `{}` on {}, so not on every member of `{}`",
+                    name.name,
+                    shown.join(" or "),
+                    self.show(rt)
+                );
+                self.emit(Diag::error("E0311", msg, name.span).note(
+                    "a member of a union value must exist on every member type; narrow it first with `match` or `as?`",
+                ));
+                return;
+            }
+        }
         let msg = format!("no method or field `{}` on `{}`", name.name, self.show(rt));
         let mut d = Diag::error("E0311", msg, name.span);
         if let Some((req, actual)) = self.unmet_ext_bound(rt, &name.name) {
@@ -3387,7 +3566,14 @@ impl Checker {
                 // A user static `new` overrides the generated constructor (the standard library's
                 // frozen `Regex` builds its instances natively this way).
             } else {
-                let m = MethodRef { fid: ctor, subst, self_ty, dispatch: Dispatch::Static(ctor), frozen: false };
+                let m = MethodRef {
+                    fid: ctor,
+                    subst,
+                    self_ty,
+                    dispatch: Dispatch::Static(ctor),
+                    frozen: false,
+                    alts: Vec::new(),
+                };
                 let (slots, ret) = self.check_args(e, &m, args, block, expected, false);
                 self.calls.insert(e.id, CallRes::Construct { class: cid, ctor, args: slots });
                 return ret;
@@ -3409,7 +3595,14 @@ impl Checker {
                     Ty::Class(_, a) => info.params.iter().copied().zip(a).collect(),
                     _ => subst.clone(),
                 };
-                let m = MethodRef { fid: f, subst: sub, self_ty, dispatch: Dispatch::Static(f), frozen: false };
+                let m = MethodRef {
+                    fid: f,
+                    subst: sub,
+                    self_ty,
+                    dispatch: Dispatch::Static(f),
+                    frozen: false,
+                    alts: Vec::new(),
+                };
                 let (slots, ret) = self.check_args(e, &m, args, block, expected, false);
                 self.calls
                     .insert(e.id, CallRes::Fn { dispatch: Dispatch::Static(f), recv: false, args: slots, safe: false });

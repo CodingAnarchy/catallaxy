@@ -1,0 +1,9 @@
+# expect: E0301
+# A method call on a union value has the union of the members' results: `Int | String` here.
+class C {
+  fn get(self) -> Int { 1 }
+}
+class D {
+  fn get(self) -> String { "s" }
+}
+fn f(c: C | D) -> Int { c.get() }

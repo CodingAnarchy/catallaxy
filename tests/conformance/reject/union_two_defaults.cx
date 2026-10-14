@@ -1,0 +1,18 @@
+# expect: E0311
+# Interface default methods are not in the runtime class tables; a call on a union value can
+# reach only one function that way.
+interface Hi {
+  fn h(self) -> Int
+  fn greet(self) -> String { "hi" }
+}
+interface Ho {
+  fn o(self) -> Int
+  fn greet(self) -> String { "ho" }
+}
+class H {
+  fn h(self) -> Int { 1 }
+}
+class O {
+  fn o(self) -> Int { 2 }
+}
+fn f(x: H | O) -> String { x.greet() }

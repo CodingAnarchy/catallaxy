@@ -13,6 +13,9 @@ pub struct MethodRef {
     pub dispatch: Dispatch,
     /// The receiver is frozen: mutating methods are rejected and results are frozen.
     pub frozen: bool,
+    /// For a union receiver: the method as found on each member, in member order (empty
+    /// otherwise). The fields above are the first member's, dispatched by name at runtime.
+    pub alts: Vec<MethodRef>,
 }
 
 impl Checker {
@@ -69,7 +72,42 @@ impl Checker {
     }
 
     /// Instantiates a method's parameter and result types for one call.
+    ///
+    /// For a union receiver the result is the union of the members' results, and a parameter whose
+    /// type differs between members has their intersection as its type, so an argument must suit
+    /// every member. Each member's own instantiation is left in `last_sigs`.
     pub fn instantiate_sig(&mut self, m: &MethodRef) -> (Vec<PInfo>, TyId) {
+        self.last_sigs.clear();
+        if m.alts.is_empty() {
+            return self.instantiate_one(m);
+        }
+        let mut inst = Vec::new();
+        let mut inst_subst = FxHashMap::default();
+        let mut sigs = Vec::new();
+        for a in &m.alts {
+            let (ps, ret) = self.instantiate_one(a);
+            inst.append(&mut self.last_inst);
+            inst_subst.extend(std::mem::take(&mut self.last_inst_subst));
+            sigs.push((a.clone(), ps, ret));
+        }
+        let mut params = sigs[0].1.clone();
+        for (_, ps, _) in &sigs[1..] {
+            if ps.len() != params.len() {
+                continue;
+            }
+            for (p, q) in params.iter_mut().zip(ps) {
+                p.ty = self.types.inter(vec![p.ty, q.ty]);
+                p.has_default &= q.has_default;
+            }
+        }
+        let ret = self.types.union(sigs.iter().map(|s| s.2).collect());
+        self.last_inst = inst;
+        self.last_inst_subst = inst_subst;
+        self.last_sigs = sigs;
+        (params, ret)
+    }
+
+    fn instantiate_one(&mut self, m: &MethodRef) -> (Vec<PInfo>, TyId) {
         self.ensure_signature(m.fid);
         let f = self.fns[m.fid as usize].clone();
         let mut sub = m.subst.clone();
@@ -136,7 +174,14 @@ impl Checker {
                 let info = &self.enums[eid as usize];
                 if let Some(&fid) = info.methods.get(name) {
                     let subst = info.params.iter().copied().zip(args).collect();
-                    return Some(MethodRef { fid, subst, self_ty: r, dispatch: Dispatch::Static(fid), frozen: false });
+                    return Some(MethodRef {
+                        fid,
+                        subst,
+                        self_ty: r,
+                        dispatch: Dispatch::Static(fid),
+                        frozen: false,
+                        alts: Vec::new(),
+                    });
                 }
                 self.lookup_ext(r, name, false).or_else(|| self.lookup_default(r, name, false))
             }
@@ -188,16 +233,21 @@ impl Checker {
                         return Some(m);
                     }
                 }
-                let mut first = None;
+                // Every member must have it. The call dispatches on the runtime value, so it is
+                // checked against each member's method (`alts`).
+                let mut alts = Vec::new();
                 for p in parts {
-                    let m = self.lookup_method(p, name, allow_getters)?;
-                    if first.is_none() {
-                        first = Some(m);
-                    }
+                    alts.push(self.lookup_method(p, name, allow_getters)?);
                 }
-                let mut m = first?;
-                m.dispatch = Dispatch::Dynamic(name.to_string(), None);
+                let mut m = alts[0].clone();
+                // A member whose method is not in its runtime class (an interface default or an
+                // extension method) is reached through the call's fallback; there is one, so
+                // only one such method can be served (see `check_union_method`).
+                let fallback = alts.iter().find_map(|a| self.union_fallback(a, name));
+                m.dispatch = Dispatch::Dynamic(name.to_string(), fallback);
                 m.self_ty = r;
+                m.frozen = alts.iter().any(|a| a.frozen);
+                m.alts = alts;
                 Some(m)
             }
             Ty::Tuple(_) | Ty::Fn(..) => {
@@ -214,6 +264,19 @@ impl Checker {
         m.self_ty = r;
         if let Owner::Iface(iid) = self.fns[m.fid as usize].owner {
             m.subst.insert(self.ifaces[iid as usize].self_param, r);
+        }
+    }
+
+    /// The function a by-name call needs as its fallback to reach method `m` of one union member:
+    /// an interface default or extension method, which runtime class tables may lack.
+    pub fn union_fallback(&self, m: &MethodRef, name: &str) -> Option<FnId> {
+        if self.runtime_dispatchable(m.self_ty, name, &m.dispatch) {
+            return None;
+        }
+        match &m.dispatch {
+            Dispatch::Dynamic(_, f) => *f,
+            Dispatch::Static(f) => Some(*f),
+            Dispatch::Virtual(..) => None,
         }
     }
 
@@ -245,11 +308,18 @@ impl Checker {
                     }
                     _ => Dispatch::Static(fid),
                 };
-                return Some(MethodRef { fid, subst, self_ty: r, dispatch, frozen: false });
+                return Some(MethodRef { fid, subst, self_ty: r, dispatch, frozen: false, alts: Vec::new() });
             }
             if allow_getters {
                 if let Some(&g) = ci.getters.get(name) {
-                    return Some(MethodRef { fid: g, subst, self_ty: r, dispatch: Dispatch::Static(g), frozen: false });
+                    return Some(MethodRef {
+                        fid: g,
+                        subst,
+                        self_ty: r,
+                        dispatch: Dispatch::Static(g),
+                        frozen: false,
+                        alts: Vec::new(),
+                    });
                 }
             }
             let sup = ci.superclass?;
@@ -284,6 +354,7 @@ impl Checker {
             self_ty: r,
             dispatch: Dispatch::Dynamic(name.to_string(), fallback),
             frozen: false,
+            alts: Vec::new(),
         })
     }
 
@@ -331,7 +402,7 @@ impl Checker {
             }
             let subst: FxHashMap<ParamId, TyId> = sub.into_iter().map(|(p, t)| (p, self.types.resolve(t))).collect();
             let dispatch = if dynamic { Dispatch::Dynamic(name.to_string(), Some(fid)) } else { Dispatch::Static(fid) };
-            return Some(MethodRef { fid, subst, self_ty: r, dispatch, frozen: false });
+            return Some(MethodRef { fid, subst, self_ty: r, dispatch, frozen: false, alts: Vec::new() });
         }
         None
     }
@@ -406,7 +477,7 @@ impl Checker {
             let mut subst: FxHashMap<ParamId, TyId> = params.into_iter().zip(args).collect();
             subst.insert(self_param, r);
             let dispatch = if dynamic { Dispatch::Dynamic(name.to_string(), Some(fid)) } else { Dispatch::Static(fid) };
-            return Some(MethodRef { fid, subst, self_ty: r, dispatch, frozen: false });
+            return Some(MethodRef { fid, subst, self_ty: r, dispatch, frozen: false, alts: Vec::new() });
         }
         None
     }
