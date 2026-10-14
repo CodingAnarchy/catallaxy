@@ -86,6 +86,7 @@ fn run_limited(name: &str, src: &str) -> Outcome {
 /// Checks the common shape: `join` saw the error, the program carried on, and the same error on
 /// the main thread ended it with a trace through `func`.
 fn check(o: &Outcome, join: &[&str], after: &str, panic: &[&str], func: &str) {
+    eprintln!("OUTCOME[{after}] {} | {}", o.stdout.lines().next().unwrap_or(""), o.stderr.lines().find(|l| l.starts_with("panic:")).unwrap_or(""));
     let ctx = format!("status {:?}\n--- stdout\n{}--- stderr\n{}", o.code, o.stdout, o.stderr);
     assert_eq!(o.code, Some(101), "{ctx}");
     let lines: Vec<&str> = o.stdout.lines().collect();

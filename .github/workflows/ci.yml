@@ -22,7 +22,7 @@ jobs:
         run: cargo test --release --locked -p catallaxy --test out_of_memory --no-run
       - name: Out-of-memory tests, repeated
         run: |
-          for i in $(seq 1 7); do
+          for i in $(seq 1 12); do
             echo "=== run $i"
-            cargo test --release --locked -p catallaxy --test out_of_memory -- --test-threads=1 || exit 1
+            cargo test --release --locked -p catallaxy --test out_of_memory -- --test-threads=1 --nocapture 2>&1 | grep -E "OUTCOME|test result|FAILED|panicked" ; test ${PIPESTATUS[0]} -eq 0 || exit 1
           done
