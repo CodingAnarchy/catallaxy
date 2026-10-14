@@ -172,20 +172,35 @@ impl DictTable {
     }
 
     pub fn with_capacity(n: usize) -> Self {
+        Self::try_with_capacity(n).unwrap_or_else(|layout| std::alloc::handle_alloc_error(layout))
+    }
+
+    /// As [`DictTable::with_capacity`], but returns the layout the allocator refused instead
+    /// of aborting.
+    pub fn try_with_capacity(n: usize) -> Result<Self, Layout> {
         let t = DictTable::new();
         if n > 0 {
-            t.entries.store(WordBuf::alloc(n * W, Value::NIL.0), Ordering::Relaxed);
-            t.indices.store(WordBuf::alloc(index_cap(n), EMPTY_IX), Ordering::Relaxed);
+            // `n * W` (W = 3) fitting also keeps `index_cap(n)` from overflowing.
+            let ents = n.checked_mul(W).ok_or_else(|| Layout::from_size_align(isize::MAX as usize & !7, 8).unwrap())?;
+            t.entries.store(WordBuf::try_alloc(ents, Value::NIL.0)?, Ordering::Relaxed);
+            // On failure, dropping `t` frees the entries.
+            t.indices.store(WordBuf::try_alloc(index_cap(n), EMPTY_IX)?, Ordering::Relaxed);
         }
-        t
+        Ok(t)
     }
 
     /// An empty table in shape mode, for `Dyn` records.
     pub fn record(n: usize) -> Self {
+        Self::try_record(n).unwrap_or_else(|layout| std::alloc::handle_alloc_error(layout))
+    }
+
+    /// As [`DictTable::record`], but returns the layout the allocator refused instead of
+    /// aborting.
+    pub fn try_record(n: usize) -> Result<Self, Layout> {
         let t = DictTable::new();
-        t.entries.store(WordBuf::alloc(n, Value::NIL.0), Ordering::Relaxed);
+        t.entries.store(WordBuf::try_alloc(n, Value::NIL.0)?, Ordering::Relaxed);
         t.shape.store(*ROOT_SHAPE as *const Shape as *mut Shape, Ordering::Relaxed);
-        t
+        Ok(t)
     }
 
     // ---- reads ------------------------------------------------------------------------------
@@ -592,22 +607,29 @@ impl Drop for DictTable {
 
 impl Clone for DictTable {
     fn clone(&self) -> Self {
+        self.try_clone().unwrap_or_else(|layout| std::alloc::handle_alloc_error(layout))
+    }
+}
+
+impl DictTable {
+    /// A copy of the table, or the layout the allocator refused.
+    pub fn try_clone(&self) -> Result<Self, Layout> {
         let n = self.raw_len();
         if let Some(shape) = self.shape() {
-            let t = DictTable::record(n);
+            let t = DictTable::try_record(n)?;
             for (d, w) in t.ents().iter().zip(&self.ents()[..n.min(self.ents().len())]) {
                 d.store(w.load(Ordering::Relaxed), Ordering::Relaxed);
             }
             t.shape.store(shape as *const Shape as *mut Shape, Ordering::Relaxed);
             t.used.store(n, Ordering::Relaxed);
             t.live.store(self.len(), Ordering::Relaxed);
-            return t;
+            return Ok(t);
         }
-        let t = DictTable::with_capacity(self.len());
+        let t = DictTable::try_with_capacity(self.len())?;
         for e in self.iter() {
             // The clone is unpublished: only this thread can see it.
-            unsafe { t.insert_new(e.hash, e.key, e.value, Access::Local) };
+            unsafe { t.try_insert_new(e.hash, e.key, e.value, Access::Local)? };
         }
-        t
+        Ok(t)
     }
 }

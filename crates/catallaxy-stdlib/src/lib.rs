@@ -20,7 +20,7 @@ use catallaxy_runtime::class::class_of;
 use catallaxy_runtime::object::{kind_of, str_of};
 use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership;
-use catallaxy_runtime::{panic, ObjKind, RtResult, Trap, Value};
+use catallaxy_runtime::{panic, try_push, try_vec, ObjKind, RtResult, Trap, Value};
 use catallaxy_vm::{NativeFn, Vm};
 use parking_lot::Mutex;
 
@@ -122,16 +122,31 @@ pub(crate) fn new_str(vm: &mut Vm, s: &str) -> Value {
     vm.m.alloc_str(s)
 }
 
-pub(crate) fn new_list(vm: &mut Vm, items: Vec<Value>) -> Value {
-    vm.m.alloc_list(items)
+/// A list holding `items` (taking over the vector), or a `MemoryError` panic if its buffer
+/// cannot be had. Nothing roots `items`, so there is no collection and retry.
+pub(crate) fn new_list(vm: &mut Vm, items: Vec<Value>) -> RtResult<Value> {
+    vm.m.try_alloc_list(items)
 }
 
-/// A snapshot of a list's items (with ownership checks).
+/// A list of new strings, one per part, or a `MemoryError` panic. The parts may point into a
+/// rooted string: allocation never moves objects, and nothing here collects. A native that
+/// holds no unrooted values should call `vm.m.collect_if_refused()` first.
+pub(crate) fn new_str_list<'a>(vm: &mut Vm, parts: impl IntoIterator<Item = &'a str>) -> RtResult<Value> {
+    let parts = parts.into_iter();
+    let mut items = try_vec(parts.size_hint().0)?;
+    for p in parts {
+        let v = vm.m.try_alloc_str_nogc(p)?;
+        try_push(&mut items, v)?;
+    }
+    new_list(vm, items)
+}
+
+/// A snapshot of a list's items (with ownership checks), or a `MemoryError` panic.
 pub(crate) fn list_items(vm: &Vm, l: Value) -> RtResult<Vec<Value>> {
     if kind_of(l) != ObjKind::List {
         return panic(format!("TypeError: expected List, got {}", class_of(l).name));
     }
-    Ok(ownership::read_list(&vm.m, l)?.to_vec())
+    ownership::read_list(&vm.m, l)?.try_to_vec()
 }
 
 pub(crate) fn to_s(vm: &mut Vm, v: Value) -> RtResult<String> {
@@ -145,6 +160,15 @@ pub(crate) fn ok(vm: &mut Vm, v: Value) -> Value {
 pub(crate) fn err(vm: &mut Vm, msg: &str) -> Value {
     let s = new_str(vm, msg);
     catallaxy_vm::slow::make_result(vm, false, s)
+}
+
+/// `Err("path: error")` for a failed file operation, or a `MemoryError` panic if the data did
+/// not fit in memory (the standard library reports a refused buffer as an I/O error).
+pub(crate) fn io_err(vm: &mut Vm, path: &str, e: std::io::Error) -> RtResult<Value> {
+    if e.kind() == std::io::ErrorKind::OutOfMemory {
+        return catallaxy_runtime::refused(format!("cannot read {path} into memory"));
+    }
+    Ok(err(vm, &format!("{path}: {e}")))
 }
 
 pub(crate) fn exit_trap(code: i32) -> Trap {

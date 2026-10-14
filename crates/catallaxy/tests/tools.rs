@@ -871,12 +871,17 @@ fn workspace_dir(tag: &str) -> std::path::PathBuf {
 impl Lsp {
     /// Starts a server on the workspace folder `dir` and completes the handshake.
     fn init_workspace(dir: &std::path::Path, env: &[(&str, &str)]) -> Lsp {
+        Lsp::init_workspace_with(dir, env, json!({}))
+    }
+
+    /// As `init_workspace`, with the given client capabilities.
+    fn init_workspace_with(dir: &std::path::Path, env: &[(&str, &str)], caps: Value) -> Lsp {
         let mut lsp = Lsp::start_with(env);
         let root = path_uri(dir);
         let r = lsp.request(
             1,
             "initialize",
-            json!({"processId": null, "rootUri": root, "capabilities": {},
+            json!({"processId": null, "rootUri": root, "capabilities": caps,
                    "workspaceFolders": [{"uri": root, "name": "ws"}]}),
         );
         assert_eq!(r["result"]["capabilities"]["workspace"]["workspaceFolders"]["supported"], true, "{r}");
@@ -1019,6 +1024,140 @@ fn lsp_workspace_file_limit_is_logged() {
     assert!(msg.contains("more than 2 .cx files"), "{msg}");
     let r = lsp.wait("workspace/symbol", |v| v["id"] == json!(2));
     assert!(r["result"].is_array(), "{r}");
+    lsp.finish();
+}
+
+impl Lsp {
+    /// Sends a request and returns its response with the messages that came before it.
+    fn request_seeing(&mut self, id: i64, method: &str, params: Value) -> (Value, Vec<Value>) {
+        self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        let mut seen = Vec::new();
+        loop {
+            let v = self
+                .rx
+                .recv_timeout(Duration::from_secs(30))
+                .unwrap_or_else(|_| panic!("timed out waiting for {method}"));
+            if v["id"] == json!(id) && v.get("method").is_none() {
+                return (v, seen);
+            }
+            seen.push(v);
+        }
+    }
+
+    /// Waits for a `window/logMessage` containing `text`, returning the message.
+    fn wait_log(&self, text: &str) -> String {
+        let v = self.wait(text, |v| {
+            v["method"] == "window/logMessage" && v["params"]["message"].as_str().is_some_and(|m| m.contains(text))
+        });
+        v["params"]["message"].as_str().unwrap().to_string()
+    }
+
+    /// Answers the server's `window/workDoneProgress/create` and waits for the progress to begin.
+    fn accept_progress(&mut self) -> Value {
+        let create = self.wait("a progress token request", |v| v["method"] == "window/workDoneProgress/create");
+        let token = create["params"]["token"].clone();
+        self.send(json!({"jsonrpc": "2.0", "id": create["id"], "result": null}));
+        let t = token.clone();
+        self.wait("progress begin", move |v| {
+            v["method"] == "$/progress" && v["params"]["token"] == t && v["params"]["value"]["kind"] == "begin"
+        });
+        token
+    }
+}
+
+const WARM_LOG: &str = "indexed the workspace";
+const COMPILED_LOG: &str = "a request compiled";
+
+/// After `initialized` the workspace is compiled in the background, with progress reports, so
+/// the first references request compiles nothing.
+#[test]
+fn lsp_workspace_warm_up() {
+    let dir = workspace_dir("lsp-ws-warm");
+    let caps = json!({"window": {"workDoneProgress": true}});
+    let mut lsp = Lsp::init_workspace_with(&dir, &[("CATX_LSP_DEBUG", "1")], caps);
+    let token = lsp.accept_progress();
+    lsp.wait("progress end", move |v| {
+        v["method"] == "$/progress" && v["params"]["token"] == token && v["params"]["value"]["kind"] == "end"
+    });
+    let log = lsp.wait_log(WARM_LOG);
+    assert!(log.contains("(4 files, 4 compiled)"), "{log}");
+
+    let shapes = path_uri(&dir.join("ws_shapes.cx"));
+    let main = path_uri(&dir.join("ws_main.cx"));
+    let params =
+        |p: Value| json!({"textDocument": {"uri": shapes}, "position": p, "context": {"includeDeclaration": true}});
+    let (r, seen) = lsp.request_seeing(2, "textDocument/references", params(pos(WS_SHAPES, 3, "total", 0)));
+    let compiled: Vec<&Value> =
+        seen.iter().filter(|v| v["params"]["message"].as_str().is_some_and(|m| m.contains(COMPILED_LOG))).collect();
+    assert!(compiled.is_empty(), "the first request compiled: {compiled:?}");
+    let mut want = vec![spot(&shapes, pos(WS_SHAPES, 3, "total", 0)), spot(&main, pos(WS_MAIN, 0, "total", 0))];
+    want.push(spot(&main, pos(WS_MAIN, 2, "total", 0)));
+    want.sort();
+    assert_eq!(ref_spots(&r), want);
+
+    // The counter does count: a file changed on disk is compiled again by the next request.
+    std::fs::write(dir.join("ws_main.cx"), format!("{WS_MAIN}puts(total([]))\n")).unwrap();
+    let (_, seen) = lsp.request_seeing(3, "textDocument/references", params(pos(WS_SHAPES, 3, "total", 0)));
+    assert!(seen.iter().any(|v| v["params"]["message"] == format!("catx lsp: {COMPILED_LOG} 1 files")), "{seen:?}");
+    lsp.finish();
+}
+
+/// Requests and edits that arrive while the warm-up is compiling get current results: each file
+/// is held as being compiled for a while, so the request waits for it, and finds it built from
+/// text the editor has since changed.
+#[test]
+fn lsp_workspace_warm_up_meets_requests_and_edits() {
+    let dir = workspace_dir("lsp-ws-warm-edit");
+    let mut lsp = Lsp::init_workspace(&dir, &[("CATX_LSP_WARM_DELAY_MS", "300")]);
+    let shapes = path_uri(&dir.join("ws_shapes.cx"));
+    let kinds = path_uri(&dir.join("ws_kinds.cx"));
+    let main = path_uri(&dir.join("ws_main.cx"));
+    let edited = format!("# edited, not saved\n{WS_KINDS}");
+    lsp.open_unsaved(&dir.join("ws_kinds.cx"), &edited);
+    let params = json!({"textDocument": {"uri": shapes}, "position": pos(WS_SHAPES, 1, "area", 0), "newName": "size"});
+    let r = lsp.request(2, "textDocument/rename", params);
+    let mut family = vec![
+        spot(&shapes, pos(WS_SHAPES, 1, "area", 0)),
+        spot(&shapes, pos(WS_SHAPES, 5, "area", 0)),
+        spot(&kinds, pos(&edited, 3, "area", 0)),
+        spot(&main, pos(WS_MAIN, 3, "area", 0)),
+    ];
+    family.sort();
+    assert_eq!(edit_spots(&r, "size"), family);
+    let r = lsp.request(3, "workspace/symbol", json!({"query": "thing"}));
+    assert_eq!(symbol_names(&r), ["DeepThing"]);
+    lsp.finish();
+}
+
+/// Shutting down while the warm-up is compiling stops it and exits cleanly.
+#[test]
+fn lsp_workspace_shutdown_during_warm_up() {
+    let dir = workspace_dir("lsp-ws-warm-stop");
+    let caps = json!({"window": {"workDoneProgress": true}});
+    let mut lsp = Lsp::init_workspace_with(&dir, &[("CATX_LSP_WARM_DELAY_MS", "600000")], caps);
+    lsp.accept_progress();
+    let r = lsp.request(2, "shutdown", Value::Null);
+    assert!(r.get("error").is_none(), "{r}");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "exit"}));
+    // A guard against hanging until the delay runs out, not a timing measurement.
+    for _ in 0..600 {
+        if let Some(status) = lsp.child.try_wait().unwrap() {
+            assert!(status.success());
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = lsp.child.kill();
+    panic!("the server did not exit");
+}
+
+/// The warm-up takes only as many files as `CATX_LSP_MAX_FILES` allows.
+#[test]
+fn lsp_workspace_warm_up_respects_file_limit() {
+    let dir = workspace_dir("lsp-ws-warm-cap");
+    let lsp = Lsp::init_workspace(&dir, &[("CATX_LSP_MAX_FILES", "2")]);
+    let log = lsp.wait_log(WARM_LOG);
+    assert!(log.contains("(2 files, 2 compiled)"), "{log}");
     lsp.finish();
 }
 

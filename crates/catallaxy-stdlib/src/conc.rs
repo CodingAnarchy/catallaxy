@@ -12,7 +12,7 @@ use catallaxy_gc::{RootSource, Tracer};
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership::{self, TRANSIT_TID};
-use catallaxy_runtime::{panic, RtResult, Trap, Value};
+use catallaxy_runtime::{panic, try_vec, RtResult, Trap, Value};
 use catallaxy_vm::interp::THREAD_STACK;
 use catallaxy_vm::{NativeFn, Vm};
 use crossbeam_deque::{Injector, Steal};
@@ -610,12 +610,12 @@ fn run_range(vm: &mut Vm, job: &Job, start: usize, end: usize, chunk: usize) -> 
 }
 
 fn par(vm: &mut Vm, list: Value, f: Value, kind: ParKind) -> RtResult<Value> {
-    let items = list_read(vm, list)?.to_vec();
+    let items = list_read(vm, list)?.try_to_vec()?;
     run_job(vm, kind, f, items, Value::NIL)
 }
 
 fn par_reduce(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    let items = list_read(vm, a[0])?.to_vec();
+    let items = list_read(vm, a[0])?.try_to_vec()?;
     run_job(vm, ParKind::Reduce, a[2], items, a[1])
 }
 
@@ -637,11 +637,13 @@ fn run_job(vm: &mut Vm, kind: ParKind, f: Value, items: Vec<Value>, identity: Va
         ParKind::Reduce => nchunks,
         ParKind::Each => 0,
     };
+    let mut results = try_vec(nresults)?;
+    results.extend((0..nresults).map(|_| AtomicU64::new(Value::NIL.0)));
     let job = Arc::new(Job {
         kind,
         closure: f,
         items,
-        results: (0..nresults).map(|_| AtomicU64::new(Value::NIL.0)).collect(),
+        results,
         identity,
         remaining: AtomicUsize::new(n),
         error: Mutex::new(None),
@@ -702,11 +704,12 @@ fn run_job(vm: &mut Vm, kind: ParKind, f: Value, items: Vec<Value>, identity: Va
     let out = match kind {
         ParKind::Each => Value::NIL,
         ParKind::Map => {
-            let vals: Vec<Value> = job.results.iter().map(|r| Value(r.load(Ordering::Acquire))).collect();
+            let mut vals = try_vec(job.results.len())?;
+            vals.extend(job.results.iter().map(|r| Value(r.load(Ordering::Acquire))));
             for &v in &vals {
                 ownership::transfer_deep(v, TRANSIT_TID, tid);
             }
-            new_list(vm, vals)
+            new_list(vm, vals)?
         }
         ParKind::Select => {
             let vals: Vec<Value> = job
@@ -716,7 +719,7 @@ fn run_job(vm: &mut Vm, kind: ParKind, f: Value, items: Vec<Value>, identity: Va
                 .filter(|(_, r)| Value(r.load(Ordering::Acquire)).is_true())
                 .map(|(&v, _)| v)
                 .collect();
-            new_list(vm, vals)
+            new_list(vm, vals)?
         }
         ParKind::Reduce => {
             let parts: Vec<Value> = job.results.iter().map(|r| Value(r.load(Ordering::Acquire))).collect();

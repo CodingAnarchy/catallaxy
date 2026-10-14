@@ -29,6 +29,10 @@ rebuild `catx` and run **Catallaxy: Restart Language Server**, the server restar
 `catallaxy.trace.server` (`messages` or `verbose`) logs the protocol traffic to the **Catallaxy**
 output channel.
 
+When it starts, and when a workspace folder is added, the server checks the workspace's `.cx` files
+in the background so that references, rename and workspace symbols answer quickly. VS Code shows
+the progress in the status bar, and the time taken goes to the **Catallaxy** output channel.
+
 To work on the extension itself, open this folder in VS Code and press F5. That starts an
 Extension Development Host with the extension loaded.
 

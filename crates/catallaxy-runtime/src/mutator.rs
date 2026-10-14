@@ -74,6 +74,39 @@ pub fn refused<T>(what: impl std::fmt::Display) -> RtResult<T> {
     panic(format!("MemoryError: {what} (the allocator refused)"))
 }
 
+/// Pushes `x` onto a vector a native is building, raising a `MemoryError` panic if the vector
+/// cannot grow. There is no collection and retry: the vector may hold values that nothing else
+/// roots.
+#[inline]
+pub fn try_push<T>(v: &mut Vec<T>, x: T) -> RtResult<()> {
+    if v.len() == v.capacity() {
+        grow_vec(v)?;
+    }
+    v.push(x);
+    Ok(())
+}
+
+#[cold]
+#[inline(never)]
+fn grow_vec<T>(v: &mut Vec<T>) -> RtResult<()> {
+    // `try_reserve` grows amortized (to at least twice the capacity), as `push` would.
+    if v.try_reserve(1).is_err() {
+        let bytes = v.capacity().max(4).saturating_mul(2).saturating_mul(std::mem::size_of::<T>());
+        return refused(format!("cannot allocate {bytes} bytes"));
+    }
+    Ok(())
+}
+
+/// Collects `items` into a vector, raising a `MemoryError` panic as [`try_push`] does.
+pub fn try_collect<T>(items: impl IntoIterator<Item = T>) -> RtResult<Vec<T>> {
+    let items = items.into_iter();
+    let mut v = try_vec(items.size_hint().0)?;
+    for x in items {
+        try_push(&mut v, x)?;
+    }
+    Ok(v)
+}
+
 /// An empty string with room for exactly `bytes` bytes, or a `MemoryError` panic.
 pub fn try_string(bytes: usize) -> RtResult<String> {
     check_alloc(bytes, 1)?;
@@ -246,6 +279,53 @@ impl Mutator {
         unsafe { self.try_alloc_str_with(len, chars, |dst| copy_parts(dst, (0..n).map(|i| part(i).as_str()))) }
     }
 
+    /// As [`Mutator::try_alloc_str`], but a refusal raises the `MemoryError` without collecting
+    /// first, so the caller may hold values that nothing roots (the items of a list it is
+    /// building, say).
+    #[inline]
+    pub fn try_alloc_str_nogc(&mut self, s: &str) -> RtResult<Value> {
+        let chars = (s.len() >= StrObj::INDEX_MIN).then(|| if s.is_ascii() { s.len() } else { s.chars().count() });
+        let (size, word) = StrObj::layout(s.len(), chars);
+        if size > catallaxy_gc::MAX_SMALL {
+            check_alloc(size, 1)?;
+        }
+        // SAFETY: as for `alloc_str_with`; `s` is UTF-8 with `chars` characters.
+        unsafe {
+            let h = (*self.heap).try_alloc_uninit(size, &BUILTINS.string.gc as *const _);
+            if h.is_null() {
+                return refused(format!("cannot allocate a string of {} bytes", s.len()));
+            }
+            Ok(self.init_str(h, size, s.len(), word, |dst| copy_parts(dst, std::iter::once(s))))
+        }
+    }
+
+    /// For a native about to allocate much, holding no unrooted values yet: if the OS has
+    /// refused memory since the last collection, collects now. Until a collection has looked
+    /// again, the `try_` allocations refuse small objects that need a new heap segment, and a
+    /// native has no safepoint at which the collection it is waiting for could run.
+    #[inline]
+    pub fn collect_if_refused(&self) {
+        if catallaxy_gc::limits::memory_refused() {
+            catallaxy_gc::collect_to_free(&self.rec);
+        }
+    }
+
+    /// An empty vector with room for exactly `n` items. If the allocator refuses, collects
+    /// (garbage may hold the memory) and tries once more, then raises a `MemoryError`. For
+    /// natives that hold no unrooted values yet: their arguments are rooted.
+    pub fn try_vec_collecting<T>(&self, n: usize) -> RtResult<Vec<T>> {
+        self.collect_if_refused();
+        let bytes = check_alloc(n, std::mem::size_of::<T>())?;
+        let mut v = Vec::new();
+        if v.try_reserve_exact(n).is_err() {
+            catallaxy_gc::collect_to_free(&self.rec);
+            if v.try_reserve_exact(n).is_err() {
+                return refused(format!("cannot allocate {bytes} bytes"));
+            }
+        }
+        Ok(v)
+    }
+
     /// As [`Mutator::alloc_str_with`], for the `try_` variants.
     ///
     /// # Safety
@@ -356,12 +436,35 @@ impl Mutator {
         Value::from_ptr(h)
     }
 
+    /// As [`Mutator::alloc_list`], but raises a `MemoryError` if the list's buffer cannot be
+    /// had. Nothing roots `items`, so there is no collection and retry.
+    pub fn try_alloc_list(&mut self, items: Vec<Value>) -> RtResult<Value> {
+        let icap = ListObj::inline_cap_for(items.len());
+        let h = self.alloc_raw(ListObj::size_for(icap), BUILTINS.list);
+        // On failure the object is left an empty list, which nothing references.
+        match unsafe { ListObj::try_init(h as *mut ListObj, items, icap) } {
+            Ok(()) => Ok(Value::from_ptr(h)),
+            Err(layout) => refused(format!("cannot allocate a list of {} bytes", layout.size())),
+        }
+    }
+
     /// A list holding a copy of `items`, with room for at least `cap` of them.
     pub fn alloc_list_from_slice(&mut self, items: &[Value], cap: usize) -> Value {
         let icap = ListObj::inline_cap_for(cap.max(items.len()));
         let h = self.alloc_raw(ListObj::size_for(icap), BUILTINS.list);
         unsafe { ListObj::init_from_slice(h as *mut ListObj, items, cap, icap) };
         Value::from_ptr(h)
+    }
+
+    /// As [`Mutator::alloc_list_from_slice`], but raises a `MemoryError` if the list's buffer
+    /// cannot be had (without collecting: `items` may hold values nothing else roots).
+    pub fn try_alloc_list_from_slice(&mut self, items: &[Value], cap: usize) -> RtResult<Value> {
+        let icap = ListObj::inline_cap_for(cap.max(items.len()));
+        let h = self.alloc_raw(ListObj::size_for(icap), BUILTINS.list);
+        match unsafe { ListObj::try_init_from_slice(h as *mut ListObj, items, cap, icap) } {
+            Ok(()) => Ok(Value::from_ptr(h)),
+            Err(layout) => refused(format!("cannot allocate a list of {} bytes", layout.size())),
+        }
     }
 
     pub fn alloc_dict(&mut self, table: DictTable) -> Value {

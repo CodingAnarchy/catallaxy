@@ -5,7 +5,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
-pub use crate::heap::release_headroom;
+pub use crate::heap::{memory_refused, release_headroom};
 
 /// The heap cap from `CATX_MAX_HEAP`: a byte count with an optional `K`, `M` or `G` suffix
 /// (powers of 1024). Unset, empty or unparsable means no cap.
