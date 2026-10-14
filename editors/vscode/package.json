@@ -1,0 +1,91 @@
+{
+  "name": "catallaxy",
+  "displayName": "Catallaxy",
+  "description": "Catallaxy language support: syntax highlighting and the catx language server",
+  "version": "0.1.0",
+  "publisher": "catallaxy",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CodingAnarchy/catallaxy",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "catallaxy",
+        "aliases": [
+          "Catallaxy",
+          "catallaxy"
+        ],
+        "extensions": [
+          ".cx"
+        ],
+        "firstLine": "^#!.*\\bcatx\\b",
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "catallaxy",
+        "scopeName": "source.catallaxy",
+        "path": "./syntaxes/catallaxy.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Catallaxy",
+      "properties": {
+        "catallaxy.serverPath": {
+          "type": "string",
+          "default": "catx",
+          "markdownDescription": "Path to the `catx` executable that runs the language server (`catx lsp`). A bare name is looked up on `PATH`.",
+          "scope": "machine-overridable"
+        },
+        "catallaxy.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the messages between VS Code and the language server (shown in the Catallaxy output channel)."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "catallaxy.restartServer",
+        "title": "Restart Language Server",
+        "category": "Catallaxy"
+      }
+    ]
+  },
+  "scripts": {
+    "test": "node test/grammar.test.js && node test/lsp.test.js",
+    "test:grammar": "node test/grammar.test.js",
+    "test:lsp": "node test/lsp.test.js",
+    "test:vscode": "node test/vscode/run.js",
+    "snapshots": "node test/grammar.test.js --update",
+    "package": "vsce package --out catallaxy.vsix"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.2.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.1.0"
+  }
+}

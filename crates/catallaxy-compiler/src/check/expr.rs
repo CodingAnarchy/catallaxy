@@ -3039,6 +3039,9 @@ impl Checker {
         }
         let (slots, ret) = self.check_args(e, &m, args, block, expected, parallel);
         self.note_self_call(&m, recv);
+        if matches!(m.dispatch, Dispatch::Dynamic(..)) && matches!(f.owner, Owner::Iface(_)) {
+            self.dyn_targets.insert(e.id, m.fid);
+        }
         self.calls.insert(e.id, CallRes::Fn { dispatch: m.dispatch.clone(), recv: true, args: slots, safe: false });
         ret
     }

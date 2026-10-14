@@ -84,6 +84,10 @@ pub struct Checker {
     pub expr_ty: FxHashMap<NodeId, TyId>,
     pub names: FxHashMap<NodeId, NameRes>,
     pub calls: FxHashMap<NodeId, CallRes>,
+    /// For a method call dispatched by name at runtime (on an interface or a type parameter's
+    /// bound), the interface member the checker resolved it to. Editor
+    /// queries (hover, definition, references) use it; codegen does not.
+    pub dyn_targets: FxHashMap<NodeId, FnId>,
     pub bins: FxHashMap<NodeId, BinRes>,
     pub fors: FxHashMap<NodeId, ForKind>,
     pub assigns: FxHashMap<NodeId, AssignRes>,
@@ -184,6 +188,7 @@ impl Checker {
             expr_ty: FxHashMap::default(),
             names: FxHashMap::default(),
             calls: FxHashMap::default(),
+            dyn_targets: FxHashMap::default(),
             bins: FxHashMap::default(),
             fors: FxHashMap::default(),
             assigns: FxHashMap::default(),
