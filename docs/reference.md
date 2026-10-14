@@ -396,7 +396,10 @@ interface Enumerable[T] { fn each(self, f: fn(T)) ... }            # (prelude)
 ```
 
 Any type that has all required methods satisfies an interface and gains its default methods, even when
-called directly on the concrete type. If two in-scope interfaces provide the same default method to one
+called directly on the concrete type. An interface whose methods take `Self` as a parameter (or inside a
+generic type, as in `List[Self]`), such as `Comparable`, can only be a bound (`[T: Comparable]`): two
+values of the interface type may have different implementing types, so it is not a value type (E0375).
+Interfaces that use `Self` only in results (`fn copy(self) -> Self`) are. If two in-scope interfaces provide the same default method to one
 type, the call is ambiguous and must be resolved by defining the method.
 
 `Enumerable`'s `map`, `select` and the like are eager and return lists. `xs.lazy()` returns a
@@ -429,8 +432,12 @@ resolve statically and are visible only in modules that declare or import them (
 
 ```
 fn max[T: Comparable](xs: List[T]) -> T? { ... }
-pub fn total(xs: Enumerable[Int]) -> Int { xs.reduce(0) { |a, b| a + b } }   # interface param = bound
+pub fn total(xs: Enumerable[Int]) -> Int { xs.reduce(0) { |a, b| a + b } }   # any Enumerable[Int]
 ```
+
+A parameter of an interface type accepts a value of any type that satisfies the interface; each such
+parameter (`fn f(a: I, b: I)`) may get a different type. To require the same type, use a type parameter
+(`fn f[T: I](a: T, b: T)`); an interface with `Self` parameters must be used that way (E0375).
 
 Type arguments are erased at run time: one compiled body serves every instantiation, and a type test
 cannot check them (see §4.4 and E0374).
