@@ -1,0 +1,12 @@
+# expect: E0310
+# A closure that assigns a local may run during any call: a nil test on the local holds only
+# until the next call.
+fn g() {
+  x: Int? = 1
+  f = fn() { x = nil }
+  if x != nil {
+    f()
+    print("#{x + 1}\n")
+  }
+}
+g()

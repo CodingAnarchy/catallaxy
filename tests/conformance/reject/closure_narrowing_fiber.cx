@@ -1,0 +1,16 @@
+# expect: E0310
+# Inside a closure, a captured variable that its function assigns elsewhere may change during any
+# call: here the function sets it to nil while the fiber waits in `Fiber.yield()`.
+fn g() {
+  x: Int? = 1
+  fib = Fiber.start {
+    if x != nil {
+      Fiber.yield()
+      puts(x + 1)
+    }
+  }
+  Fiber.yield()
+  x = nil
+  puts(fib.join())
+}
+g()
