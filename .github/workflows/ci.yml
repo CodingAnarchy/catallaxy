@@ -51,6 +51,14 @@ jobs:
           cc -Wall -Wextra -Werror -I crates/catallaxy-capi/include crates/catallaxy-capi/examples/ext.c target/release/libcatallaxy_capi.a $LIBS -o ext
           ./ext 2>/dev/null | diff - crates/catallaxy-capi/examples/ext.out
           CATX_GC_STRESS=1 ./ext 2>/dev/null | diff - crates/catallaxy-capi/examples/ext.out
+      - name: C ABI shared library (dlopen, two copies in one process)
+        if: runner.os != 'Windows'
+        run: |
+          LIBS=""; EXT=dylib; if [ "$RUNNER_OS" = "Linux" ]; then LIBS="-ldl"; EXT=so; fi
+          cc -Wall -Wextra -Werror -I crates/catallaxy-capi/include crates/catallaxy-capi/examples/dlopen.c $LIBS -o dlopen
+          cp "target/release/libcatallaxy_capi.$EXT" "copy.$EXT"
+          ./dlopen "target/release/libcatallaxy_capi.$EXT" "./copy.$EXT"
+          CATX_GC_STRESS=1 ./dlopen "target/release/libcatallaxy_capi.$EXT" "./copy.$EXT"
       - name: Clippy
         run: cargo clippy --release --locked --workspace --all-targets -- -D warnings
 

@@ -466,9 +466,9 @@ Annotate the parameter to use any of these.
   build their results in (`map`, `split`, `keys` and the like), get one retry with the headroom released
   and then a `MemoryError` at the next safepoint. If that retry fails too, the process aborts
   (`memory allocation of N bytes failed`). The same happens when the reserve is used up before a
-  safepoint is reached. A program embedding the runtime through the C API uses its own allocator and
-  gets no retry for these. On Linux with memory
-  overcommit, and under memory pressure on macOS, a program that grows gradually is usually killed by the
+  safepoint is reached. The retry comes from the global allocator `catallaxy_gc::Allocator`, which
+  `catx` and the C API libraries use; a Rust program embedding the runtime gets it only if it opts in
+  (section 11). On Linux with memory overcommit, and under memory pressure on macOS, a program that grows gradually is usually killed by the
   OS before any allocation fails; set `CATX_MAX_HEAP` below the machine's memory to turn that into a
   `MemoryError`.
 
@@ -671,6 +671,17 @@ escape it. Allocation alone never collects. Missing optional arguments arrive as
 (the standard library's `Regex` holds its compiled regex this way). It is dropped when the
 collector frees the handle.
 
+The `catallaxy` crate does not choose a global allocator. To get the out-of-memory handling `catx`
+has (section 7: a refused allocation inside the runtime releases the headroom and is retried once,
+and a `MemoryError` follows at the next safepoint instead of an abort), add one line to the program:
+
+```rust
+#[global_allocator]
+static ALLOC: catallaxy::Allocator = catallaxy::Allocator;
+```
+
+It forwards to the system allocator and does extra work only when a request is refused.
+
 ### C ABI
 
 The `catallaxy-capi` crate builds a static and a shared library (`libcatallaxy_capi`) with the C
@@ -687,5 +698,12 @@ cx_status native(cx_vm *vm, const cx_value *args, size_t nargs, cx_value *out, v
 and is declared in Catallaxy with `native fn` exactly like a Rust one. The rooting rule is the same
 as for Rust natives, but unchecked: a value held across `cx_call` must be rooted. Up to 256 C
 natives can be registered per process. `crates/catallaxy-capi/examples/ext.c` is a complete
-example.
+example, and `crates/catallaxy-capi/examples/dlopen.c` loads the shared library at run time.
+
+The libraries' own Rust code allocates through `catallaxy::Allocator` (the crate's default
+`global-allocator` feature), so they handle running out of memory as `catx` does; the host's
+`malloc` is not affected. `cx_allocator_active()` returns 1 when this is in effect. Each shared
+library has its own copy of the Rust standard library and allocator, so it can be loaded with
+`dlopen` next to other Rust libraries. A Rust program that links `catallaxy-capi` as a Rust crate
+and has its own `#[global_allocator]` turns the feature off with `default-features = false`.
 
