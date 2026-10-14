@@ -311,15 +311,20 @@ async function main() {
       assert(refused, "renaming `sort_with` (prelude) was not refused");
     });
 
-    await check("references and rename: an interface member and the calls through the interface", async () => {
-      // Classes satisfy interfaces structurally, so their methods are separate symbols: the
-      // interface member's occurrences are its declaration and the calls on Shape-typed values
-      // (`self` in a default method, the block parameters of `shapes.sort_with`).
+    await check("references and rename: an interface member, its implementations and the calls", async () => {
+      // Classes satisfy interfaces structurally. The ones used as a Shape (the `shapes` list)
+      // implement the member, so their methods go with it: the declaration, the calls on
+      // Shape-typed values (`self` in a default method, the block parameters of
+      // `shapes.sort_with`), the classes' methods, and the call on a Triangle's `self`.
       const want = [
         pos(shapes, "perimeter(self) -> Float\n"),
         pos(shapes, "self.perimeter()", 0, 5),
         pos(shapes, "b.perimeter()", 0, 2),
         pos(shapes, "a.perimeter()", 0, 2),
+        pos(shapes, "perimeter(self) -> Float { 2.0 * Math"),
+        pos(shapes, "perimeter(self) -> Float { 2.0 * (self"),
+        pos(shapes, "perimeter(self) -> Float { self.a"),
+        pos(shapes, "self.perimeter() / 2.0", 0, 5),
       ].map((p) => `${p.line}:${p.character}`);
       const refs = await c.request("textDocument/references", {
         ...at(shapesUri, shapes, "b.perimeter()", 0, 2),
