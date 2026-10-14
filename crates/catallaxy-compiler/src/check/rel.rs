@@ -290,6 +290,9 @@ impl Checker {
         let cacheable = !self.types.has_vars(s) && !self.types.has_vars(d) && !self.types.has_open(s);
         if cacheable {
             if let Some(&r) = self.satisfies_cache.get(&(s, d)) {
+                if r {
+                    self.note_conformance(s, iid);
+                }
                 return r;
             }
         }
@@ -302,7 +305,48 @@ impl Checker {
         if cacheable {
             self.satisfies_cache.insert((s, d), r);
         }
+        if r {
+            self.note_conformance(s, iid);
+        }
         r
+    }
+
+    /// Records that a value of type `s` (a class, enum or other interface) is used as interface
+    /// `iid`, and which of its methods implement the interface's members. For editor queries
+    /// only: renaming an interface member renames the methods of the types that conform to it.
+    fn note_conformance(&mut self, s: TyId, iid: IfaceId) {
+        let mut head = s;
+        if let Ty::Frozen(i) = self.types.get(head) {
+            head = self.types.shallow_resolve(*i);
+        }
+        match self.types.get(head) {
+            Ty::Class(..) | Ty::Enum(..) => {}
+            Ty::Iface(i, _) if *i != iid => {}
+            _ => return,
+        }
+        let key = (s, iid);
+        if !self.conform_impls.contains_key(&key) {
+            // A placeholder first: looking the methods up may check this conversion again.
+            self.conform_impls.insert(key, Vec::new());
+            let members = self.ifaces[iid as usize].methods.clone();
+            let cp = self.checkpoint();
+            let errors = self.suppressed_errors;
+            self.suppress_diags += 1;
+            let mut impls = Vec::new();
+            for mid in members {
+                let name = self.fns[mid as usize].name.clone();
+                if let Some(m) = self.lookup_method(s, &name, true) {
+                    if m.fid != mid {
+                        impls.push((mid, m.fid));
+                    }
+                }
+            }
+            self.suppress_diags -= 1;
+            self.suppressed_errors = errors;
+            self.rollback(cp);
+            self.conform_impls.insert(key, impls);
+        }
+        self.conform_log.push(key);
     }
 
     /// `Comparable` for builtin types without a `<=>` method: tuples and lists compare
