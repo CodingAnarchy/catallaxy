@@ -130,56 +130,72 @@ fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     // waits for running threads to stop: register from the native state.
     let mut child = catallaxy_gc::blocking(&vm.m.rec, || {
         let rec = catallaxy_gc::register_thread();
-        Vm::new(rec, THREAD_STACK)
-    });
+        Vm::try_new(rec.clone(), THREAD_STACK).inspect_err(|_| catallaxy_gc::unregister_thread(&rec))
+    })?;
+    let tid = child.tid();
     // The closure (and, for `spawn move`, what it captured) now belongs to the child.
-    ownership::transfer_deep(closure, vm.tid(), child.tid());
+    ownership::transfer_deep(closure, vm.tid(), tid);
     child.extra_roots().push(closure);
     let t = vm.m.alloc_thread();
     let inner = unsafe { as_thread(t) }.inner.clone();
-    inner.tid.store(child.tid() as u64, Ordering::Relaxed);
+    inner.tid.store(tid as u64, Ordering::Relaxed);
     let inner2 = inner.clone();
-    let handle = std::thread::Builder::new()
-        .name(format!("catx-{}", child.tid()))
-        .stack_size(16 << 20)
-        .spawn(move || {
-            let mut child = child;
-            catallaxy_gc::leave_native(&child.m.rec);
-            let closure = child.extra_roots()[0];
-            let result = child.call_value(closure, &[]);
-            // Fibers the thread started finish before the thread does.
-            crate::fiber::drain(&mut child);
-            let outcome = match result {
-                Ok(v) => {
-                    ownership::transfer_deep(v, child.tid(), TRANSIT_TID);
-                    ThreadOutcome::Done(v)
-                }
-                Err(Trap::Panic(msg)) => {
-                    let trace = child.panic_trace.take().unwrap_or_default();
-                    let mut full = msg.clone();
-                    for line in trace.iter().take(8) {
-                        full.push_str(&format!("\n    at {line}"));
-                    }
-                    // `join` hands the message to the program; a thread nobody joins is
-                    // reported (with its trace) when the program ends.
-                    UNJOINED_PANICS.lock().push((inner2.clone(), child.tid(), full));
-                    ThreadOutcome::Panicked(msg)
-                }
-                Err(Trap::Exit(code)) => {
-                    flush();
-                    std::process::exit(code);
-                }
-                Err(Trap::Unwind { .. }) => ThreadOutcome::Panicked("internal error: stray non-local exit".into()),
-            };
-            {
-                let mut o = inner2.outcome.lock();
-                *o = outcome;
+    // The child's VM reaches the new thread through a slot, so that it can be taken back and
+    // shut down if the OS refuses to start the thread.
+    let slot = Arc::new(Mutex::new(Some(child)));
+    let slot2 = slot.clone();
+    let spawned = std::thread::Builder::new().name(format!("catx-{tid}")).stack_size(16 << 20).spawn(move || {
+        let mut child = slot2.lock().take().expect("child VM");
+        drop(slot2);
+        catallaxy_gc::leave_native(&child.m.rec);
+        let closure = child.extra_roots()[0];
+        let result = child.call_value(closure, &[]);
+        // Fibers the thread started finish before the thread does.
+        crate::fiber::drain(&mut child);
+        let outcome = match result {
+            Ok(v) => {
+                ownership::transfer_deep(v, child.tid(), TRANSIT_TID);
+                ThreadOutcome::Done(v)
             }
-            inner2.done.notify_all();
-            child.extra_roots().clear();
-            child.shutdown();
-        })
-        .map_err(|e| Trap::Panic(format!("cannot spawn thread: {e}")))?;
+            Err(Trap::Panic(msg)) => {
+                let trace = child.panic_trace.take().unwrap_or_default();
+                let mut full = msg.clone();
+                for line in trace.iter().take(8) {
+                    full.push_str(&format!("\n    at {line}"));
+                }
+                // `join` hands the message to the program; a thread nobody joins is
+                // reported (with its trace) when the program ends.
+                UNJOINED_PANICS.lock().push((inner2.clone(), child.tid(), full));
+                ThreadOutcome::Panicked(msg)
+            }
+            Err(Trap::Exit(code)) => {
+                flush();
+                std::process::exit(code);
+            }
+            Err(Trap::Unwind { .. }) => ThreadOutcome::Panicked("internal error: stray non-local exit".into()),
+        };
+        {
+            let mut o = inner2.outcome.lock();
+            *o = outcome;
+        }
+        inner2.done.notify_all();
+        child.extra_roots().clear();
+        child.shutdown();
+    });
+    let handle = match spawned {
+        Ok(h) => h,
+        Err(e) => {
+            // Most likely out of memory for the thread's stack.
+            catallaxy_gc::limits::release_headroom();
+            if let Some(mut child) = slot.lock().take() {
+                child.extra_roots().clear();
+                child.shutdown();
+            }
+            // The closure is the caller's again.
+            ownership::transfer_deep(closure, tid, vm.tid());
+            return panic(format!("ThreadError: cannot start a thread ({e})"));
+        }
+    };
     *inner.handle.lock() = Some(handle);
     Ok(t)
 }
@@ -437,6 +453,8 @@ struct Pool {
     signal: (Mutex<u64>, Condvar),
     jobs: Mutex<Vec<Arc<Job>>>,
     workers: usize,
+    /// Workers that could not get a VM and exited.
+    failed: AtomicUsize,
 }
 
 static POOL: LazyLock<Pool> = LazyLock::new(|| {
@@ -451,13 +469,18 @@ static POOL: LazyLock<Pool> = LazyLock::new(|| {
         signal: (Mutex::new(0), Condvar::new()),
         jobs: Mutex::new(Vec::new()),
         workers: n.saturating_sub(1),
+        failed: AtomicUsize::new(0),
     };
+    let mut pool = pool;
     for i in 0..pool.workers {
-        std::thread::Builder::new()
-            .name(format!("catx-pool-{i}"))
-            .stack_size(16 << 20)
-            .spawn(worker_main)
-            .expect("spawn pool worker");
+        // A worker the OS refuses to start is done without: the calling thread takes part in
+        // every job, so fewer workers only means less parallelism.
+        let started =
+            std::thread::Builder::new().name(format!("catx-pool-{i}")).stack_size(16 << 20).spawn(worker_main);
+        if started.is_err() {
+            pool.workers = i;
+            break;
+        }
     }
     pool
 });
@@ -489,7 +512,12 @@ fn mark(t: &mut Tracer, v: Value) {
 
 fn worker_main() {
     let rec = catallaxy_gc::register_thread();
-    let mut vm = Vm::new(rec, THREAD_STACK);
+    let Ok(mut vm) = Vm::try_new(rec.clone(), THREAD_STACK) else {
+        // No memory for its registers: the pool runs without this worker.
+        catallaxy_gc::unregister_thread(&rec);
+        POOL.failed.fetch_add(1, Ordering::Release);
+        return;
+    };
     // Workers idle in the native state.
     loop {
         let task = loop {
@@ -637,8 +665,9 @@ fn run_job(vm: &mut Vm, kind: ParKind, f: Value, items: Vec<Value>, identity: Va
         blocking(vm, move || {
             let (m, cv) = &job2.done;
             let mut d = m.lock();
-            while !*d {
-                cv.wait(&mut d);
+            // Workers that could not start never finish the job: then the fiber helps after all.
+            while !*d && POOL.failed.load(Ordering::Acquire) < POOL.workers {
+                cv.wait_for(&mut d, std::time::Duration::from_millis(50));
             }
         });
     }

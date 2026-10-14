@@ -5,6 +5,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
+pub use crate::heap::release_headroom;
+
 /// The heap cap from `CATX_MAX_HEAP`: a byte count with an optional `K`, `M` or `G` suffix
 /// (powers of 1024). Unset, empty or unparsable means no cap.
 pub fn max_heap() -> Option<usize> {
@@ -89,14 +91,21 @@ pub fn check_request(bytes: usize) -> Result<(), String> {
 }
 
 static OVER_LIMIT: AtomicBool = AtomicBool::new(false);
+static OUT_OF_MEMORY: AtomicBool = AtomicBool::new(false);
 
-/// After a major collection: notes whether the live heap is over the cap.
+/// After a major collection: notes whether the live heap is over the cap. A collection that
+/// finds it back under the cap withdraws an error no thread has raised yet.
 pub(crate) fn after_collection(live_bytes: usize) {
     if let Some(max) = max_heap() {
-        if live_bytes > max {
-            OVER_LIMIT.store(true, Ordering::Release);
-        }
+        OVER_LIMIT.store(live_bytes > max, Ordering::Release);
     }
+}
+
+/// After a major collection: notes whether the heap is out of memory, that is, whether the
+/// collector could not restore its emergency reserve of segments (see `heap.rs`). As with
+/// [`after_collection`], a later collection that restores it withdraws a pending error.
+pub(crate) fn note_out_of_memory(out: bool) {
+    OUT_OF_MEMORY.store(out, Ordering::Release);
 }
 
 /// The allocation budget until the next collection, capped so that a collection happens
@@ -108,11 +117,34 @@ pub(crate) fn cap_budget(budget: usize, live_bytes: usize) -> usize {
     }
 }
 
-/// Whether the last major collection found more live data than `CATX_MAX_HEAP` allows. The
-/// first thread to ask after such a collection gets `true` (and should raise a `MemoryError`).
+/// The `MemoryError` message a thread should panic with at a safepoint, if the last major
+/// collection found more live data than `CATX_MAX_HEAP` allows, or found that the system would
+/// not give the heap more memory. The first thread to ask after such a collection gets it.
+/// Callers check this on their safepoint slow path only, after taking part in any collection.
 #[inline]
-pub fn take_over_limit() -> bool {
-    OVER_LIMIT.load(Ordering::Relaxed) && OVER_LIMIT.swap(false, Ordering::AcqRel)
+pub fn take_pending_error() -> Option<String> {
+    if !OVER_LIMIT.load(Ordering::Relaxed) && !OUT_OF_MEMORY.load(Ordering::Relaxed) {
+        return None;
+    }
+    take_pending_slow()
+}
+
+#[cold]
+fn take_pending_slow() -> Option<String> {
+    if OVER_LIMIT.swap(false, Ordering::AcqRel) {
+        return Some(format!(
+            "MemoryError: {:.1} MB live after collection, over the CATX_MAX_HEAP limit of {:.1} MB",
+            crate::stats::live_bytes() as f64 / 1e6,
+            max_heap().unwrap_or(0) as f64 / 1e6
+        ));
+    }
+    if OUT_OF_MEMORY.swap(false, Ordering::AcqRel) {
+        return Some(format!(
+            "MemoryError: out of memory: the system refused to grow the heap ({:.1} MB live after collection)",
+            crate::stats::live_bytes() as f64 / 1e6
+        ));
+    }
+    None
 }
 
 #[cfg(test)]

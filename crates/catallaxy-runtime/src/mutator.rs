@@ -61,9 +61,17 @@ pub fn try_vec<T>(n: usize) -> RtResult<Vec<T>> {
     let bytes = check_alloc(n, std::mem::size_of::<T>())?;
     let mut v = Vec::new();
     if v.try_reserve_exact(n).is_err() {
-        return panic(format!("MemoryError: cannot allocate {bytes} bytes (the allocator refused)"));
+        return refused(format!("cannot allocate {bytes} bytes"));
     }
     Ok(v)
+}
+
+/// The `MemoryError` for a request the allocator refused (`what` says which). Hands the
+/// collector's headroom back to the OS first, so that reporting the error does not fail too.
+#[cold]
+pub fn refused<T>(what: impl std::fmt::Display) -> RtResult<T> {
+    catallaxy_gc::limits::release_headroom();
+    panic(format!("MemoryError: {what} (the allocator refused)"))
 }
 
 /// An empty string with room for exactly `bytes` bytes, or a `MemoryError` panic.
@@ -71,7 +79,7 @@ pub fn try_string(bytes: usize) -> RtResult<String> {
     check_alloc(bytes, 1)?;
     let mut s = String::new();
     if s.try_reserve_exact(bytes).is_err() {
-        return panic(format!("MemoryError: cannot allocate {bytes} bytes (the allocator refused)"));
+        return refused(format!("cannot allocate {bytes} bytes"));
     }
     Ok(s)
 }
@@ -220,6 +228,63 @@ impl Mutator {
         unsafe { self.alloc_str_with(len, chars, |dst| copy_parts(dst, (0..n).map(|i| part(i).as_str()))) }
     }
 
+    /// As [`Mutator::alloc_str`], but a string the allocator refuses raises a `MemoryError`
+    /// instead of aborting. A refusal first runs a collection and retries, so every value the
+    /// caller holds must be rooted (as interpreter registers and native arguments are); `s`
+    /// itself may point into a rooted string, since objects never move.
+    pub fn try_alloc_str(&mut self, s: &str) -> RtResult<Value> {
+        let chars = (s.len() >= StrObj::INDEX_MIN).then(|| if s.is_ascii() { s.len() } else { s.chars().count() });
+        // SAFETY: `s` is UTF-8 with `chars` characters.
+        unsafe { self.try_alloc_str_with(s.len(), chars, |dst| copy_parts(dst, std::iter::once(s))) }
+    }
+
+    /// As [`Mutator::alloc_concat`], raising a `MemoryError` as [`Mutator::try_alloc_str`] does.
+    pub fn try_alloc_concat<'a>(&mut self, n: usize, part: impl Fn(usize) -> &'a StrObj) -> RtResult<Value> {
+        let len: usize = (0..n).map(|i| part(i).len).sum();
+        let chars = (len >= StrObj::INDEX_MIN).then(|| (0..n).map(|i| part(i).char_count()).sum());
+        // SAFETY: as for `alloc_concat`; the parts are rooted, so a collection keeps them.
+        unsafe { self.try_alloc_str_with(len, chars, |dst| copy_parts(dst, (0..n).map(|i| part(i).as_str()))) }
+    }
+
+    /// As [`Mutator::alloc_str_with`], for the `try_` variants.
+    ///
+    /// # Safety
+    /// As for [`Mutator::alloc_str_with`].
+    #[inline]
+    unsafe fn try_alloc_str_with(
+        &mut self,
+        len: usize,
+        chars: Option<usize>,
+        fill: impl FnOnce(*mut u8),
+    ) -> RtResult<Value> {
+        let (size, word) = StrObj::layout(len, chars);
+        if size > catallaxy_gc::MAX_SMALL {
+            // Refuse what the machine cannot provide before the allocator hands out memory
+            // that overcommit cannot back.
+            check_alloc(size, 1)?;
+        }
+        let vtable = &BUILTINS.string.gc as *const _;
+        let mut h = (*self.heap).try_alloc_uninit(size, vtable);
+        if h.is_null() {
+            h = self.retry_str(size, len)?;
+        }
+        Ok(self.init_str(h, size, len, word, fill))
+    }
+
+    /// The allocator refused a string of `len` bytes (`size` with its header): garbage may be
+    /// holding the memory, so collects and tries once more.
+    #[cold]
+    #[inline(never)]
+    fn retry_str(&mut self, size: usize, len: usize) -> RtResult<*mut Header> {
+        catallaxy_gc::collect_to_free(&self.rec);
+        // SAFETY: as for the first attempt; the caller initializes the object.
+        let h = unsafe { (*self.heap).try_alloc_uninit(size, &BUILTINS.string.gc as *const _) };
+        if h.is_null() {
+            return refused(format!("cannot allocate a string of {len} bytes"));
+        }
+        Ok(h)
+    }
+
     /// Allocates a frozen string of `len` bytes; `fill` writes them. `chars` (the character
     /// count) must be known for strings of at least [`StrObj::INDEX_MIN`] bytes.
     ///
@@ -230,6 +295,22 @@ impl Mutator {
         let (size, word) = StrObj::layout(len, chars);
         // Large strings skip zeroing: every byte is written below, before any safepoint.
         let h = (*self.heap).alloc_uninit(size, &BUILTINS.string.gc as *const _);
+        self.init_str(h, size, len, word, fill)
+    }
+
+    /// Fills in a string object of `size` bytes just allocated at `h`.
+    ///
+    /// # Safety
+    /// As for [`Mutator::alloc_str_with`]; `size` and `word` come from `StrObj::layout`.
+    #[inline(always)]
+    unsafe fn init_str(
+        &mut self,
+        h: *mut Header,
+        size: usize,
+        len: usize,
+        word: u64,
+        fill: impl FnOnce(*mut u8),
+    ) -> Value {
         let o = h as *mut StrObj;
         std::ptr::addr_of_mut!((*o).len).write(len);
         std::ptr::addr_of_mut!((*o).hash).write(AtomicU64::new(0));

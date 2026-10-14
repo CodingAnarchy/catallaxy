@@ -290,7 +290,18 @@ pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
     let h = unsafe { &*handle.as_ptr() };
     catallaxy_runtime::ownership::check_write(&vm.m, h)?;
     unsafe { catallaxy_runtime::object::as_instance(handle) }.set(ID_FIELD, Value::small_int(id as i64));
-    let fvm = Box::into_raw(vm.new_fiber(FIBER_REGISTERS));
+    // Both stacks come first, so a refusal (a MemoryError) leaves nothing to undo.
+    let stack = match DefaultStack::new(FIBER_NATIVE_STACK) {
+        Ok(s) => s,
+        Err(e) => {
+            catallaxy_gc::limits::release_headroom();
+            return Err(Trap::Panic(format!(
+                "MemoryError: cannot allocate a {} KB fiber stack ({e})",
+                FIBER_NATIVE_STACK / 1024
+            )));
+        }
+    };
+    let fvm = Box::into_raw(vm.new_fiber(FIBER_REGISTERS)?);
     unsafe {
         (*fvm).extra_roots().push(closure);
         (*fvm).extra_roots().push(handle);
@@ -298,7 +309,6 @@ pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
     let ctl = Arc::new(Ctl { outcome: Mutex::new(Outcome::Running), joiners: Mutex::new(Vec::new()) });
     let ctl2 = ctl.clone();
     let vm_ptr = fvm as usize;
-    let stack = DefaultStack::new(FIBER_NATIVE_STACK).expect("fiber stack");
     let coro = Coroutine::with_stack(stack, move |y: &Yielder<(), ()>, ()| {
         let _leave = LeaveOnExit;
         YIELDER.with(|c| c.set(y as *const _));

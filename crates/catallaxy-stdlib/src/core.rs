@@ -73,7 +73,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "String.<=>" => |_, a| Ok(Value::small_int(s(a[0])?.cmp(s(a[1])?) as i64)),
         "String.+" => |vm, a| {
             let parts = [str_obj(a[0])?, str_obj(a[1])?];
-            Ok(vm.m.alloc_concat(2, |i| parts[i]))
+            vm.m.try_alloc_concat(2, |i| parts[i])
         },
         "String.*" => |vm, a| {
             let n = int(a[1])?;
@@ -85,7 +85,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             for _ in 0..n {
                 r.push_str(x);
             }
-            Ok(new_str(vm, &r))
+            vm.m.try_alloc_str(&r)
         },
         "String.[]" => str_index,
         "String.length" => |_, a| Ok(Value::small_int(unsafe { as_str_obj(a[0]) }.char_count() as i64)),
@@ -151,12 +151,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
                 return Ok(a[0]);
             }
             let r = h.replace(o, n);
-            Ok(new_str(vm, &r))
+            vm.m.try_alloc_str(&r)
         },
         "String.replace_first" => |vm, a| {
             let (h, o, n) = (s(a[0])?, s(a[1])?, s(a[2])?);
             let r = h.replacen(o, n, 1);
-            Ok(new_str(vm, &r))
+            vm.m.try_alloc_str(&r)
         },
         "String.slice" => |vm, a| {
             let x = str_obj(a[0])?;
@@ -207,7 +207,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "String.format" => |vm, a| {
             let args = crate::coll::list_read(vm, a[1])?.to_vec();
             let r = catallaxy_runtime::fmtspec::format_template(vm, s(a[0])?, &args)?;
-            Ok(new_str(vm, &r))
+            vm.m.try_alloc_str(&r)
         },
         "String.rjust" => |vm, a| pad(vm, a, 2),
         "String.is_digit" => |_, a| str_all(a, |c| c.is_ascii_digit()),
@@ -219,12 +219,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "String.delete_prefix" => |vm, a| {
             let (h, p) = (s(a[0])?, s(a[1])?);
             let r = h.strip_prefix(p).unwrap_or(h).to_string();
-            Ok(new_str(vm, &r))
+            vm.m.try_alloc_str(&r)
         },
         "String.delete_suffix" => |vm, a| {
             let (h, p) = (s(a[0])?, s(a[1])?);
             let r = h.strip_suffix(p).unwrap_or(h).to_string();
-            Ok(new_str(vm, &r))
+            vm.m.try_alloc_str(&r)
         },
         "String.squeeze" => |vm, a| {
             str_map(vm, a, |x| {
@@ -249,7 +249,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
                     None => c,
                 })
                 .collect();
-            Ok(new_str(vm, &r))
+            vm.m.try_alloc_str(&r)
         },
         _ => return None,
     })
@@ -311,7 +311,7 @@ fn pad(vm: &mut Vm, a: &[Value], mode: u8) -> RtResult<Value> {
             r.push_str(x);
         }
     }
-    Ok(new_str(vm, &r))
+    vm.m.try_alloc_str(&r)
 }
 
 fn str_index(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
@@ -360,7 +360,7 @@ fn int_to_s(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
         Some(base) if base.is_small_int() && base.as_small_int() != 10 => int_to_s_radix(vm, a),
         _ => {
             let r = ops::format_int(a[0]);
-            Ok(new_str(vm, &r))
+            vm.m.try_alloc_str(&r)
         }
     }
 }
