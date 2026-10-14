@@ -3,7 +3,9 @@
 Every diagnostic from `catx check` (and `catx run`, `catx fix` and the language server) carries a code.
 This file has one entry per code: what it means, a small program that triggers it, and how to fix it.
 Codes starting with `E` are errors; the program does not run until they are fixed. Codes starting with
-`W` are warnings; the program still runs.
+`W` are warnings; the program still runs, and `catx check` still exits with status 0. A comment
+`# allow(CODE, ...)` on a warning's line, or on the line above it, silences those warnings there
+(`s += x # allow(W0004)`); errors cannot be allowed.
 
 The first digits group the codes:
 
@@ -1611,3 +1613,26 @@ puts(name?.length)
 ```
 
 Use `.` instead of `?.`.
+
+## W0004
+
+String built by appending in a loop. A `String` local declared outside a loop grows by `s += x` or
+`s = s + x` inside a `for`, `while` or `loop` body, or inside the block of `each*`, `times`, `upto`,
+`downto`, `map`, `flat_map`, `filter`, `filter_map`, `reject` or `select`. Each append copies the whole
+string, so the loop takes time quadratic in the string's length. Loops over a literal range of at most
+16 elements (`for i in 0..3`, `4.times`) are not reported.
+
+```cx
+fn join(xs: List[String]) -> String {
+  s = ""
+  for x in xs {
+    s += x
+  }
+  s
+}
+```
+
+Append to a `StringBuilder`, which grows in place, and convert once after the loop:
+`sb = StringBuilder.new()` before it, `sb.push(x)` inside, `s = sb.to_s` after. `catx fix` makes this
+rewrite when it is mechanical (reference, §10). To keep the code as it is, add `# allow(W0004)` on
+the line.

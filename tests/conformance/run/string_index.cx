@@ -30,7 +30,7 @@ cjk = "日本語のテキスト" * 40
 built = ""
 k = 0
 while k < 300 {
-  built = built + (if k % 7 == 0 { "ü" } else { "x" })
+  built = built + (if k % 7 == 0 { "ü" } else { "x" }) # allow(W0004): builds a string by concatenation on purpose
   k += 1
 }
 for s in [ascii, mixed, cjk, built, "héllo", "", "😀"] {

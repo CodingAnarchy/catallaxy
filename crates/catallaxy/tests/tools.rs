@@ -938,3 +938,26 @@ fn fix_applies_checker_fixes() {
     assert!(out.is_empty() && err.contains("fixed 0 files"), "{out}{err}");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn string_append_lint_warns_and_fixes() {
+    let dir = scratch_dir("w0004");
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = "s = \"\"\nfor i in 0..100 {\n  s += \"#{i % 10}\"\n}\nputs(s.length)\n";
+    let file = dir.join("a.cx");
+    std::fs::write(&file, src).unwrap();
+    // A warning: `check` still succeeds.
+    let (code, out, err) = catx(&["check".as_ref(), file.as_os_str()]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(format!("{out}{err}").contains("warning[W0004]"), "{out}{err}");
+    let (code, out, err) = catx(&["fix".as_ref(), file.as_os_str()]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("a.cx:3:3: use a StringBuilder [W0004]"), "{out}");
+    let want =
+        "s_sb = StringBuilder.new()\nfor i in 0..100 {\n  s_sb.push(\"#{i % 10}\")\n}\ns = s_sb.to_s\nputs(s.length)\n";
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), want);
+    let (code, out, err) = catx(&["run".as_ref(), file.as_os_str()]);
+    assert_eq!((code, out.as_str()), (0, "101\n"), "{err}");
+    assert!(!err.contains("W0004"), "{err}");
+    std::fs::remove_dir_all(&dir).ok();
+}
