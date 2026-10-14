@@ -304,7 +304,15 @@ impl<'a> Parser<'a> {
             }
             path.push(self.expect_ident()?);
         }
-        Ok(ImportDecl { path, items, span: start.to(self.prev_span()) })
+        let mut alias = None;
+        if self.is_kw(Kw::As) {
+            if items.is_some() {
+                return self.error("`as` renames a module; `import a.b.{...}` cannot have one");
+            }
+            self.bump();
+            alias = Some(self.expect_ident()?);
+        }
+        Ok(ImportDecl { path, items, alias, span: start.to(self.prev_span()) })
     }
 
     fn parse_type_params(&mut self) -> PResult<Vec<TypeParam>> {

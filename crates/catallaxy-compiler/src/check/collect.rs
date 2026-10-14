@@ -241,6 +241,9 @@ impl Checker {
                     self.fns[fid as usize].is_pub = f.is_pub;
                     self.fns[fid as usize].doc = f.doc.clone();
                     self.declare(m, &f.name, ScopeItem::Fn(fid));
+                    if self.mods[m as usize].is_prelude && f.name.name == "compare_values" {
+                        self.well_known.compare_values = Some(fid);
+                    }
                 }
                 Item::Const(c) => {
                     let gid = self.new_global(&c.name.name, true, m, c.is_pub, c.name.span, GlobalInit::Item(m, i));
@@ -296,14 +299,17 @@ impl Checker {
             }
             match &imp.items {
                 None => {
-                    let alias = path.last().unwrap().clone();
-                    self.mods[m as usize].imported.insert(alias, (ScopeItem::Module(target), imp.span));
+                    let (alias, span) = match &imp.alias {
+                        Some(a) => (a.name.clone(), a.span),
+                        None => (path.last().unwrap().clone(), imp.span),
+                    };
+                    self.bind_import(m, alias, ScopeItem::Module(target), span);
                 }
                 Some(list) => {
                     for name in list {
                         match self.mods[target as usize].items.get(&name.name).copied() {
                             Some(si) if self.item_is_pub(si) => {
-                                self.mods[m as usize].imported.insert(name.name.clone(), (si, name.span));
+                                self.bind_import(m, name.name.clone(), si, name.span);
                             }
                             Some(_) => {
                                 self.err("E0202", format!("`{}` is private to module `{}`", name.name, key), name.span)
@@ -312,6 +318,24 @@ impl Checker {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// Binds an imported name in module `m`; two imports may not bind one name to different things.
+    fn bind_import(&mut self, m: ModId, name: String, si: ScopeItem, span: Span) {
+        match self.mods[m as usize].imported.get(&name) {
+            Some(&(prev, _)) if prev != si => {
+                let hint = if matches!(si, ScopeItem::Module(_)) {
+                    "; give one module another name with `import a.b as name`"
+                } else {
+                    ""
+                };
+                self.err("E0206", format!("`{name}` is already imported{hint}"), span);
+            }
+            Some(_) => {}
+            None => {
+                self.mods[m as usize].imported.insert(name, (si, span));
             }
         }
     }
@@ -1043,7 +1067,13 @@ impl Checker {
             self.fns[fid as usize].is_pub = x.is_pub || md.is_pub || is_prelude;
             self.fill_sig(fid, md, &mut scope, false);
             if md.is_native {
-                self.fns[fid as usize].native_name = Some(format!("ext.{}", md.name.name));
+                // A prelude extension of a builtin class with bounded parameters (`extend[T:
+                // Comparable] List[T]`) implements its natives under the class's name.
+                let owner = match self.types.get(target) {
+                    Ty::Class(c, _) if is_prelude && self.classes[c].is_builtin => self.classes[c].name.clone(),
+                    _ => "ext".to_string(),
+                };
+                self.fns[fid as usize].native_name = Some(format!("{owner}.{}", md.name.name));
             }
             methods.insert(md.name.name.clone(), fid);
         }

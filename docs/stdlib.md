@@ -59,9 +59,9 @@ Everything here is available in every module without an import.
 - `fn group_by[K](self, f: fn(T) -> K) -> Dict[K, List[T]]`
 - `fn partition(self, f: fn(T) -> Bool) -> (List[T], List[T])`
 - `fn tally_by[K](self, f: fn(T) -> K) -> Dict[K, Int]`
-- `fn sort_by[K](self, f: fn(T) -> K) -> List[T]`
-- `fn min_by[K](self, f: fn(T) -> K) -> T?`
-- `fn max_by[K](self, f: fn(T) -> K) -> T?`
+- `fn sort_by[K: Comparable](self, f: fn(T) -> K) -> List[T]`
+- `fn min_by[K: Comparable](self, f: fn(T) -> K) -> T?`
+- `fn max_by[K: Comparable](self, f: fn(T) -> K) -> T?`
 - `fn sum_by(self, f: fn(T) -> Int) -> Int`
 - `fn zip[U](self, other: List[U]) -> List[(T, U)]`
 - `fn uniq(self) -> List[T]`
@@ -144,6 +144,11 @@ Everything here is available in every module without an import.
 - `fn map[U](self, f: fn(T) -> U) -> Result[U, E]`
 - `fn map_err[F](self, f: fn(E) -> F) -> Result[T, F]`
 - `fn and_then[U](self, f: fn(T) -> Result[U, E]) -> Result[U, E]`
+
+## T?
+
+- `fn ok_or[E](self, error: E) -> Result[T, E]`
+- `fn ok_or_else[E](self, f: fn() -> E) -> Result[T, E]`
 
 ## Int
 
@@ -324,14 +329,17 @@ Everything here is available in every module without an import.
 - `fn fill(mut self, value: T)`
 - `fn rotate(self, n: Int = 1) -> List[T]`
 - `fn chunk(self, size: Int) -> List[List[T]]`
-- `fn sort_by_keys[K](self, keys: List[K]) -> List[T]`
-- `fn sorted(self) -> List[T]`
-- `fn sort_in_place(mut self)`
+- `fn sort_by_keys[K: Comparable](self, keys: List[K]) -> List[T]`
 - `fn sort_with(self, f: fn(T, T) -> Int) -> List[T]`
 - `fn par_map[U](self, f: fn(T) -> U) -> List[U]`
 - `fn par_each(self, f: fn(T))`
 - `fn par_reduce(self, identity: T, f: fn(T, T) -> T) -> T`
 - `fn par_select(self, f: fn(T) -> Bool) -> List[T]`
+
+## List[T] (where T: Comparable)
+
+- `fn sorted(self) -> List[T]`
+- `fn sort_in_place(mut self)`
 
 ## List[List[U]]
 
@@ -390,8 +398,14 @@ Everything here is available in every module without an import.
 - `fn map_values[W](self, f: fn(V) -> W) -> Dict[K, W]`
 - `fn select_entries(self, f: fn(K, V) -> Bool) -> Dict[K, V]`
 - `fn invert(self) -> Dict[V, K]`
-- `fn sort_by_value(self) -> List[(K, V)]`
+
+## Dict[K, V] (where K: Comparable)
+
 - `fn sort_by_key(self) -> List[(K, V)]`
+
+## Dict[K, V] (where V: Comparable)
+
+- `fn sort_by_value(self) -> List[(K, V)]`
 
 ## Set[T]
 

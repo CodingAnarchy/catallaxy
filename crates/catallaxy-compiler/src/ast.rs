@@ -139,6 +139,8 @@ pub struct ExtendDecl {
 pub struct ImportDecl {
     pub path: Vec<Ident>,
     pub items: Option<Vec<Ident>>,
+    /// `import a.b as c`: the name the module is bound to (default: the last path segment).
+    pub alias: Option<Ident>,
     pub span: Span,
 }
 

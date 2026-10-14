@@ -161,28 +161,36 @@ fn empty_segments_are_returned_to_the_os() {
     m.roots().0.borrow_mut().push(list);
     let start = total_heap_bytes();
     let released = stats::released_bytes();
-    // About 64 MB of garbage. No safepoints, so no collection reclaims any of it early.
-    for i in 0..1_400_000 {
+    // Garbage until the heap has grown by 64 MB. (Earlier tests may have left empty pages in the
+    // pool, which are used first, so the amount of garbage needed varies.) No safepoints, so no
+    // collection reclaims any of it early.
+    let mut i = 0;
+    while total_heap_bytes() < start + (64 << 20) && i < 20_000_000 {
         let _ = m.cons(std::ptr::null_mut(), std::ptr::null_mut(), i);
+        i += 1;
     }
     let grown = total_heap_bytes();
-    assert!(grown >= start + (60 << 20), "heap grew from {start} to {grown}");
     // The first collection finds the garbage dead; the second sweeps it, leaving whole
     // segments empty, and returns all but a reserve for the next allocation budget.
     collect_now(&m.rec);
     collect_now(&m.rec);
     let after = total_heap_bytes();
-    assert!(stats::released_bytes() >= released + (40 << 20), "released {}", stats::released_bytes() - released);
-    assert!(after + (40 << 20) <= grown, "heap went from {grown} to {after}");
+    let freed = stats::released_bytes() - released;
     // The heap keeps working, including when it has to map segments again.
     for i in 0..1_400_000 {
         let _ = m.cons(std::ptr::null_mut(), std::ptr::null_mut(), i);
     }
     collect_now(&m.rec);
     collect_now(&m.rec);
-    assert_eq!(list_sum(list), (0..1000).sum());
+    let sum = list_sum(list);
     m.roots().0.borrow_mut().clear();
+    // Unregister before asserting: a failed assertion must not leave a running mutator behind
+    // for the other tests' collections to wait on.
     m.finish();
+    assert!(grown >= start + (64 << 20), "heap grew from {start} to {grown}");
+    assert!(freed >= 40 << 20, "released {freed} bytes");
+    assert!(after + (40 << 20) <= grown, "heap went from {grown} to {after}");
+    assert_eq!(sum, (0..1000).sum());
 }
 
 #[test]

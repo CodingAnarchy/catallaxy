@@ -55,7 +55,8 @@ pub(crate) fn after_collection(live_bytes: usize, mutators: usize) {
     // 2) and with the number of allocating threads, so adding threads does not multiply pauses.
     let per_thread = MIN_THRESHOLD * mutators.clamp(1, 32);
     let t = if floor < MIN_THRESHOLD { floor } else { live_bytes.max(per_thread) };
-    THRESHOLD.store(t, Ordering::Relaxed);
+    THRESHOLD.store(crate::limits::cap_budget(t, live_bytes), Ordering::Relaxed);
+    crate::limits::after_collection(live_bytes);
     COLLECTIONS.fetch_add(1, Ordering::Relaxed);
 }
 

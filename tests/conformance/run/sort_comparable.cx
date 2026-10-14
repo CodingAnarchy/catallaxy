@@ -1,0 +1,32 @@
+# Tuples and lists are Comparable when their elements are: they order lexicographically, sort,
+# and work wherever a `Comparable` is expected (bounds, `min`/`max`, `clamp`, sort keys).
+fn biggest[T: Comparable](xs: List[T]) -> T? { xs.max() }
+
+class Rec {
+  a: Int
+  b: String
+}
+
+puts((1, "b") < (1, "c"))
+puts((2, "a") <=> (1, "z"))
+puts([1, 2] < [1, 2, 0])
+puts([[2, 1], [1, 5]].sort())
+puts([(2, "x"), (1, "y")].sorted())
+puts([(2, "x"), (1, "y")].min())
+puts(biggest([(2, "x"), (3, "y")]))
+puts(biggest([[1], [0, 9]]))
+puts((5, 1).clamp((1, 0), (3, 0)))
+recs = [Rec.new(2, "b"), Rec.new(1, "z"), Rec.new(2, "a")]
+puts(recs.sort_by { |r| (r.a, r.b) }.map { |r| r.b })
+puts(recs.max_by { |r| (r.a, r.b) }?.b)
+d = ["b": 2, "a": 3]
+puts(d.sort_by_key())
+puts(d.sort_by_value())
+xs = [3, 1, 2]
+xs.sort_in_place()
+puts(xs)
+j: Dyn = 3
+puts([j, 1].sort())
+f = freeze([[2], [1]])
+puts(f.sorted())
+puts(f[0] < [3])

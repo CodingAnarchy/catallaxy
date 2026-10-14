@@ -182,6 +182,12 @@ impl Checker {
                 Some(m)
             }
             Ty::Union(parts) => {
+                // Methods of the optional itself (`extend[T] T?`: `ok_or`, ...).
+                if parts.contains(&self.types.nil) {
+                    if let Some(m) = self.lookup_ext(r, name, false) {
+                        return Some(m);
+                    }
+                }
                 let mut first = None;
                 for p in parts {
                     let m = self.lookup_method(p, name, allow_getters)?;
@@ -264,7 +270,14 @@ impl Checker {
         let &fid = info.by_name.get(name)?;
         let mut subst: FxHashMap<ParamId, TyId> = info.params.iter().copied().zip(args.iter().copied()).collect();
         subst.insert(info.self_param, r);
-        let fallback = if self.fns[fid as usize].is_default { Some(fid) } else { None };
+        let fallback = if self.fns[fid as usize].is_default {
+            Some(fid)
+        } else if name == "<=>" && Some(iid) == self.well_known.comparable {
+            // Tuples and lists are comparable without a `<=>` method.
+            self.well_known.compare_values
+        } else {
+            None
+        };
         Some(MethodRef {
             fid,
             subst,
@@ -272,6 +285,19 @@ impl Checker {
             dispatch: Dispatch::Dynamic(name.to_string(), fallback),
             frozen: false,
         })
+    }
+
+    /// Whether `name` is a method of the optional type `r` itself (an extension of `T?`), which
+    /// can be called without unwrapping.
+    pub fn has_optional_method(&mut self, r: TyId, name: &str) -> bool {
+        let r = self.types.shallow_resolve(r);
+        if !matches!(self.types.get(r), Ty::Union(p) if p.contains(&self.types.nil)) {
+            return false;
+        }
+        let cp = self.checkpoint();
+        let found = self.lookup_ext(r, name, false).is_some();
+        self.rollback(cp);
+        found
     }
 
     /// Extension methods visible in the current module whose target matches `r`.
@@ -306,6 +332,51 @@ impl Checker {
             let subst: FxHashMap<ParamId, TyId> = sub.into_iter().map(|(p, t)| (p, self.types.resolve(t))).collect();
             let dispatch = if dynamic { Dispatch::Dynamic(name.to_string(), Some(fid)) } else { Dispatch::Static(fid) };
             return Some(MethodRef { fid, subst, self_ty: r, dispatch, frozen: false });
+        }
+        None
+    }
+
+    /// For a failed lookup: an extension method `name` whose target matches `r` but whose
+    /// parameter bounds do not hold. Returns the bound requirement and the type that misses it,
+    /// rendered for a diagnostic (`T: Comparable`, `K`).
+    pub fn unmet_ext_bound(&mut self, r: TyId, name: &str) -> Option<(String, String)> {
+        let r = self.types.shallow_resolve(r);
+        for e in self.visible_exts() {
+            if !self.exts[e as usize].methods.contains_key(name) {
+                continue;
+            }
+            let ext = self.exts[e as usize].clone();
+            let cp = self.checkpoint();
+            self.suppress_diags += 1;
+            let mut sub: FxHashMap<ParamId, TyId> = FxHashMap::default();
+            for &p in &ext.params {
+                let v = self.types.fresh_var();
+                sub.insert(p, v);
+            }
+            let target = self.types.subst(ext.target, &sub, None);
+            let matched = match self.types.get(target).clone() {
+                Ty::Iface(..) => self.assignable(r, target),
+                _ => self.unify_receiver(r, target),
+            };
+            let mut found = None;
+            if matched {
+                'params: for &p in &ext.params {
+                    let actual = self.types.resolve(sub[&p]);
+                    for b in self.params[p as usize].bounds.clone() {
+                        let b = self.types.subst(b, &sub, None);
+                        if !self.trial(|c| c.assignable(actual, b)) {
+                            let req = format!("{}: {}", self.params[p as usize].name, self.show(b));
+                            found = Some((req, self.show(actual)));
+                            break 'params;
+                        }
+                    }
+                }
+            }
+            self.suppress_diags -= 1;
+            self.rollback(cp);
+            if found.is_some() {
+                return found;
+            }
         }
         None
     }

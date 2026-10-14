@@ -21,7 +21,7 @@ pub enum PathRes {
 }
 
 /// Narrowings implied by a condition being true / false.
-pub type Narrowings = (Vec<(LocalId, TyId)>, Vec<(LocalId, TyId)>);
+pub type Narrowings = (Vec<(NKey, TyId)>, Vec<(NKey, TyId)>);
 
 impl Checker {
     pub fn check_against(&mut self, e: &Expr, ty: TyId, what: &str) -> TyId {
@@ -74,7 +74,74 @@ impl Checker {
     pub fn check_expr(&mut self, e: &Expr, expected: Option<TyId>) -> TyId {
         let t = self.check_expr_inner(e, expected);
         self.record_ty(e.id, t);
+        if self.may_mutate(e) {
+            self.clear_unstable_paths();
+        }
         t
+    }
+
+    /// Before a loop: what its body may do on one iteration happens before the next, so field
+    /// paths it may change lose their narrowing for the whole loop (the checker visits the body
+    /// once). A call anywhere drops the unstable ones, an assignment to a field drops paths
+    /// through that field name, and an assignment to a local drops paths rooted at it.
+    fn loop_invalidate(&mut self, body: &Block) {
+        if self.ctxs.last().is_none_or(|c| c.path_narrow.iter().all(|l| l.is_empty())) {
+            return;
+        }
+        if self.method_names.is_empty() {
+            let mut names: FxHashSet<String> = FxHashSet::default();
+            for ci in self.classes.values() {
+                names.extend(ci.methods.keys().cloned());
+            }
+            for x in &self.exts {
+                names.extend(x.methods.keys().cloned());
+            }
+            for i in &self.ifaces {
+                names.extend(i.by_name.keys().cloned());
+            }
+            self.method_names = names;
+        }
+        let mut calls = false;
+        let mut fields: Vec<String> = Vec::new();
+        let mut locals: Vec<String> = Vec::new();
+        let mut stack: Vec<&Expr> = body.stmts.iter().collect();
+        while let Some(x) = stack.pop() {
+            match &x.kind {
+                ExprKind::Call { .. } => calls = true,
+                // Without parentheses, a member is a field read unless some type has a method
+                // of that name (zero-argument methods share the namespace).
+                ExprKind::Member { name, args, block, parens, .. } => {
+                    if *parens || !args.is_empty() || block.is_some() || self.method_names.contains(&name.name) {
+                        calls = true;
+                    }
+                }
+                ExprKind::Assign { target, .. } => match &target.kind {
+                    ExprKind::Member { name, .. } => fields.push(name.name.clone()),
+                    ExprKind::Ident(n) => locals.push(n.clone()),
+                    _ => {}
+                },
+                _ => {}
+            }
+            stack.extend(crate::query::children(x));
+        }
+        if calls {
+            self.clear_unstable_paths();
+        }
+        let roots: Vec<LocalId> = locals.iter().filter_map(|n| self.lookup_local_quiet(n)).collect();
+        self.clear_paths(|p, _| roots.contains(&p.0) || p.1.iter().any(|f| fields.contains(f)));
+    }
+
+    /// Whether evaluating `e` (just checked) runs code that could assign fields: a function,
+    /// method or closure call, a constructor, or an operator or index implemented by a method.
+    fn may_mutate(&self, e: &Expr) -> bool {
+        match &e.kind {
+            ExprKind::Call { .. } | ExprKind::Member { .. } | ExprKind::Index { .. } => matches!(
+                self.calls.get(&e.id),
+                Some(CallRes::Fn { .. } | CallRes::Closure { .. } | CallRes::Construct { .. } | CallRes::DynMember(_))
+            ),
+            ExprKind::Binary(..) => matches!(self.bins.get(&e.id), Some(BinRes::Method(..))),
+            _ => false,
+        }
     }
 
     fn check_expr_inner(&mut self, e: &Expr, expected: Option<TyId>) -> TyId {
@@ -173,6 +240,7 @@ impl Checker {
                 self.check_if_let(pattern, value, then, else_.as_deref(), expected)
             }
             ExprKind::While { cond, body } => {
+                self.loop_invalidate(body);
                 let (tn, _) = self.check_cond(cond);
                 self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: false });
                 self.push_scope();
@@ -185,6 +253,7 @@ impl Checker {
                 self.types.nil
             }
             ExprKind::Loop { body } => {
+                self.loop_invalidate(body);
                 self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: false });
                 self.check_block(body, None);
                 let lp = self.ctx().loops.pop().unwrap();
@@ -810,6 +879,9 @@ impl Checker {
                     self.bins.insert(e.id, BinRes::Compare(ArithKind::Generic));
                     return bool_;
                 }
+                if self.builtin_compare(e, op, r, lt, rt) {
+                    return bool_;
+                }
                 self.operator_method(e, op, l, r, lt, rt)
             }
             BinOp::Cmp => {
@@ -827,6 +899,9 @@ impl Checker {
                 let (ls, rs) = (self.types.shallow_resolve(lt), self.types.shallow_resolve(rt));
                 if (ls == string && rs == string) || self.is_dynamic(lt) || self.is_dynamic(rt) {
                     self.bins.insert(e.id, BinRes::Compare(ArithKind::Generic));
+                    return int;
+                }
+                if self.builtin_compare(e, op, r, lt, rt) {
                     return int;
                 }
                 self.operator_method(e, op, l, r, lt, rt)
@@ -912,6 +987,45 @@ impl Checker {
         }
     }
 
+    /// `<`, `<=>`, ... on tuples and lists of comparable elements, which compare
+    /// lexicographically at run time. Returns false (nothing recorded) for other types.
+    fn builtin_compare(&mut self, e: &Expr, op: BinOp, r: &Expr, lt: TyId, rt: TyId) -> bool {
+        let lt_r = self.types.shallow_resolve(lt);
+        let is_seq = |c: &Self, t: TyId| match c.types.get(t) {
+            Ty::Tuple(_) | Ty::Class(builtin::LIST, _) => true,
+            Ty::Frozen(i) => {
+                matches!(c.types.get(c.types.shallow_resolve(*i)), Ty::Tuple(_) | Ty::Class(builtin::LIST, _))
+            }
+            _ => false,
+        };
+        if !is_seq(self, lt_r) {
+            return false;
+        }
+        if self.builtin_comparable(lt_r) != Some(true) {
+            let msg = format!(
+                "operator `{}` is not defined for `{}`: its elements are not `Comparable`",
+                op.symbol(),
+                self.show(lt)
+            );
+            self.err("E0316", msg, e.span);
+        } else if !self.trial(|c| c.assignable(rt, lt)) && !self.trial(|c| c.assignable(lt, rt)) && {
+            // Comparison only reads: a frozen side compares with an owned one.
+            let (fl, fr) = (self.freeze_ty(lt), self.freeze_ty(rt));
+            !self.trial(|c| c.assignable(fr, fl)) && !self.assignable(fl, fr)
+        } {
+            let msg = format!(
+                "`{}` {} `{}`: right side must be `{}`",
+                self.show(lt),
+                op.symbol(),
+                self.show(rt),
+                self.show(lt)
+            );
+            self.err("E0315", msg, r.span);
+        }
+        self.bins.insert(e.id, BinRes::Compare(ArithKind::Generic));
+        true
+    }
+
     /// An operator implemented by a method (`+` on a class, `<` from Comparable, ...).
     fn operator_method(&mut self, e: &Expr, op: BinOp, l: &Expr, r: &Expr, lt: TyId, rt: TyId) -> TyId {
         let name = op.symbol();
@@ -977,13 +1091,20 @@ impl Checker {
                 (f, t)
             }
             ExprKind::Binary(op @ (BinOp::And | BinOp::Or), l, r) => {
-                let (lt, lf) = self.check_cond(l);
+                let (mut lt, mut lf) = self.check_cond(l);
                 self.push_scope();
-                for &(id, t) in if *op == BinOp::And { &lt } else { &lf } {
+                for (id, t) in if *op == BinOp::And { lt.clone() } else { lf.clone() } {
                     self.narrow(id, t);
                 }
+                let epoch = self.path_epoch;
                 let (rt, rf) = self.check_cond(r);
                 self.pop_scope();
+                if self.path_epoch != epoch {
+                    // A call on the right may have changed what the left found about fields.
+                    let keep = |(k, _): &(NKey, TyId)| !matches!(k, NKey::Path(_, false));
+                    lt.retain(keep);
+                    lf.retain(keep);
+                }
                 self.bins.insert(e.id, BinRes::Logic);
                 self.record_ty(e.id, bool_);
                 if *op == BinOp::And {
@@ -1003,10 +1124,14 @@ impl Checker {
                 self.record_ty(e.id, bool_);
                 let mut nonnil = Vec::new();
                 let mut isnil = Vec::new();
-                if let Some(l) = self.narrowable_local(x) {
+                let key = match self.narrowable_local(x) {
+                    Some(l) => Some(NKey::Local(l)),
+                    None => self.field_path(x).map(|(p, stable)| NKey::Path(p, stable)),
+                };
+                if let Some(key) = key {
                     if let Some(inner) = self.types.strip_nil(t) {
-                        nonnil.push((l, inner));
-                        isnil.push((l, self.types.nil));
+                        nonnil.push((key.clone(), inner));
+                        isnil.push((key, self.types.nil));
                     }
                 }
                 if *op == BinOp::Ne {
@@ -1024,9 +1149,9 @@ impl Checker {
                     let target = self.resolve_type(ty, &mut self.type_scope());
                     let cur = self.local_ty(l);
                     let (yes, no) = self.split_by_type(cur, target);
-                    tn.push((l, yes));
+                    tn.push((l.into(), yes));
                     if let Some(no) = no {
-                        fne.push((l, no));
+                        fne.push((l.into(), no));
                     }
                 }
                 (tn, fne)
@@ -1059,6 +1184,35 @@ impl Checker {
         (y, n)
     }
 
+    /// The field path `e` reads (`n.next`, `self.head.next`) when it is a plain field read on a
+    /// local or `self`, with whether it is stable (see `NKey::Path`). Fields of shared classes,
+    /// which other threads may change, are never paths.
+    pub fn field_path(&self, e: &Expr) -> Option<(FieldPath, bool)> {
+        let ExprKind::Member { recv, name, args, block: None, parens: false, safe: false } = &e.kind else {
+            return None;
+        };
+        if !args.is_empty() || !matches!(self.calls.get(&e.id), Some(CallRes::Field { safe: false, .. })) {
+            return None;
+        }
+        let ((root, mut fields), stable) = match &recv.kind {
+            ExprKind::Ident(_) => ((self.narrowable_local(recv)?, Vec::new()), true),
+            ExprKind::SelfValue => ((self.ctxs.last()?.self_local?, Vec::new()), true),
+            _ => self.field_path(recv)?,
+        };
+        let rt = self.types.shallow_resolve(self.ty_of(recv.id));
+        let frozen_here = match self.types.get(rt) {
+            Ty::Frozen(_) => true,
+            Ty::Class(c, _) => match self.classes.get(c).map(|ci| ci.modifier) {
+                Some(ast::ClassModifier::Shared) => return None,
+                Some(ast::ClassModifier::Frozen) => true,
+                _ => false,
+            },
+            _ => false,
+        };
+        fields.push(name.name.clone());
+        Some(((root, fields), stable && frozen_here))
+    }
+
     fn narrowable_local(&self, e: &Expr) -> Option<LocalId> {
         match (&e.kind, self.names.get(&e.id)) {
             (ExprKind::Ident(_), Some(NameRes::Local(l))) => Some(*l),
@@ -1072,7 +1226,7 @@ impl Checker {
     fn check_if(&mut self, cond: &Expr, then: &Block, else_: Option<&Expr>, expected: Option<TyId>) -> TyId {
         let (tn, fne) = self.check_cond(cond);
         self.push_scope();
-        for &(l, t) in &tn {
+        for (l, t) in tn.iter().cloned() {
             self.narrow(l, t);
         }
         let tt = self.check_block(then, expected);
@@ -1080,7 +1234,7 @@ impl Checker {
         let et = match else_ {
             Some(x) => {
                 self.push_scope();
-                for &(l, t) in &fne {
+                for (l, t) in fne.iter().cloned() {
                     self.narrow(l, t);
                 }
                 let t = self.check_expr(x, expected);
@@ -1323,7 +1477,15 @@ impl Checker {
                     "`?` on an optional requires the function to return an optional, but it returns `{}`",
                     self.show(ret)
                 );
-                self.err("E0321", msg, e.span);
+                let mut d = Diag::error("E0321", msg, e.span);
+                if matches!(self.types.get(ret), Ty::Enum(r, _) if Some(*r) == self.well_known.result) {
+                    d = d.note("turn the missing value into an error with `.ok_or(error)?`").suggest(
+                        "convert it to a Result",
+                        x.span.after(),
+                        ".ok_or(<error>)",
+                    );
+                }
+                self.emit(d);
             }
             if matches!(self.types.get(ret), Ty::Var(_)) {
                 let nil = self.types.nil;
@@ -1507,6 +1669,18 @@ impl Checker {
                         self.assigns.insert(e.id, AssignRes::Field(idx));
                         self.calls.insert(target.id, CallRes::Field { index: idx, safe: false });
                         self.record_ty(target.id, fty);
+                        // Any object's field of this name may be the one assigned (aliases).
+                        self.clear_paths(|p, _| p.1.contains(&name.name));
+                        if let Some((p, stable)) = self.field_path(target) {
+                            let fty_r = self.types.shallow_resolve(fty);
+                            if self.types.is_nilable(fty_r)
+                                && !self.types.is_nilable(vt)
+                                && !self.is_never(vt)
+                                && !self.types.has_vars(vt)
+                            {
+                                self.narrow(NKey::Path(p, stable), vt);
+                            }
+                        }
                         if matches!(recv.kind, ExprKind::SelfValue) {
                             let fid = self.ctxs[self.return_ctx()].fn_id;
                             self.fns[fid as usize].mutating = true;
@@ -1609,10 +1783,12 @@ impl Checker {
                 b
             }
             BinOp::Coalesce => {
+                // `x ??= v` leaves `x` non-nil: the result (what `x` holds afterwards) is the
+                // unwrapped type, so the target is narrowed like after `x = v`.
                 let inner = self.types.strip_nil(target_ty).unwrap_or(target_ty);
                 self.check_against(value, inner, "`??=`");
                 self.bins.insert(e.id, BinRes::Coalesce);
-                target_ty
+                inner
             }
             _ => {
                 let vt = self.check_expr(value, None);
@@ -1677,6 +1853,18 @@ impl Checker {
                         if !self.item_is_pub(si) {
                             let msg = format!("`{}` is private to module `{}`", name.name, self.mods[m as usize].name);
                             self.err("E0202", msg, name.span);
+                        }
+                        // Record `module.Type` for tooling, like a bare type name above.
+                        let res = match si {
+                            ScopeItem::Class(c) => Some(NameRes::Class(c)),
+                            ScopeItem::Enum(en) => Some(NameRes::Enum(en)),
+                            ScopeItem::Iface(i) => Some(NameRes::Iface(i)),
+                            _ => None,
+                        };
+                        if let Some(r) = res {
+                            if e.id < u32::MAX - 2 {
+                                self.names.insert(e.id, r);
+                            }
                         }
                         Some(match si {
                             ScopeItem::Class(c) => PathRes::Class(c, None),
@@ -2780,6 +2968,25 @@ impl Checker {
                             return ret;
                         }
                     }
+                    // `E.values()`: every variant, when none has a payload (an enum's own static
+                    // `values` takes precedence, above).
+                    if name.name == "values" && args.is_empty() && block.is_none() {
+                        let ei = &self.enums[en as usize];
+                        if let Some(v) = ei.variants.iter().find(|v| !v.fields.is_empty()) {
+                            let msg = format!(
+                                "`{}.values()` needs payload-less variants, but `{}` has a payload",
+                                ei.name, v.name
+                            );
+                            self.err("E0367", msg, name.span);
+                            return self.types.error;
+                        }
+                        let classes: Vec<ClassId> = ei.variants.iter().map(|v| v.class_id).collect();
+                        let n = ei.params.len();
+                        let ta = targs.unwrap_or_else(|| (0..n).map(|_| self.types.fresh_var()).collect());
+                        let et = self.types.intern(Ty::Enum(en, ta));
+                        self.calls.insert(e.id, CallRes::EnumValues(classes));
+                        return self.types.intern(Ty::Class(builtin::LIST, vec![et]));
+                    }
                     let msg = format!("enum `{}` has no variant `{}`", self.enums[en as usize].name, name.name);
                     let mut d = Diag::error("E0343", msg, name.span);
                     let names: Vec<String> = self.enums[en as usize].variants.iter().map(|v| v.name.clone()).collect();
@@ -2858,19 +3065,38 @@ impl Checker {
                     }
                 }
             }
-        } else if self.types.is_nilable(rt) && rt != self.types.nil {
+        } else if self.types.is_nilable(rt) && rt != self.types.nil && !self.has_optional_method(rt, &name.name) {
             let msg = format!("value of type `{}` may be nil", self.show(rt));
             let dot = Span::new(e.span.file, recv.span.end, recv.span.end);
+            let note = match self.field_path(recv) {
+                Some(((root, fields), _)) => {
+                    let path = format!("{}.{}", self.locals[root as usize].name, fields.join("."));
+                    let var = fields.last().cloned().unwrap_or_default();
+                    format!(
+                        "`!= nil` narrows a field only until a call, a loop or a closure could change it; \
+                         bind it instead: `if let {var} = {path} {{ ... }}` (or use `?.`, `??` or `!`)"
+                    )
+                }
+                None => "check `!= nil`, use `if let`, `?.`, `??` or `!`".to_string(),
+            };
             self.emit(
                 Diag::error("E0310", msg, recv.span)
                     .fix("use safe navigation", dot, "?")
                     .fix("assert it is not nil", dot, "!")
-                    .note("check `!= nil`, use `if let`, `?.`, `??` or `!`"),
+                    .note(note),
             );
             self.check_args_loose(args, block);
             return self.types.error;
         }
         let t = self.member_on(e, recv, rt, name, args, block, parens, expected);
+        // A field path narrowed by an earlier test (`if n.next != nil { n.next.v }`).
+        if !optional_result {
+            if let Some((p, _)) = self.field_path(e) {
+                if let Some(nt) = self.path_ty(&p) {
+                    return nt;
+                }
+            }
+        }
         if optional_result {
             if let Some(CallRes::Fn { safe, .. }) | Some(CallRes::Field { safe, .. }) = self.calls.get_mut(&e.id) {
                 *safe = true;
@@ -3039,6 +3265,9 @@ impl Checker {
         }
         let (slots, ret) = self.check_args(e, &m, args, block, expected, parallel);
         self.note_self_call(&m, recv);
+        if matches!(m.dispatch, Dispatch::Dynamic(..)) && matches!(f.owner, Owner::Iface(_)) {
+            self.dyn_targets.insert(e.id, m.fid);
+        }
         self.calls.insert(e.id, CallRes::Fn { dispatch: m.dispatch.clone(), recv: true, args: slots, safe: false });
         ret
     }
@@ -3087,6 +3316,12 @@ impl Checker {
         }
         let msg = format!("no method or field `{}` on `{}`", name.name, self.show(rt));
         let mut d = Diag::error("E0311", msg, name.span);
+        if let Some((req, actual)) = self.unmet_ext_bound(rt, &name.name) {
+            let iface = req.split_once(": ").map_or(req.as_str(), |(_, b)| b);
+            d = d.note(format!("`{}` needs `{req}`, and `{actual}` is not `{iface}`", name.name));
+            self.emit(d);
+            return;
+        }
         if let Some(s) = crate::util::suggest(&name.name, names.iter().map(|s| s.as_str())) {
             d = d.suggest(format!("did you mean `{s}`?"), name.span, s);
         }
@@ -3618,6 +3853,7 @@ impl Checker {
 
     fn check_for(&mut self, e: &Expr, pattern: &ast::Pattern, iter: &Expr, body: &Block) -> TyId {
         let it = self.check_expr(iter, None);
+        self.loop_invalidate(body);
         let itr = self.types.shallow_resolve(it);
         let (kind, elem) = match self.types.get(itr).clone() {
             Ty::Class(builtin::LIST, a) => (ForKind::List, a[0]),
