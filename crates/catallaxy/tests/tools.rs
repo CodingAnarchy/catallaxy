@@ -891,6 +891,7 @@ fn fmt_and_check_walk_directories() {
     let (code, _, err) = catx(&["check".as_ref(), dir.as_os_str()]);
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("E0300"), "{err}");
+    assert!(err.contains("help: for more on E0300, see https://") && err.contains("/docs/errors.md#e0300"), "{err}");
     std::fs::remove_dir_all(&dir).ok();
 }
 

@@ -544,7 +544,8 @@ every `*.cx` file under it, skipping hidden directories and `target/`.
 
 `catx test dir` runs every `*.cx` file under `dir` (except those in `lib/` directories, which hold
 modules for tests to import) in its own process. A file whose first line is `# expect: CODE[, CODE...]`
-must fail `catx check` with those diagnostic codes. Any other file must run with standard output
+must fail `catx check` with those diagnostic codes (if every code is a warning, `W...`, it need only
+report them). Any other file must run with standard output
 equal to its `.out` file and exit with status 0, or with the status given by a `# exit: N` line; a
 `.in` file next to it is fed to standard input. A program still running after `CATX_TEST_TIMEOUT`
 seconds (default 120) is killed and fails with its output so far. The exit status is 1 if anything
@@ -587,6 +588,10 @@ or leave a placeholder (`: Int`, `?? <default>`) are suggestions only and are ne
 named files are edited, not the modules they import. A file that was formatted before is formatted
 again afterwards. It prints each fix it applies; `--dry-run` prints them without writing. The exit
 status is 1 if errors remain, 2 if a file could not be read or written.
+
+Every diagnostic has a code. `docs/errors.md` explains each one with an example and a fix, and
+`catx check` (like `catx run` when a program does not compile) ends its report with a link to the
+entries for the codes it printed.
 
 Warnings never make `catx check` fail. A comment `# allow(CODE, ...)` on the warning's line, or on
 the line above it, silences those warnings there (`s += x # allow(W0004)`). The warnings are:
