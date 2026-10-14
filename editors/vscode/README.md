@@ -4,11 +4,11 @@ Syntax highlighting for Catallaxy (`.cx`) files, plus the `catx lsp` language se
 
 - diagnostics as you type
 - hover
-- go to definition, find references and rename
+- go to definition, and find references and rename across every `.cx` file in the workspace folders, open or not
 - completion
 - signature help
 - inlay hints with inferred types
-- document and workspace symbols
+- document symbols, and workspace symbols over the workspace folders
 - formatting (`catx fmt`)
 
 ## Install

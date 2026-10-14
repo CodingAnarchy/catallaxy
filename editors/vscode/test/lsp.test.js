@@ -458,6 +458,21 @@ async function main() {
       assert.deepStrictEqual(n.params.diagnostics, []);
     });
 
+    await check("references: files under the workspace folder count when they are not open", async () => {
+      // Neither lib/geometry.cx nor modules_demo.cx (just closed) is open.
+      const geo = fs.readFileSync(path.join(dir, "lib/geometry.cx"), "utf8");
+      const r = await c.request("textDocument/references", {
+        ...at(geometryUri, geo, "fn area", 0, 3),
+        context: { includeDeclaration: true },
+      });
+      const where = r.map((l) => `${l.uri === geometryUri ? "geometry" : l.uri === demoUri ? "demo" : l.uri}:${l.range.start.line}`);
+      assert.deepStrictEqual(where.sort(), [
+        `demo:${pos(demo, "geometry.area(square)").line}`,
+        `demo:${pos(demo, "geometry.area(triangle)").line}`,
+        `geometry:${pos(geo, "fn area").line}`,
+      ]);
+    });
+
     await check("shutdown and exit", async () => {
       assert.strictEqual(await c.request("shutdown", null), null);
       c.notify("exit", null);
