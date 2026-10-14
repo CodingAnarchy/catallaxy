@@ -279,28 +279,44 @@ pub fn lock_obj<'a>(m: &Mutator, h: &'a Header) -> catallaxy_gc::ObjLockGuard<'a
 }
 
 /// Checks that the current thread may read the list `v`. List reads never lock (see
-/// [`ListObj`]), so this is the only synchronization a list read needs.
-#[inline]
+/// [`ListObj`]), so this is the only synchronization a list read needs. Raises a `TypeError`
+/// if `v` is not a list.
+// Not inlined: the check's error path, inlined into the interpreter loop's slow paths, costs the
+// whole loop (register allocation), and list reads off the interpreter's fast paths are calls.
+#[inline(never)]
 pub fn read_list<'a>(m: &Mutator, v: Value) -> RtResult<&'a ListObj> {
-    let h = unsafe { &*v.as_ptr() };
-    check_read(m, h)?;
-    Ok(unsafe { as_list(v) })
+    let l = list_of(v)?;
+    check_read(m, unsafe { &*v.as_ptr() })?;
+    Ok(l)
 }
 
 /// Runs `f` on a list with write access: directly when owned, under the lock when shared.
 /// For shared lists, values stored must first go through [`publish_into_shared`].
+/// Raises a `TypeError` if `v` is not a list.
 #[inline]
 pub fn write_list<R>(m: &Mutator, v: Value, f: impl FnOnce(&ListObj, Access) -> R) -> RtResult<R> {
-    with_write(m, v, |access| f(unsafe { as_list(v) }, access))
+    let l = list_of(v)?;
+    with_write(m, v, |access| f(l, access))
 }
 
 /// Reads a dict or set. Owned and frozen tables are read directly; shared ones through the
 /// table's seqlock, falling back to the object's lock when writers keep overlapping. `f` may run
-/// more than once and must only read.
+/// more than once and must only read. Raises a `TypeError` if `v` is not a dict or set.
 #[inline]
 pub fn read_dict<R>(m: &Mutator, v: Value, f: impl Fn(&DictTable) -> R) -> RtResult<R> {
-    let h = unsafe { &*v.as_ptr() };
+    dict_of(v)?;
+    // SAFETY: checked just above.
+    unsafe { read_dict_unchecked(m, v, f) }
+}
+
+/// [`read_dict`] without the kind check, for paths that read a table repeatedly.
+///
+/// # Safety
+/// `v` must be a dict or set, checked by the caller (static types are not enough).
+#[inline]
+pub unsafe fn read_dict_unchecked<R>(m: &Mutator, v: Value, f: impl Fn(&DictTable) -> R) -> RtResult<R> {
     let t = unsafe { as_dict(v) }.table();
+    let h = unsafe { &*v.as_ptr() };
     match check_read(m, h)? {
         Access::Local => Ok(f(t)),
         Access::Shared => match t.read_optimistic(&f) {
@@ -314,14 +330,28 @@ pub fn read_dict<R>(m: &Mutator, v: Value, f: impl Fn(&DictTable) -> R) -> RtRes
 }
 
 /// Runs `f` on a dict or set with write access: directly when owned, under the lock when shared.
+/// Raises a `TypeError` if `v` is not a dict or set.
 #[inline]
 pub fn write_dict<R>(m: &Mutator, v: Value, f: impl FnOnce(&DictTable, Access) -> R) -> RtResult<R> {
+    dict_of(v)?;
+    // SAFETY: checked just above.
+    unsafe { write_dict_unchecked(m, v, f) }
+}
+
+/// [`write_dict`] without the kind check.
+///
+/// # Safety
+/// `v` must be a dict or set, checked by the caller (static types are not enough).
+#[inline]
+pub unsafe fn write_dict_unchecked<R>(m: &Mutator, v: Value, f: impl FnOnce(&DictTable, Access) -> R) -> RtResult<R> {
     with_write(m, v, |access| f(unsafe { as_dict(v) }.table(), access))
 }
 
-/// Runs `f` on a container's contents with the right synchronization for a read.
+/// Runs `f` on a container's contents with the right synchronization for a read. `v` must be a
+/// heap object whose kind the caller has checked (with a checked view such as [`sb_of`]).
 #[inline]
 pub fn with_read<R>(m: &Mutator, v: Value, f: impl FnOnce() -> R) -> RtResult<R> {
+    debug_assert!(v.is_ptr(), "with_read on an immediate");
     let h = unsafe { &*v.as_ptr() };
     match check_read(m, h)? {
         Access::Local => Ok(f()),
@@ -333,9 +363,11 @@ pub fn with_read<R>(m: &Mutator, v: Value, f: impl FnOnce() -> R) -> RtResult<R>
 }
 
 /// Runs `f` on a container's contents with the right synchronization for a write.
-/// For shared containers, values stored must first go through [`publish_into_shared`].
+/// For shared containers, values stored must first go through [`publish_into_shared`]. `v` must
+/// be a heap object whose kind the caller has checked (with a checked view such as [`sb_of`]).
 #[inline]
 pub fn with_write<R>(m: &Mutator, v: Value, f: impl FnOnce(Access) -> R) -> RtResult<R> {
+    debug_assert!(v.is_ptr(), "with_write on an immediate");
     let h = unsafe { &*v.as_ptr() };
     match check_write(m, h)? {
         Access::Local => Ok(f(Access::Local)),

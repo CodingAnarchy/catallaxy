@@ -1024,12 +1024,19 @@ pub(crate) fn vtable_for(kind: ObjKind) -> GcVTable {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Typed views. Callers must have checked the kind (usually statically, by the type checker).
+// Typed views.
+//
+// The `as_*` views are unchecked: the caller must have verified the object's kind just before
+// (with `kind_of`, a class compare, or a match on the class's kind). The static types are not
+// enough: a `Dyn` value or a hole in the checker can put a value of any type where another is
+// expected. Natives and other code taking values from programs use the checked `*_of` views
+// below, which raise a `TypeError` naming the expected and actual types instead.
 
 macro_rules! view {
     ($fn:ident, $ty:ty) => {
         /// # Safety
-        /// `v` must be a pointer to an object of this kind.
+        /// `v` must be a pointer to an object of this kind, checked by the caller (static types
+        /// are not enough; see the checked `*_of` views).
         #[inline(always)]
         pub unsafe fn $fn<'a>(v: Value) -> &'a $ty {
             &*(v.as_ptr() as *const $ty)
@@ -1050,6 +1057,63 @@ view!(as_atomic, AtomicObj);
 view!(as_channel, ChannelObj);
 view!(as_thread, ThreadObj);
 view!(as_native, NativeObj);
+
+/// A `TypeError` panic: `expected {want}, got {the class of v}`.
+#[cold]
+#[inline(never)]
+pub fn type_error<T>(want: &str, v: Value) -> crate::RtResult<T> {
+    crate::panic(format!("TypeError: expected {want}, got {}", crate::class::class_of(v).name))
+}
+
+macro_rules! checked_view {
+    ($fn:ident, $view:ident, $ty:ty, $kind:pat, $name:expr) => {
+        #[doc = concat!("The `", $name, "` behind `v`, or a `TypeError` panic if `v` is not one.")]
+        #[inline(always)]
+        pub fn $fn<'a>(v: Value) -> crate::RtResult<&'a $ty> {
+            if matches!(kind_of(v), $kind) {
+                // SAFETY: the kind was checked just above.
+                Ok(unsafe { $view(v) })
+            } else {
+                type_error($name, v)
+            }
+        }
+    };
+}
+checked_view!(str_obj_of, as_str_obj, StrObj, ObjKind::Str, "String");
+checked_view!(list_of, as_list, ListObj, ObjKind::List, "List");
+checked_view!(dict_of, as_dict, DictObj, ObjKind::Dict | ObjKind::Set, "Dict or Set");
+checked_view!(tuple_of, as_tuple, TupleObj, ObjKind::Tuple, "Tuple");
+checked_view!(sb_of, as_sb, StringBuilderObj, ObjKind::StringBuilder, "StringBuilder");
+checked_view!(mutex_of, as_mutex, MutexObj, ObjKind::Mutex, "Mutex");
+checked_view!(atomic_of, as_atomic, AtomicObj, ObjKind::Atomic, "Atomic");
+checked_view!(channel_of, as_channel, ChannelObj, ObjKind::Channel, "Channel");
+checked_view!(thread_of, as_thread, ThreadObj, ObjKind::Thread, "Thread");
+
+/// The instance behind `v` if it is of class `class_id` exactly (builtin and prelude classes,
+/// which have no subclasses), or a `TypeError` panic naming `want`.
+#[inline(always)]
+pub fn instance_of<'a>(v: Value, class_id: u32, want: &str) -> crate::RtResult<&'a InstanceObj> {
+    if v.is_ptr() {
+        let cls = unsafe { heap_class(v.as_ptr()) };
+        if cls.id == class_id && cls.kind == ObjKind::Instance {
+            // SAFETY: the kind was checked just above.
+            return Ok(unsafe { as_instance(v) });
+        }
+    }
+    type_error(want, v)
+}
+
+/// The instance behind `v` if it is an instance with a field `i` (of any class), else `None`.
+/// Reading the field is then memory-safe; whether it is the expected class's field is up to the
+/// caller.
+#[inline(always)]
+pub fn instance_with_field<'a>(v: Value, i: usize) -> Option<&'a InstanceObj> {
+    if v.is_ptr() && i < unsafe { heap_class(v.as_ptr()) }.instance_fields as usize {
+        // SAFETY: only instance classes have `instance_fields`, and this one has field `i`.
+        return Some(unsafe { as_instance(v) });
+    }
+    None
+}
 
 /// The object kind of a value (`Immediate` for non-pointers).
 #[inline]

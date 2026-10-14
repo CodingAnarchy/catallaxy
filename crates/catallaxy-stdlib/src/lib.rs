@@ -17,10 +17,10 @@ use std::io::Write;
 use std::sync::OnceLock;
 
 use catallaxy_runtime::class::class_of;
-use catallaxy_runtime::object::{kind_of, str_of};
+use catallaxy_runtime::object::str_of;
 use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership;
-use catallaxy_runtime::{panic, try_push, try_vec, ObjKind, RtResult, Trap, Value};
+use catallaxy_runtime::{panic, try_push, try_vec, RtResult, Trap, Value};
 use catallaxy_vm::{NativeFn, Vm};
 use parking_lot::Mutex;
 
@@ -91,8 +91,7 @@ pub(crate) fn s<'a>(v: Value) -> RtResult<&'a str> {
 
 /// The string object behind `v`.
 pub(crate) fn str_obj<'a>(v: Value) -> RtResult<&'a catallaxy_runtime::object::StrObj> {
-    s(v)?;
-    Ok(unsafe { catallaxy_runtime::object::as_str_obj(v) })
+    catallaxy_runtime::object::str_obj_of(v)
 }
 
 pub(crate) fn int(v: Value) -> RtResult<i64> {
@@ -106,6 +105,24 @@ pub(crate) fn int(v: Value) -> RtResult<i64> {
         };
     }
     panic(format!("TypeError: expected Int, got {}", class_of(v).name))
+}
+
+/// `v` itself if it is an Int (small or big), else a `TypeError` panic.
+pub(crate) fn int_value(v: Value) -> RtResult<Value> {
+    if ops::is_int(v) {
+        Ok(v)
+    } else {
+        catallaxy_runtime::object::type_error("Int", v)
+    }
+}
+
+/// `v` itself if it is a Bool, else a `TypeError` panic.
+pub(crate) fn bool_value(v: Value) -> RtResult<Value> {
+    if v.is_bool() {
+        Ok(v)
+    } else {
+        catallaxy_runtime::object::type_error("Bool", v)
+    }
 }
 
 pub(crate) fn float(v: Value) -> RtResult<f64> {
@@ -143,9 +160,6 @@ pub(crate) fn new_str_list<'a>(vm: &mut Vm, parts: impl IntoIterator<Item = &'a 
 
 /// A snapshot of a list's items (with ownership checks), or a `MemoryError` panic.
 pub(crate) fn list_items(vm: &Vm, l: Value) -> RtResult<Vec<Value>> {
-    if kind_of(l) != ObjKind::List {
-        return panic(format!("TypeError: expected List, got {}", class_of(l).name));
-    }
     ownership::read_list(&vm.m, l)?.try_to_vec()
 }
 
