@@ -28,7 +28,8 @@ unsafe fn size_cons(_obj: *const Header) -> usize {
     std::mem::size_of::<Cons>()
 }
 
-static CONS_VT: GcVTable = GcVTable { trace: trace_cons, finalize: Some(fin_cons), size: size_cons };
+static CONS_VT: GcVTable =
+    GcVTable { trace: trace_cons, finalize: Some(fin_cons), size: size_cons, trace_remembered: None };
 
 #[repr(C)]
 struct Big {
@@ -39,7 +40,7 @@ unsafe fn trace_none(_: *const Header, _: &mut Tracer) {}
 unsafe fn size_big(_: *const Header) -> usize {
     std::mem::size_of::<Big>()
 }
-static BIG_VT: GcVTable = GcVTable { trace: trace_none, finalize: None, size: size_big };
+static BIG_VT: GcVTable = GcVTable { trace: trace_none, finalize: None, size: size_big, trace_remembered: None };
 
 /// A mutator: a shadow stack of roots plus a local heap.
 struct Mutator {

@@ -281,7 +281,17 @@ fn minor_collect(rec: &ThreadRecord) {
         m.root_large = heap.marked_young_large();
     }
     for &o in heap.remembered() {
-        unsafe { ((*(*o).vtable()).trace)(o, &mut tracer) };
+        // Only objects this thread still owns. One it shared, froze or handed to another thread
+        // since remembering it had its young referents tenured first (`escape` in the runtime),
+        // and may be written by other threads now.
+        let meta = unsafe { (*o).meta() };
+        if Header::state_of(meta) != crate::ObjState::Owned || Header::owner_of(meta) != rec.tid {
+            continue;
+        }
+        unsafe {
+            let vt = &*(*o).vtable();
+            (vt.trace_remembered.unwrap_or(vt.trace))(o, &mut tracer)
+        };
     }
     while let Some(o) = tracer.minor.as_mut().and_then(|m| m.stack.pop()) {
         let h = o as *const Header;

@@ -39,6 +39,13 @@ pub struct GcVTable {
     pub finalize: Option<unsafe fn(obj: *mut Header)>,
     /// Bytes retained by the object, including Rust-side buffers (for heap growth decisions).
     pub size: unsafe fn(obj: *const Header) -> usize,
+    /// Minor collections call this instead of `trace` for an object in the remembered set: it
+    /// visits at least the references stored into the object since its owner's previous minor
+    /// collection (when the object was old and not remembered, it held no young references),
+    /// and may then forget which those were, because everything it visits is old afterwards.
+    /// Large containers use it to scan only the slots they recorded as written. `None` means
+    /// `trace`.
+    pub trace_remembered: Option<unsafe fn(obj: *const Header, tracer: &mut Tracer)>,
 }
 
 #[repr(C)]
@@ -219,9 +226,18 @@ impl Header {
         self.update(|m| (m & !OWNER_MASK) | ((tid as u64) << OWNER_SHIFT));
     }
 
-    /// Sets the state to owned by `tid` in one atomic step.
+    /// Sets the state to owned by `tid` in one atomic step. The remembered bit is cleared: it
+    /// refers to the previous owner's remembered set, and the new owner's write barrier must add
+    /// the object to its own.
     pub fn set_owned_by(&self, tid: u16) {
-        self.update(|m| (m & !(OWNER_MASK | STATE_MASK)) | ((tid as u64) << OWNER_SHIFT));
+        self.update(|m| (m & !(OWNER_MASK | STATE_MASK | REMEMBERED_BIT)) | ((tid as u64) << OWNER_SHIFT));
+    }
+
+    /// True if the object is owned by another thread than `tid`.
+    #[inline]
+    pub(crate) fn owned_by_other(&self, tid: u16) -> bool {
+        let m = self.meta.load(Ordering::Acquire);
+        Self::state_of(m) == ObjState::Owned && Self::owner_of(m) != tid
     }
 
     #[inline(always)]

@@ -148,6 +148,13 @@ impl Default for DictTable {
     }
 }
 
+/// Whether `v` is a young object. Only slots written with one need recording for minor
+/// collections (see [`WordBuf::note_written`]).
+#[inline(always)]
+fn young(v: Value) -> bool {
+    v.header().is_some_and(|h| h.is_young())
+}
+
 fn index_cap(n: usize) -> usize {
     (n * 3 / 2 + 1).next_power_of_two().max(8)
 }
@@ -246,6 +253,30 @@ impl DictTable {
             mark_value(t, e.key);
             mark_value(t, e.value);
         }
+    }
+
+    /// For a minor collection of the owner: marks the entries written since the last one (see
+    /// [`WordBuf::note_written`]) and forgets them. Entry `i` covers words `i * W..i * W + W` of
+    /// the entry buffer in table mode, word `i` in shape mode.
+    pub fn trace_written(&self, t: &mut Tracer) {
+        // SAFETY: the entry buffer is allocated by `WordBuf` (never in place), and the caller is
+        // the owner's minor collection, so no other thread writes the table.
+        let r = unsafe { WordBuf::take_written(self.entries.load(Ordering::Relaxed)) };
+        let w = if self.shape().is_some() { 1 } else { W };
+        for i in r.start / w..r.end.div_ceil(w).min(self.raw_len()) {
+            if let Some(e) = self.raw_entry(i) {
+                mark_value(t, e.key);
+                mark_value(t, e.value);
+            }
+        }
+    }
+
+    /// The words of the entry buffer recorded as written since the last minor collection that
+    /// scanned the table. For tests.
+    #[doc(hidden)]
+    pub fn written_range(&self) -> std::ops::Range<usize> {
+        // SAFETY: the entry buffer is allocated by `WordBuf`.
+        unsafe { WordBuf::written(self.entries.load(Ordering::Acquire)) }
     }
 
     /// Live entries in insertion order.
@@ -372,8 +403,12 @@ impl DictTable {
     pub unsafe fn set_value_at(&self, idx: usize, v: Value, access: Access) {
         let s = self.begin(access);
         let slot = if self.shape().is_some() { idx } else { idx * W + 2 };
-        if let Some(w) = self.ents().get(slot) {
+        let ents = self.entries.load(Ordering::Relaxed);
+        if let Some(w) = WordBuf::slots(ents).get(slot) {
             w.store(v.0, Ordering::Relaxed);
+            if young(v) {
+                WordBuf::note_written(ents, slot, slot + 1);
+            }
         }
         self.end(s);
     }
@@ -410,12 +445,19 @@ impl DictTable {
                     let cap = WordBuf::cap(self.entries.load(Ordering::Relaxed));
                     if n == cap {
                         let buf = WordBuf::try_alloc((cap * 2).max(4), Value::NIL.0)?;
-                        for (d, w) in WordBuf::slots(buf).iter().zip(self.ents()) {
+                        let old = self.entries.load(Ordering::Relaxed);
+                        for (d, w) in WordBuf::slots(buf).iter().zip(WordBuf::slots(old)) {
                             d.store(w.load(Ordering::Relaxed), Ordering::Relaxed);
                         }
+                        // Same indices, so the same written range.
+                        WordBuf::copy_written(old, buf);
                         release(self.entries.swap(buf, Ordering::AcqRel), access);
                     }
-                    self.ents()[n].store(value.0, Ordering::Relaxed);
+                    let ents = self.entries.load(Ordering::Relaxed);
+                    WordBuf::slots(ents)[n].store(value.0, Ordering::Relaxed);
+                    if young(value) {
+                        WordBuf::note_written(ents, n, n + 1);
+                    }
                     self.shape.store(next as *const Shape as *mut Shape, Ordering::Release);
                     self.used.store(n + 1, Ordering::Relaxed);
                     self.live.fetch_add(1, Ordering::Relaxed);
@@ -431,10 +473,14 @@ impl DictTable {
             self.rebuild(self.len() + 1, access)?;
         }
         let n = self.raw_len();
-        let w = &self.ents()[n * W..n * W + W];
+        let ents = self.entries.load(Ordering::Relaxed);
+        let w = &WordBuf::slots(ents)[n * W..n * W + W];
         w[0].store(hash, Ordering::Relaxed);
         w[1].store(key.0, Ordering::Relaxed);
         w[2].store(value.0, Ordering::Relaxed);
+        if young(key) || young(value) {
+            WordBuf::note_written(ents, n * W, n * W + W);
+        }
         Self::place(WordBuf::slots(self.indices.load(Ordering::Relaxed)), hash, n);
         self.used.store(n + 1, Ordering::Relaxed);
         self.live.fetch_add(1, Ordering::Relaxed);

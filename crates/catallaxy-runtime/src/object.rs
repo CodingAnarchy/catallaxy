@@ -267,12 +267,16 @@ pub struct BigIntObj {
 #[repr(C)]
 pub struct ListObj {
     pub header: Header,
-    len: AtomicUsize,
     buf: AtomicPtr<WordBuf>,
+    /// Just before `inline`: where an out-of-line buffer keeps its written range, the inline
+    /// buffer has the length, which reads as the range `0..len` (see `note_written`).
+    len: AtomicUsize,
     /// The inline buffer's capacity word; its slots follow the struct. Capacity 0 for lists
     /// created out of line.
     inline: WordBuf,
 }
+
+const _: () = assert!(std::mem::offset_of!(ListObj, inline) == std::mem::offset_of!(ListObj, len) + 8);
 
 // Size classes are 16-byte steps; the inline capacities chosen below (odd) fill the object's
 // slot exactly only if the struct ends half way through a step.
@@ -468,8 +472,59 @@ impl ListObj {
         if i >= self.len.load(Ordering::Relaxed) {
             return false;
         }
-        self.slots()[i].store(v.0, Ordering::Release);
+        let buf = self.buf.load(Ordering::Relaxed);
+        WordBuf::slots(buf)[i].store(v.0, Ordering::Release);
+        self.note_store(buf, i, v);
         true
+    }
+
+    /// The slots a minor collection would scan if the list were remembered: all of them when
+    /// inline, else those recorded as written since the last one. For tests.
+    #[doc(hidden)]
+    pub fn written_range(&self) -> std::ops::Range<usize> {
+        let buf = self.buf.load(Ordering::Acquire);
+        if buf == self.inline_addr() {
+            return 0..self.len();
+        }
+        // SAFETY: an out-of-line buffer is allocated by `WordBuf`.
+        unsafe { WordBuf::written(buf) }
+    }
+
+    /// Records slots `lo..hi` of `buf`, the current buffer, as written (see
+    /// [`WordBuf::note_written`]).
+    ///
+    /// A young list records nothing: its buffer's range covers every slot (a new buffer's does,
+    /// and only a minor collection of an old list narrows it), so the common case costs one test
+    /// of a header bit. Nor does the inline buffer: it is small enough that a minor collection
+    /// scans it whole. It has no range word, but the word before it is the length, which reads as
+    /// the range `0..len`; so storing into an existing element passes the check below without
+    /// telling the two cases apart, and only the slow path does.
+    #[inline(always)]
+    unsafe fn note_written(&self, buf: *mut WordBuf, lo: usize, hi: usize) {
+        if !self.header.is_young() && !WordBuf::range_covers(WordBuf::range_word(buf), lo, hi) {
+            self.widen_written(buf, lo, hi);
+        }
+    }
+
+    /// Records slot `i` of `buf`, the current buffer, as written with `v`. The range only has to
+    /// cover slots that may hold a young reference, so storing a number or an old object records
+    /// nothing (a slot that held a young reference before is still in the range).
+    #[inline(always)]
+    unsafe fn note_store(&self, buf: *mut WordBuf, i: usize, v: Value) {
+        if v.header().is_some_and(|h| h.is_young())
+            && !self.header.is_young()
+            && !WordBuf::range_covers(WordBuf::range_word(buf), i, i + 1)
+        {
+            self.widen_written(buf, i, i + 1);
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    unsafe fn widen_written(&self, buf: *mut WordBuf, lo: usize, hi: usize) {
+        if buf != self.inline_addr() {
+            WordBuf::widen_written(buf, lo, hi);
+        }
     }
 
     /// # Safety
@@ -487,10 +542,13 @@ impl ListObj {
     /// See above.
     pub unsafe fn try_push(&self, v: Value, access: Access) -> Result<(), std::alloc::Layout> {
         let n = self.len.load(Ordering::Relaxed);
-        if n == self.capacity() {
+        let mut buf = self.buf.load(Ordering::Relaxed);
+        if n == WordBuf::cap(buf) {
             self.grow(n + 1, access)?;
+            buf = self.buf.load(Ordering::Relaxed);
         }
-        self.slots()[n].store(v.0, Ordering::Release);
+        WordBuf::slots(buf)[n].store(v.0, Ordering::Release);
+        self.note_store(buf, n, v);
         self.len.store(n + 1, Ordering::Release);
         Ok(())
     }
@@ -528,12 +586,17 @@ impl ListObj {
         let old_len = self.len.load(Ordering::Relaxed);
         let n = items.len();
         if n > self.capacity() {
+            // A new buffer counts as written throughout.
             let buf = WordBuf::try_alloc_from(n.max(4), items.iter().map(|v| v.0), Value::NIL.0)?;
             self.swap_buf(buf, access);
             self.len.store(n, Ordering::Release);
             return Ok(());
         }
-        let slots = self.slots();
+        let buf = self.buf.load(Ordering::Relaxed);
+        if n > 0 {
+            self.note_written(buf, 0, n);
+        }
+        let slots = WordBuf::slots(buf);
         if n < old_len {
             self.len.store(n, Ordering::Release);
         }
@@ -594,8 +657,14 @@ impl ListObj {
             // started empty out of line would.
             cap = cap.next_power_of_two();
         }
-        let old = &self.slots()[..n];
+        let old_buf = self.buf.load(Ordering::Relaxed);
+        let old = &WordBuf::slots(old_buf)[..n];
         let buf = WordBuf::try_alloc_from(cap, old.iter().map(|s| s.load(Ordering::Relaxed)), Value::NIL.0)?;
+        // The items keep their indices, so they keep their written range. Items that were
+        // inline count as written throughout (the new buffer's initial range).
+        if old_buf != self.inline_addr() {
+            WordBuf::copy_written(old_buf, buf);
+        }
         self.swap_buf(buf, access);
         Ok(())
     }
@@ -786,8 +855,26 @@ unsafe fn size_bigint(h: *const Header) -> usize {
 }
 
 unsafe fn trace_list(h: *const Header, t: &mut Tracer) {
-    // The world is stopped; slots past the length are nil.
-    for s in (*(h as *const ListObj)).slots() {
+    // No thread is writing the list (the world is stopped, or a minor collection of its owner
+    // runs); slots past the length are nil.
+    let l = &*(h as *const ListObj);
+    let slots = WordBuf::slots(l.buf.load(Ordering::Relaxed));
+    for s in &slots[..l.len.load(Ordering::Relaxed).min(slots.len())] {
+        mark_value(t, Value(s.load(Ordering::Relaxed)));
+    }
+}
+/// A minor collection of the owner, for an old list it wrote since the last one: only the slots
+/// recorded as written.
+unsafe fn trace_list_written(h: *const Header, t: &mut Tracer) {
+    let l = &*(h as *const ListObj);
+    let buf = l.buf.load(Ordering::Relaxed);
+    if buf == l.inline_addr() {
+        return trace_list(h, t);
+    }
+    let slots = WordBuf::slots(buf);
+    let r = WordBuf::take_written(buf);
+    let n = l.len.load(Ordering::Relaxed).min(r.end);
+    for s in &slots[r.start.min(n)..n] {
         mark_value(t, Value(s.load(Ordering::Relaxed)));
     }
 }
@@ -806,6 +893,9 @@ unsafe fn size_list(h: *const Header) -> usize {
 
 unsafe fn trace_dict(h: *const Header, t: &mut Tracer) {
     (*(h as *const DictObj)).table.trace(t);
+}
+unsafe fn trace_dict_written(h: *const Header, t: &mut Tracer) {
+    (*(h as *const DictObj)).table.trace_written(t);
 }
 unsafe fn fin_dict(h: *mut Header) {
     std::ptr::drop_in_place(&mut (*(h as *mut DictObj)).table);
@@ -925,7 +1015,12 @@ pub(crate) fn vtable_for(kind: ObjKind) -> GcVTable {
         ObjKind::Thread => (trace_thread, Some(fin_thread), size_thread),
         ObjKind::Native => (trace_nothing, Some(fin_native), size_native),
     };
-    GcVTable { trace, finalize, size }
+    let trace_remembered: Option<unsafe fn(*const Header, &mut Tracer)> = match kind {
+        ObjKind::List => Some(trace_list_written),
+        ObjKind::Dict | ObjKind::Set => Some(trace_dict_written),
+        _ => None,
+    };
+    GcVTable { trace, finalize, size, trace_remembered }
 }
 
 // ---------------------------------------------------------------------------------------------

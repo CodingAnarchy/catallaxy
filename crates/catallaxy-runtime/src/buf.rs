@@ -3,6 +3,11 @@
 //! value that was stored there, never a torn one. A writer that outgrows a buffer copies it into
 //! a new one, publishes the new pointer with `Release`, and hands the old one to [`release`],
 //! which frees it only once no other thread can be reading it.
+//!
+//! **Written ranges.** A buffer this module allocates is preceded by one more word: the range of
+//! slots written since the owner's last minor collection, which a minor collection of an old
+//! container scans instead of every slot (issue #120). See [`WordBuf::note_written`]. Buffers
+//! embedded in a container's own object ([`WordBuf::init_in_place`]) have no such word.
 
 use std::alloc::Layout;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,17 +21,35 @@ pub struct WordBuf {
     slots: [AtomicU64; 0],
 }
 
+/// A buffer with its written-range word in front, as this module allocates them.
+#[repr(C)]
+struct Prefixed {
+    written: AtomicU64,
+    buf: WordBuf,
+}
+
+/// Words in front of the capacity word of a buffer this module allocates.
+const PREFIX: usize = 1;
+
+/// Written-range words: the high half is the first slot written, the low half one past the last.
+/// (So a plain count `n` below 2^32 reads as the range `0..n`; see [`WordBuf::range_covers`].)
+/// Every slot, including any index too large for the encoding.
+const WRITTEN_ALL: u64 = u32::MAX as u64;
+/// No slot.
+const WRITTEN_NONE: u64 = (u32::MAX as u64) << 32;
+
 /// The buffer of every container with no capacity. Never written, never freed.
-static EMPTY: WordBuf = WordBuf { cap: 0, slots: [] };
+static EMPTY: Prefixed = Prefixed { written: AtomicU64::new(WRITTEN_ALL), buf: WordBuf { cap: 0, slots: [] } };
 
 impl WordBuf {
     fn layout(cap: usize) -> Layout {
-        Layout::from_size_align(8 * (cap + 1), 8).expect("container too large")
+        Layout::from_size_align(8 * (cap + 1 + PREFIX), 8).expect("container too large")
     }
 
     /// The shared empty buffer.
     pub fn empty() -> *mut WordBuf {
-        &EMPTY as *const WordBuf as *mut WordBuf
+        // Derived from the whole static, so the word in front stays in bounds.
+        unsafe { (&EMPTY as *const Prefixed as *mut u8).add(8 * PREFIX) as *mut WordBuf }
     }
 
     /// A new buffer of `cap` slots, each holding `fill`.
@@ -57,14 +80,16 @@ impl WordBuf {
         }
         // A size past `isize::MAX` is refused like any other.
         let layout = cap
-            .checked_add(1)
+            .checked_add(1 + PREFIX)
             .and_then(|n| Layout::array::<u64>(n).ok())
             .ok_or_else(|| Layout::from_size_align(isize::MAX as usize & !7, 8).unwrap())?;
         unsafe {
-            let p = std::alloc::alloc(layout) as *mut WordBuf;
-            if p.is_null() {
+            let base = std::alloc::alloc(layout) as *mut Prefixed;
+            if base.is_null() {
                 return Err(layout);
             }
+            std::ptr::addr_of_mut!((*base).written).write(AtomicU64::new(WRITTEN_ALL));
+            let p = std::ptr::addr_of_mut!((*base).buf);
             Self::init_in_place(p, cap, prefix, fill);
             crate::note_external(cap * 8);
             Ok(p)
@@ -74,7 +99,8 @@ impl WordBuf {
     /// Writes a buffer of `cap` slots holding the words of `prefix` (at most `cap` of them) and
     /// then `fill` at `p`, which is not allocated by this module: containers use it for a
     /// buffer embedded in their own heap object. Such a buffer must never be passed to
-    /// [`WordBuf::free`] or [`release`].
+    /// [`WordBuf::free`] or [`release`], and it has no written range: it must not be passed to
+    /// [`WordBuf::note_written`] or the functions that follow it.
     ///
     /// # Safety
     /// `p` must be valid for writes of `8 * (cap + 1)` bytes, 8-aligned, and unpublished.
@@ -92,8 +118,8 @@ impl WordBuf {
     }
 
     /// A buffer holding `items` (with the vector's capacity, spare slots holding `fill`) that
-    /// takes over the vector's allocation instead of copying it: the allocation is grown by one
-    /// word for the capacity header and the items are moved up within it, so building a large
+    /// takes over the vector's allocation instead of copying it: the allocation is grown by the
+    /// header words and the items are moved up within it, so building a large
     /// container from a vector does not need memory for two copies.
     pub fn from_vec(items: Vec<u64>, fill: u64) -> *mut WordBuf {
         Self::try_from_vec(items, fill).unwrap_or_else(|layout| std::alloc::handle_alloc_error(layout))
@@ -109,21 +135,23 @@ impl WordBuf {
         }
         unsafe {
             // `Vec<u64>` allocated `cap` words with the global allocator; `layout(cap)` has
-            // the same alignment and one more word, so `realloc` may grow it in place.
+            // the same alignment and the header words more, so `realloc` may grow it in place.
             let old = Layout::array::<u64>(cap).expect("container too large");
-            // A vector's allocation is at most `isize::MAX` bytes; one more word may not fit.
-            let Some(new) = cap.checked_add(1).and_then(|n| Layout::array::<u64>(n).ok()) else {
+            // A vector's allocation is at most `isize::MAX` bytes; the header words may not fit.
+            let Some(new) = cap.checked_add(1 + PREFIX).and_then(|n| Layout::array::<u64>(n).ok()) else {
                 std::alloc::dealloc(ptr as *mut u8, old);
                 return Err(old);
             };
-            let p = std::alloc::realloc(ptr as *mut u8, old, new.size()) as *mut WordBuf;
-            if p.is_null() {
+            let base = std::alloc::realloc(ptr as *mut u8, old, new.size()) as *mut Prefixed;
+            if base.is_null() {
                 // The vector's allocation is still valid; free it before reporting.
                 std::alloc::dealloc(ptr as *mut u8, old);
                 return Err(new);
             }
-            let words = p as *mut u64;
-            std::ptr::copy(words, words.add(1), len);
+            let words = base as *mut u64;
+            std::ptr::copy(words, words.add(1 + PREFIX), len);
+            std::ptr::addr_of_mut!((*base).written).write(AtomicU64::new(WRITTEN_ALL));
+            let p = std::ptr::addr_of_mut!((*base).buf);
             std::ptr::addr_of_mut!((*p).cap).write(cap);
             let slots = Self::slots_ptr(p);
             for i in len..cap {
@@ -140,7 +168,7 @@ impl WordBuf {
         let b = p as *mut WordBuf;
         let cap = (*b).cap;
         if cap > 0 {
-            std::alloc::dealloc(p, Self::layout(cap));
+            std::alloc::dealloc(p.sub(8 * PREFIX), Self::layout(cap));
         }
     }
 
@@ -162,6 +190,107 @@ impl WordBuf {
     #[inline(always)]
     pub unsafe fn cap(p: *const WordBuf) -> usize {
         (*p).cap
+    }
+
+    // ---- written ranges ----
+    //
+    // A minor collection must find every reference to a young object stored in an old container
+    // since the previous one. The write barrier remembers the container; these record which slots
+    // were written, so that the collection scans those instead of the whole buffer.
+    //
+    // The range must cover every slot that may hold a young reference of the owning thread. A new
+    // buffer covers everything, so a container is scanned whole the first time; a minor
+    // collection that scanned the range empties it ([`WordBuf::take_written`]), since everything
+    // it found is old afterwards. Only the owner writes an owned container, and minor collections
+    // only scan containers their thread owns, so the word needs no ordering. It is atomic because
+    // a shared container's writers (holding its lock) update it too.
+
+    #[inline(always)]
+    unsafe fn written_word<'a>(p: *const WordBuf) -> &'a AtomicU64 {
+        &*(p as *const AtomicU64).sub(PREFIX)
+    }
+
+    /// The word before the capacity word: the written range of a buffer this module allocated.
+    ///
+    /// # Safety
+    /// That word must be readable as an atomic word: `p` is a live buffer this module allocated,
+    /// or one written in place after an atomic word of the same object.
+    #[inline(always)]
+    pub unsafe fn range_word(p: *const WordBuf) -> u64 {
+        Self::written_word(p).load(Ordering::Relaxed)
+    }
+
+    /// Whether the range word `r` covers slots `lo..hi`.
+    #[inline(always)]
+    pub fn range_covers(r: u64, lo: usize, hi: usize) -> bool {
+        lo >= (r >> 32) as usize && hi <= (r as u32) as usize
+    }
+
+    /// Records that slots `lo..hi` (`lo < hi`) were written. A load and two compares when the
+    /// range already covers them, as it does for every container that is still young.
+    ///
+    /// # Safety
+    /// `p` must be a live buffer this module allocated (not one written in place), and the
+    /// caller must have write access to the container that holds it.
+    #[inline(always)]
+    pub unsafe fn note_written(p: *const WordBuf, lo: usize, hi: usize) {
+        if !Self::range_covers(Self::range_word(p), lo, hi) {
+            Self::widen_written(p, lo, hi);
+        }
+    }
+
+    /// The slow path of [`WordBuf::note_written`]: widens the range to cover `lo..hi`.
+    ///
+    /// # Safety
+    /// As for [`WordBuf::note_written`].
+    #[cold]
+    #[inline(never)]
+    pub unsafe fn widen_written(p: *const WordBuf, lo: usize, hi: usize) {
+        let w = Self::written_word(p);
+        let r = w.load(Ordering::Relaxed);
+        let (lo, hi) = (lo.min((r >> 32) as usize), hi.max((r as u32) as usize));
+        let new = if hi >= u32::MAX as usize { WRITTEN_ALL } else { ((lo as u64) << 32) | hi as u64 };
+        w.store(new, Ordering::Relaxed);
+    }
+
+    /// Gives `to`, a new buffer holding the contents of `from` at the same indices, the
+    /// written range of `from`.
+    ///
+    /// # Safety
+    /// As for [`WordBuf::note_written`], for both buffers.
+    #[inline]
+    pub unsafe fn copy_written(from: *const WordBuf, to: *const WordBuf) {
+        if (*to).cap > 0 {
+            Self::written_word(to).store(Self::written_word(from).load(Ordering::Relaxed), Ordering::Relaxed);
+        }
+    }
+
+    /// The slots written since the last call (within the capacity), which it then forgets.
+    ///
+    /// # Safety
+    /// As for [`WordBuf::note_written`]; called by a minor collection of the owning thread.
+    #[inline]
+    pub unsafe fn take_written(p: *const WordBuf) -> std::ops::Range<usize> {
+        let r = Self::written(p);
+        if (*p).cap > 0 {
+            Self::written_word(p).store(WRITTEN_NONE, Ordering::Relaxed);
+        }
+        r
+    }
+
+    /// The slots written since the last [`WordBuf::take_written`] (within the capacity).
+    ///
+    /// # Safety
+    /// As for [`WordBuf::note_written`].
+    #[inline]
+    pub unsafe fn written(p: *const WordBuf) -> std::ops::Range<usize> {
+        let cap = (*p).cap;
+        if cap == 0 {
+            return 0..0;
+        }
+        let r = Self::range_word(p);
+        let hi = ((r as u32) as usize).min(cap);
+        ((r >> 32) as usize).min(hi)..hi
     }
 }
 

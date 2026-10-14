@@ -12,7 +12,7 @@ unsafe fn no_trace(_: *const Header, _: &mut Tracer) {}
 unsafe fn no_size(_: *const Header) -> usize {
     16
 }
-static VT: GcVTable = GcVTable { trace: no_trace, finalize: None, size: no_size };
+static VT: GcVTable = GcVTable { trace: no_trace, finalize: None, size: no_size, trace_remembered: None };
 
 struct Obj {
     header: Header,
