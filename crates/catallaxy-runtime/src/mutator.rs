@@ -348,16 +348,19 @@ impl Mutator {
     }
 
     /// A list holding `items`, which takes over the vector's allocation (and capacity).
+    /// Small lists copy the items into the list object instead (see [`ListObj`]).
     pub fn alloc_list(&mut self, items: Vec<Value>) -> Value {
-        let h = self.alloc_raw(std::mem::size_of::<ListObj>(), BUILTINS.list);
-        unsafe { ListObj::init(h as *mut ListObj, items) };
+        let icap = ListObj::inline_cap_for(items.len());
+        let h = self.alloc_raw(ListObj::size_for(icap), BUILTINS.list);
+        unsafe { ListObj::init(h as *mut ListObj, items, icap) };
         Value::from_ptr(h)
     }
 
     /// A list holding a copy of `items`, with room for at least `cap` of them.
     pub fn alloc_list_from_slice(&mut self, items: &[Value], cap: usize) -> Value {
-        let h = self.alloc_raw(std::mem::size_of::<ListObj>(), BUILTINS.list);
-        unsafe { ListObj::init_from_slice(h as *mut ListObj, items, cap) };
+        let icap = ListObj::inline_cap_for(cap.max(items.len()));
+        let h = self.alloc_raw(ListObj::size_for(icap), BUILTINS.list);
+        unsafe { ListObj::init_from_slice(h as *mut ListObj, items, cap, icap) };
         Value::from_ptr(h)
     }
 

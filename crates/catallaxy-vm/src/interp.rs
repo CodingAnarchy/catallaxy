@@ -1232,7 +1232,8 @@ impl Vm {
                 Op::NewList => {
                     let (b, n) = (b_of(w), c_of(w));
                     let items = unsafe { std::slice::from_raw_parts(regs.add(b), n) };
-                    let v = self.m.alloc_list_from_slice(items, n.max(4));
+                    // Small literals (the common case) keep their items inline, with spare room.
+                    let v = self.m.alloc_list_from_slice(items, n);
                     set!(a, v);
                 }
                 Op::NewDict => {

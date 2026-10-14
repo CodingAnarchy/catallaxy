@@ -45,18 +45,29 @@ impl WordBuf {
             if p.is_null() {
                 std::alloc::handle_alloc_error(Self::layout(cap));
             }
-            std::ptr::addr_of_mut!((*p).cap).write(cap);
-            let slots = Self::slots_ptr(p);
-            let mut n = 0;
-            for w in prefix.into_iter().take(cap) {
-                slots.add(n).write(AtomicU64::new(w));
-                n += 1;
-            }
-            for i in n..cap {
-                slots.add(i).write(AtomicU64::new(fill));
-            }
+            Self::init_in_place(p, cap, prefix, fill);
             crate::note_external(cap * 8);
             p
+        }
+    }
+
+    /// Writes a buffer of `cap` slots holding the words of `prefix` (at most `cap` of them) and
+    /// then `fill` at `p`, which is not allocated by this module: containers use it for a
+    /// buffer embedded in their own heap object. Such a buffer must never be passed to
+    /// [`WordBuf::free`] or [`release`].
+    ///
+    /// # Safety
+    /// `p` must be valid for writes of `8 * (cap + 1)` bytes, 8-aligned, and unpublished.
+    pub unsafe fn init_in_place(p: *mut WordBuf, cap: usize, prefix: impl IntoIterator<Item = u64>, fill: u64) {
+        std::ptr::addr_of_mut!((*p).cap).write(cap);
+        let slots = Self::slots_ptr(p);
+        let mut n = 0;
+        for w in prefix.into_iter().take(cap) {
+            slots.add(n).write(AtomicU64::new(w));
+            n += 1;
+        }
+        for i in n..cap {
+            slots.add(i).write(AtomicU64::new(fill));
         }
     }
 

@@ -135,7 +135,7 @@ This keeps floats unboxed and makes every slot a single machine word. With stati
 
 **Containers.**
 
-- **List:** header, length, pointer to a backing array. Growing a shared list allocates a new array and swaps the pointer under the object's lock. Readers holding the old array stay safe because the GC keeps it alive.
+- **List:** header, length, pointer to a backing array. Growing a shared list allocates a new array and swaps the pointer under the object's lock. Readers holding the old array stay safe because the GC keeps it alive. Lists created with room for at most 7 elements (literals, small vectors, `[]`) keep them in an array inside the list object, so they cost one heap slot and no `malloc`. The pointer then points into the object. A list that outgrows that array moves out of line the same way and never moves back. A reader still holding the inline array reads old values from memory that lives as long as the list.
 - **Dict:** insertion-ordered open-addressing table (the CPython 3.6+ layout). Shared dicts take the lock for writes; v1 also locks reads, and a seqlock fast path for reads is a later optimization.
 - **String:** immutable UTF-8 with a cached hash. Mutable buffers are a separate `StringBuilder` type, so strings are always frozen and freely shared.
 
