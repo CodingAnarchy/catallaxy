@@ -1,0 +1,5 @@
+# expect: E0311
+# A member of a union value must exist on every member type.
+class C { n: Int }
+class D { m: Int }
+fn f(c: C | D) -> Int { c.n }

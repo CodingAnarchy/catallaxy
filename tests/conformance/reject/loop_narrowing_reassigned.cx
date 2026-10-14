@@ -1,0 +1,16 @@
+# expect: E0310
+# A narrowing from before a loop does not hold in the body when the loop assigns the variable a
+# value that may be nil: the next iteration would see it.
+fn g() {
+  x: Int? = 1
+  i = 0
+  if x != nil {
+    while i < 2 {
+      y = x + 1
+      puts(y)
+      x = nil
+      i += 1
+    }
+  }
+}
+g()

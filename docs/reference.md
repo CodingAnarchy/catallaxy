@@ -172,6 +172,13 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
   optional). In a function that returns a `Result`, convert an optional first:
   `x.ok_or(error)?` or `x.ok_or_else { error }?` (`T?.ok_or(e: E) -> Result[T, E]`).
 - `e as? T` returns `T?` (runtime check; mainly for `Dyn` and unions).
+- A field or method of a union value (`x.n`, `x.m(a)` with `x: A | B`) must exist on every member type;
+  otherwise it is E0311, naming the members that lack it. A field's type is the union of the members'
+  field types, and a call's result is the union of the members' results. The call is dispatched on the
+  runtime value and passes its arguments by position, so each member's method must take the same
+  parameters (names, in order) with a default for each omitted argument (E0332), and each argument must
+  suit every member's parameter type (E0300). Members whose class lacks the method at runtime (they
+  reach it as an interface default or extension method) must all reach the same function (E0311).
 - Operators on class instances call methods named by the operator: `fn +(self, o: Vec) -> Vec`,
   `fn ==(self, o: Self) -> Bool`, `fn <=>(self, o: Self) -> Int`, `fn [](self, i: Int) -> T`,
   `fn []=(self, i: Int, v: T)`. Comparison operators on a type with `<=>` come from `Comparable`.
@@ -217,6 +224,14 @@ block cannot follow a call without parentheses: write `if xs.any() { ... }` not 
 Narrowing: after `if x != nil`, `if x is T`, `if let`, and in `match` arms on a variable subject, the
 variable has the narrowed type for the rest of that branch. `x ??= v` and `x = v` with a non-nil `v` also
 narrow `x` to non-nil.
+
+A loop body runs again after itself, so a narrowing from before a loop holds in the loop (condition
+included) only if every assignment to the variable in the loop visibly keeps it: `x -= 1`, `x = x * 2`,
+`x ??= 0`, a literal, `T.new(...)`, `v!` or a call of a function whose declared result fits. Otherwise,
+as for `x = maybe()` or an assignment inside a closure, the narrowing does not apply in the loop or after
+it, and the body must check `x` again. A narrowing the loop keeps also holds after the loop. In the rare
+case where a kept narrowing is broken by the checked type of an assignment (an operator method that
+returns an optional, say), the assignment is E0324.
 
 A field path on a local or `self` (`n.next`, `self.head.next`) is narrowed by `!= nil` / `== nil` tests
 and by assigning it a non-nil value, as long as nothing could have changed it since: the narrowing ends at
@@ -564,8 +579,12 @@ unsaved edits. It provides:
   completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
 - find references and rename (with prepare-rename) for locals, parameters (including named
   arguments), functions, methods (an override and the method it overrides rename together), fields,
-  classes, enums, variants, interfaces and constants. They cover the document and every module it
-  imports; names from the prelude cannot be renamed;
+  classes, enums, variants, interfaces and constants. An interface member renames together with the
+  same-named methods of every type whose values are used as that interface (passed, assigned,
+  returned, put in a list or dict, or checked against a generic bound), so those types keep
+  conforming; renaming such a method renames the member too. They cover the document, every module
+  it imports, and the other open documents and their imports; names from the prelude cannot be
+  renamed, nor can a member that a built-in type implements;
 - signature help for function, method and constructor calls, showing default values and marking
   the trailing-block parameter, with the active parameter following commas and named arguments;
 - inlay hints with the inferred types of unannotated variables, `for`/`let`/`if let` bindings and

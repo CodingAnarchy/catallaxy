@@ -21,6 +21,13 @@ use crate::types::*;
 use catallaxy_vm::bytecode::RtType;
 pub use env::*;
 
+/// A point to roll the checker's inference state back to (see [`Checker::trial`]).
+#[derive(Copy, Clone, Debug)]
+pub struct Checkpoint {
+    bindings: usize,
+    conforms: usize,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NameRes {
     Local(LocalId),
@@ -110,6 +117,14 @@ pub struct Checker {
     /// bound), the interface member the checker resolved it to. Editor
     /// queries (hover, definition, references) use it; codegen does not.
     pub dyn_targets: FxHashMap<NodeId, FnId>,
+    /// Conversions of a concrete type to an interface type that the checker kept (not rolled
+    /// back with a failed trial): arguments, assignments, returns, element coercions and bounds.
+    /// Each entry keys `conform_impls`. Editor queries (references and rename of interface
+    /// members) use it; codegen does not.
+    pub conform_log: Vec<(TyId, IfaceId)>,
+    /// For each conversion of `conform_log`, the methods of the type that implement the
+    /// interface's members: (interface member, implementing method).
+    pub conform_impls: FxHashMap<(TyId, IfaceId), Vec<(FnId, FnId)>>,
     pub bins: FxHashMap<NodeId, BinRes>,
     pub fors: FxHashMap<NodeId, ForKind>,
     pub assigns: FxHashMap<NodeId, AssignRes>,
@@ -141,6 +156,13 @@ pub struct Checker {
     pub satisfies_stack: Vec<(TyId, TyId)>,
     /// Bumped whenever a call drops unstable field-path narrowings.
     pub path_epoch: u32,
+    /// Narrowings of locals that hold throughout the loops being checked (innermost last):
+    /// every assignment to the local in the loop must keep its value within the narrowed type.
+    /// (local, narrowed type, number of contexts at the loop).
+    pub loop_facts: Vec<(LocalId, TyId, usize)>,
+    /// Locals whose narrowing a loop being checked dropped, because it assigns them a value that
+    /// may not fit it (for diagnostics).
+    pub loop_dropped: Vec<LocalId>,
     /// Every method name of every type (built on first use, for loop pre-scans).
     pub method_names: FxHashSet<String>,
     /// When set, `Open` requirements are recorded against this function.
@@ -167,6 +189,9 @@ pub struct Checker {
     /// Type parameters instantiated by the last `instantiate_sig` (for bound checks).
     pub last_inst: Vec<(ParamId, TyId)>,
     pub last_inst_subst: FxHashMap<ParamId, TyId>,
+    /// For a union receiver: each member's method with its instantiated parameters and result,
+    /// from the last `instantiate_sig` (empty otherwise).
+    pub last_sigs: Vec<(lookup::MethodRef, Vec<PInfo>, TyId)>,
     pub pending_bounds: Vec<(ModId, Vec<ParamId>, Vec<ast::TypeParam>, collect::TypeScope)>,
 }
 
@@ -218,6 +243,8 @@ impl Checker {
             names: FxHashMap::default(),
             calls: FxHashMap::default(),
             dyn_targets: FxHashMap::default(),
+            conform_log: Vec::new(),
+            conform_impls: FxHashMap::default(),
             bins: FxHashMap::default(),
             fors: FxHashMap::default(),
             assigns: FxHashMap::default(),
@@ -239,6 +266,8 @@ impl Checker {
             satisfies_cache: FxHashMap::default(),
             satisfies_stack: Vec::new(),
             path_epoch: 0,
+            loop_facts: Vec::new(),
+            loop_dropped: Vec::new(),
             method_names: FxHashSet::default(),
             open_owner: None,
             well_known: WellKnown::default(),
@@ -255,6 +284,7 @@ impl Checker {
             pattern_subjects: FxHashMap::default(),
             last_inst: Vec::new(),
             last_inst_subst: FxHashMap::default(),
+            last_sigs: Vec::new(),
             pending_bounds: Vec::new(),
         }
     }
@@ -392,15 +422,31 @@ impl Checker {
 
     // ---- variable binding log for trial unification ---------------------------------------
 
-    pub fn checkpoint(&self) -> usize {
-        self.binding_log.len()
+    pub fn checkpoint(&self) -> Checkpoint {
+        Checkpoint { bindings: self.binding_log.len(), conforms: self.conform_log.len() }
     }
 
-    pub fn rollback(&mut self, cp: usize) {
-        while self.binding_log.len() > cp {
+    pub fn rollback(&mut self, cp: Checkpoint) {
+        while self.binding_log.len() > cp.bindings {
             let v = self.binding_log.pop().unwrap();
             self.types.vars[v as usize] = None;
         }
+        self.conform_log.truncate(cp.conforms);
+    }
+
+    /// The (interface member, implementing method) pairs of every kept conversion to an
+    /// interface type, without duplicates. For editor queries.
+    pub fn conformances(&self) -> Vec<(FnId, FnId)> {
+        let mut seen: FxHashSet<(TyId, IfaceId)> = FxHashSet::default();
+        let mut out: FxHashSet<(FnId, FnId)> = FxHashSet::default();
+        for key in &self.conform_log {
+            if seen.insert(*key) {
+                out.extend(self.conform_impls.get(key).into_iter().flatten().copied());
+            }
+        }
+        let mut out: Vec<(FnId, FnId)> = out.into_iter().collect();
+        out.sort_unstable();
+        out
     }
 
     pub fn bind_var(&mut self, v: VarId, t: TyId) {

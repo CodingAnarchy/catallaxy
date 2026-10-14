@@ -1,0 +1,10 @@
+# expect: E0332
+# The call is dispatched by name and passes arguments by position, so every member's method must
+# take the same parameters.
+class C {
+  fn put(self, key: String, n: Int) -> Int { n }
+}
+class D {
+  fn put(self, n: Int, key: String) -> Int { n }
+}
+fn f(c: C | D) -> Int { c.put("k", 1) }

@@ -1,0 +1,17 @@
+# expect: E0310
+# The same for a `for` loop over a type with its own `each`, whose body runs as a block: after the
+# loop, `x` may be nil.
+class Bag {
+  items: List[Int]
+  fn each(self, f: fn(Int)) { for i in self.items { f(i) } }
+}
+fn g() {
+  x: Int? = 1
+  if x != nil {
+    for i in Bag.new([1, 2]) {
+      x = nil
+    }
+    puts(x + 1)
+  }
+}
+g()

@@ -1,0 +1,39 @@
+# A narrowing from before a loop holds in the body, and after the loop, when every assignment to
+# the variable in the loop keeps it.
+fn step(n: Int) -> Int { n - 1 }
+fn maybe(n: Int) -> Int? { if n > 1 { nil } else { n } }
+
+fn countdown(start: Int?) -> Int {
+  x = start
+  if x == nil { return -1 }
+  total = 0
+  while x > 0 {
+    total += x
+    if x % 2 == 0 { x -= 1 } else { x = step(x) }
+  }
+  loop {
+    x += 2
+    if x > 5 { break }
+  }
+  for i in [1, 2, 3] {
+    x = x * i + 1
+  }
+  total + x
+}
+
+fn drop_and_recheck() -> Int {
+  x: Int? = 0
+  seen = 0
+  i = 0
+  while i < 4 {
+    # `x` may be nil from the second iteration on, so it is checked here.
+    if x != nil { seen += x + 1 }
+    x = maybe(i)
+    i += 1
+  }
+  seen
+}
+
+puts(countdown(4))
+puts(countdown(nil))
+puts(drop_and_recheck())

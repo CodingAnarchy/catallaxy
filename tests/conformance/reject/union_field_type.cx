@@ -1,0 +1,6 @@
+# expect: E0316
+# A field on a union has the union of the members' field types: `Int | String` here.
+class C { n: Int }
+class D { n: String }
+fn f(c: C | D) -> Int { c.n + 1 }
+print(f(D.new("x")))
