@@ -17,6 +17,9 @@ crossbeam-deque.workspace = true
 parking_lot.workspace = true
 parking_lot_core.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(loom)'.dependencies]
 loom = "0.7"
 

@@ -2,7 +2,7 @@
 
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ops::{self, Interop};
-use catallaxy_runtime::{panic, RtResult, Trap, Value};
+use catallaxy_runtime::{check_alloc, panic, try_string, RtResult, Trap, Value};
 use catallaxy_vm::{NativeFn, Vm};
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
@@ -80,7 +80,11 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             if n < 0 {
                 return panic("ArgumentError: negative repeat count");
             }
-            let r = s(a[0])?.repeat(n as usize);
+            let x = s(a[0])?;
+            let mut r = try_string(check_alloc(x.len(), n as usize)?)?;
+            for _ in 0..n {
+                r.push_str(x);
+            }
             Ok(new_str(vm, &r))
         },
         "String.[]" => str_index,
@@ -289,12 +293,24 @@ fn pad(vm: &mut Vm, a: &[Value], mode: u8) -> RtResult<Value> {
         return Ok(a[0]);
     }
     let total = width - len;
-    let fill = |n: usize| p.chars().cycle().take(n).collect::<String>();
-    let r = match mode {
-        0 => format!("{}{}{}", fill(total / 2), x, fill(total - total / 2)),
-        1 => format!("{}{}", x, fill(total)),
-        _ => format!("{}{}", fill(total), x),
-    };
+    // `total` characters of `p` take at most `total * p.len()` bytes.
+    let mut r = try_string(check_alloc(total, p.len())?.saturating_add(x.len()))?;
+    let fill = |r: &mut String, n: usize| r.extend(p.chars().cycle().take(n));
+    match mode {
+        0 => {
+            fill(&mut r, total / 2);
+            r.push_str(x);
+            fill(&mut r, total - total / 2);
+        }
+        1 => {
+            r.push_str(x);
+            fill(&mut r, total);
+        }
+        _ => {
+            fill(&mut r, total);
+            r.push_str(x);
+        }
+    }
     Ok(new_str(vm, &r))
 }
 

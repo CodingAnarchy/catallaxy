@@ -10,6 +10,7 @@
 mod collector;
 mod header;
 mod heap;
+pub mod limits;
 pub mod stats;
 
 pub use collector::{

@@ -150,6 +150,50 @@ fn rooted_list_survives_and_garbage_is_reclaimed() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "needs tens of megabytes of garbage to exceed the kept reserve")]
+fn empty_segments_are_returned_to_the_os() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut m = Mutator::new();
+    let mut list: *mut Cons = std::ptr::null_mut();
+    for i in 0..1000 {
+        list = m.cons(std::ptr::null_mut(), list, i);
+    }
+    m.roots().0.borrow_mut().push(list);
+    let start = total_heap_bytes();
+    let released = stats::released_bytes();
+    // Garbage until the heap has grown by 64 MB. (Earlier tests may have left empty pages in the
+    // pool, which are used first, so the amount of garbage needed varies.) No safepoints, so no
+    // collection reclaims any of it early.
+    let mut i = 0;
+    while total_heap_bytes() < start + (64 << 20) && i < 20_000_000 {
+        let _ = m.cons(std::ptr::null_mut(), std::ptr::null_mut(), i);
+        i += 1;
+    }
+    let grown = total_heap_bytes();
+    // The first collection finds the garbage dead; the second sweeps it, leaving whole
+    // segments empty, and returns all but a reserve for the next allocation budget.
+    collect_now(&m.rec);
+    collect_now(&m.rec);
+    let after = total_heap_bytes();
+    let freed = stats::released_bytes() - released;
+    // The heap keeps working, including when it has to map segments again.
+    for i in 0..1_400_000 {
+        let _ = m.cons(std::ptr::null_mut(), std::ptr::null_mut(), i);
+    }
+    collect_now(&m.rec);
+    collect_now(&m.rec);
+    let sum = list_sum(list);
+    m.roots().0.borrow_mut().clear();
+    // Unregister before asserting: a failed assertion must not leave a running mutator behind
+    // for the other tests' collections to wait on.
+    m.finish();
+    assert!(grown >= start + (64 << 20), "heap grew from {start} to {grown}");
+    assert!(freed >= 40 << 20, "released {freed} bytes");
+    assert!(after + (40 << 20) <= grown, "heap went from {grown} to {after}");
+    assert_eq!(sum, (0..1000).sum());
+}
+
+#[test]
 fn large_objects_are_collected() {
     let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut m = Mutator::new();

@@ -220,7 +220,10 @@ extend String {
 
 extend List[T] {
   native fn new() -> List[T]
+  # An empty list with room for `n` items. The capacity is a hint: at most 2^24 items are
+  # reserved up front, and the list grows past that as usual. Panics if `n` is negative.
   native fn with_capacity(n: Int) -> List[T]
+  # `n` copies of `value`. Panics with a MemoryError if the list cannot fit in memory.
   native fn filled(n: Int, value: T) -> List[T]
   native fn length(self) -> Int
   fn size(self) -> Int { self.length }

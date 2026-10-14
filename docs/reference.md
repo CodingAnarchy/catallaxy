@@ -335,6 +335,14 @@ Any type that has all required methods satisfies an interface and gains its defa
 called directly on the concrete type. If two in-scope interfaces provide the same default method to one
 type, the call is ambiguous and must be resolved by defining the method.
 
+`Enumerable`'s `map`, `select` and the like are eager and return lists. `xs.lazy()` returns a
+`Lazy[T]`, whose adaptors (`map`, `flat_map`, `select`/`filter`, `reject`, `take`, `take_while`,
+`drop`, `drop_while`, `with_index`, `zip`, `uniq`) build a pipeline that runs only when consumed
+(`to_list`, `each`, `first`, `find`, `for`, ...), one element at a time. `take`, `take_while`,
+`first` and `find` stop the source early, so pipelines over infinite sources such as
+`Lazy.iterate(0) { |n| n + 1 }` terminate. `Lazy.new { |emit| ... }` makes a sequence from any
+function that feeds elements to `emit`; each consumption calls it again.
+
 ```
 enum Shape {
   Circle(r: Float)
@@ -364,13 +372,35 @@ A member reached through a bound `T: I` (or `T: I & J`) is seen with `Self` repl
 ### 6.3 Implicit generics
 
 A non-`pub` function may leave parameter types off. The checker infers a structural requirement for each
-such parameter from how the body uses it, and checks every call site against it.
+such parameter from how the body uses it, and checks every call site against it with the rules typed code
+follows. A requirement records the types it is used at: the members the body reads or calls (with the
+argument types), operators on either side, indexing and element assignment, iteration, calls of the
+parameter as a function, and typed places the value flows into (an annotated variable, an argument, the
+declared result). Values derived from a parameter carry requirements too, so `x.name` must have an
+`upcase` below, and passing a value whose `name` is an `Int` is an error at the call.
 
 ```
 fn shout(x) { x.name.upcase }      # x: { fn name(self) -> { fn upcase(self) -> R } }
+fn greet(p) { "hi " + p.name }     # p.name must be a String
 ```
 
-Generics are erased: one compiled body serves every instantiation.
+An argument that does not meet a requirement is E0342 (E0341 when the value flows into a typed place),
+reported at the call with a note at the use in the body. A union argument must meet each requirement with
+every member, and the result is the union of what each member produces. Requirements on a parameter that
+is passed to another implicit-generic function become requirements of the caller's own parameter.
+
+Generics are erased: one compiled body serves every instantiation, and it reaches members by name at
+runtime. So, through an untyped parameter:
+
+- a method must be the argument type's own method or field, or the only extension method of that name
+  for its class; interface default methods and extensions of interfaces (such as `max` and `sort` on
+  lists) need an annotated parameter;
+- arguments are passed by position, so named arguments must follow the parameter order, and an `Int` is
+  not accepted where a `Float` is expected (typed calls convert it; this one cannot);
+- comparisons (`<`, `>`, ...) use the type's `<=>`, and bitwise operators apply to `Int` only;
+- assigning a field (`x.n = v`), `?`, and members of `freeze(x)` are not supported (E0369).
+
+Annotate the parameter to use any of these.
 
 ## 7. Errors
 
@@ -382,6 +412,11 @@ Generics are erased: one compiled body serves every instantiation.
   `par_*` block, whichever thread ran it).
 - `Thread.join` returns `Result[T, String]`: `Err` carries the panic message. A thread that panicked and
   was never joined is reported, with its trace, on stderr when the program ends.
+- Running out of memory panics with a message starting `MemoryError:` where the runtime can see it coming:
+  a single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,
+  `s * n` or `s.ljust(n)` with a huge `n`, and, when `CATX_MAX_HEAP` is set, a collection that finds more
+  live data than the limit (the next thread to reach a safepoint panics). The allocator failing anywhere
+  else still aborts the process.
 
 ## 8. Concurrency
 
