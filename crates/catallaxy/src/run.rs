@@ -8,7 +8,15 @@ use std::time::{Duration, Instant};
 use catallaxy_compiler::diag::SourceMap;
 use catallaxy_compiler::driver::{compile_path, FsLoader, Options};
 
+/// Prints `diags` to stderr, then (if any is an error) where their codes are explained.
 fn print_diags(sm: &SourceMap, diags: &[catallaxy_compiler::diag::Diagnostic]) {
+    render_diags(sm, diags);
+    if diags.iter().any(|d| d.is_error()) {
+        print_code_help(diags.iter().map(|d| d.code));
+    }
+}
+
+fn render_diags(sm: &SourceMap, diags: &[catallaxy_compiler::diag::Diagnostic]) {
     let color = std::io::stderr().is_terminal();
     for d in diags {
         eprint!("{}", sm.render(d, color));
@@ -16,6 +24,19 @@ fn print_diags(sm: &SourceMap, diags: &[catallaxy_compiler::diag::Diagnostic]) {
     let errors = diags.iter().filter(|d| d.is_error()).count();
     if errors > 0 {
         eprintln!("{} error{} found", errors, if errors == 1 { "" } else { "s" });
+    }
+}
+
+/// Points at the entries for `codes` in the error-code index (`docs/errors.md`).
+fn print_code_help<'a>(codes: impl IntoIterator<Item = &'a str>) {
+    let mut codes: Vec<&str> = codes.into_iter().collect();
+    codes.sort_unstable();
+    codes.dedup();
+    let url = concat!(env!("CARGO_PKG_REPOSITORY"), "/blob/main/docs/errors.md");
+    match codes.as_slice() {
+        [] => {}
+        [one] => eprintln!("help: for more on {one}, see {url}#{}", one.to_lowercase()),
+        [init @ .., last] => eprintln!("help: for more on {} and {last}, see {url}", init.join(", ")),
     }
 }
 
@@ -66,15 +87,18 @@ pub fn cmd_check(args: &[String]) -> i32 {
     let files = crate::files::expand(&files, &[]);
     let mut any_error = false;
     let mut all_json = Vec::new();
+    let mut codes = Vec::new();
     for f in files {
         let comp = compile_path(&f, &FsLoader, &Options { check_only: true });
         any_error |= comp.has_errors();
         if json {
             all_json.push(comp.sm.to_json(&comp.diags));
         } else {
-            print_diags(&comp.sm, &comp.diags);
+            render_diags(&comp.sm, &comp.diags);
+            codes.extend(comp.diags.iter().map(|d| d.code));
         }
     }
+    print_code_help(codes);
     if json {
         if all_json.len() == 1 {
             println!("{}", all_json[0]);
@@ -121,7 +145,7 @@ pub fn cmd_disasm(args: &[String]) -> i32 {
 
 /// Runs the conformance layout under `dir`:
 /// `run/*.cx` with `.out` files (expected stdout), and `reject/*.cx` whose first line is
-/// `# expect: CODE[, CODE...]`.
+/// `# expect: CODE[, CODE...]` (which must fail `catx check` unless every code is a warning).
 ///
 /// Each program gets `CATX_TEST_TIMEOUT` seconds (default 120); one that runs longer is killed
 /// and fails, so a hang names its test instead of stalling the whole suite.
@@ -150,7 +174,9 @@ pub fn cmd_test(args: &[String]) -> i32 {
                 let text = String::from_utf8_lossy(&out.stdout);
                 let missing: Vec<&String> =
                     want.iter().filter(|c| !text.contains(&format!("\"code\":\"{c}\""))).collect();
-                if missing.is_empty() && !out.status.success() {
+                // Warnings alone (`W` codes) do not fail `catx check`.
+                let want_failure = want.iter().any(|c| !c.starts_with('W'));
+                if missing.is_empty() && (!want_failure || !out.status.success()) {
                     Ok(())
                 } else {
                     Err(format!("expected {want:?}, got {}", text.trim()))
