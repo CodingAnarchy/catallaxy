@@ -973,8 +973,7 @@ impl<'a> Codegen<'a> {
                             Some(op) => {
                                 // Read the field into t, then combine.
                                 self.emit(st, encode(Op::GetField, t, o, idx as u8));
-                                let v = self.expr_reg(st, value);
-                                self.combine(st, e, *op, t, t, v, value);
+                                self.combine_into(st, e, *op, t, value);
                             }
                         }
                         self.emit(st, encode(Op::SetField, o, idx as u8, t));
@@ -988,8 +987,7 @@ impl<'a> Codegen<'a> {
                             None => self.expr_to(st, value, base + 2),
                             Some(op) => {
                                 self.emit(st, encode(Op::Index, base + 2, base, base + 1));
-                                let v = self.expr_reg(st, value);
-                                self.combine(st, e, *op, base + 2, base + 2, v, value);
+                                self.combine_into(st, e, *op, base + 2, value);
                             }
                         }
                         self.call_dispatch(st, &dispatch, base, 3);
@@ -1004,8 +1002,7 @@ impl<'a> Codegen<'a> {
                                     None => self.expr_to(st, value, t),
                                     Some(op) => {
                                         self.emit(st, encode(Op::Index, t, o, i));
-                                        let v = self.expr_reg(st, value);
-                                        self.combine(st, e, *op, t, t, v, value);
+                                        self.combine_into(st, e, *op, t, value);
                                     }
                                 }
                                 self.emit(st, encode(Op::SetIndex, o, i, t));
@@ -1046,6 +1043,26 @@ impl<'a> Codegen<'a> {
                 self.expr_to(st, target, dst);
                 let v = self.expr_reg(st, value);
                 self.combine(st, e, op, dst, dst, v, value);
+            }
+        }
+    }
+
+    /// `t = t op value` for a compound assignment whose old value is already in `t`. `||=`,
+    /// `&&=` and `??=` evaluate `value` only when needed.
+    fn combine_into(&mut self, st: &mut FnState, e: &Expr, op: BinOp, t: u8, value: &Expr) {
+        match op {
+            BinOp::Or | BinOp::And | BinOp::Coalesce => {
+                let j = match op {
+                    BinOp::Or => self.emit_jump(st, Op::JmpIf, t),
+                    BinOp::And => self.emit_jump(st, Op::JmpIfNot, t),
+                    _ => self.emit_jump(st, Op::JmpIfNotNil, t),
+                };
+                self.expr_to(st, value, t);
+                self.patch(st, j);
+            }
+            _ => {
+                let v = self.expr_reg(st, value);
+                self.combine(st, e, op, t, t, v, value);
             }
         }
     }

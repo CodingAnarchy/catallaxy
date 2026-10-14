@@ -1,0 +1,12 @@
+# expect: E0310
+# A call may change a field: the earlier `!= nil` test no longer holds.
+class Node {
+  v: Int
+  next: Node?
+  fn cut(mut self) { self.next = nil }
+}
+n = Node.new(1, Node.new(2, nil))
+if n.next != nil {
+  n.cut()
+  puts(n.next.v)
+}

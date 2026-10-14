@@ -169,7 +169,8 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
 - `x ?? d` is `x` unless nil. `x?.m` short-circuits to `nil`. `x!` panics on nil.
 - `e?`: on `Result[T, E]`, unwraps `Ok` or returns `Err` from the enclosing function (whose result must be
   a `Result` with a compatible error type); on `T?`, unwraps or returns `nil` (enclosing result must be
-  optional).
+  optional). In a function that returns a `Result`, convert an optional first:
+  `x.ok_or(error)?` or `x.ok_or_else { error }?` (`T?.ok_or(e: E) -> Result[T, E]`).
 - `e as? T` returns `T?` (runtime check; mainly for `Dyn` and unions).
 - Operators on class instances call methods named by the operator: `fn +(self, o: Vec) -> Vec`,
   `fn ==(self, o: Self) -> Bool`, `fn <=>(self, o: Self) -> Int`, `fn [](self, i: Int) -> T`,
@@ -214,7 +215,15 @@ block cannot follow a call without parentheses: write `if xs.any() { ... }` not 
 | `pattern if guard` | guard |
 
 Narrowing: after `if x != nil`, `if x is T`, `if let`, and in `match` arms on a variable subject, the
-variable has the narrowed type for the rest of that branch.
+variable has the narrowed type for the rest of that branch. `x ??= v` and `x = v` with a non-nil `v` also
+narrow `x` to non-nil.
+
+A field path on a local or `self` (`n.next`, `self.head.next`) is narrowed by `!= nil` / `== nil` tests
+and by assigning it a non-nil value, as long as nothing could have changed it since: the narrowing ends at
+any assignment to a field of that name, a reassignment of the root variable, any call (unless every field
+on the path belongs to a `frozen class` or is read through a frozen value), and it does not reach into
+closures or across loop iterations that might change it. Fields of shared classes are never narrowed.
+When it does not apply, bind the value: `if let next = n.next { ... }`.
 
 ### 4.5 Functions, closures, blocks
 
