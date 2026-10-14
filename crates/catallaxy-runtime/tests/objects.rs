@@ -16,9 +16,10 @@ use common::*;
 fn lists_built_from_vecs_and_slices() {
     let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut h = Host::new();
-    let strs: Vec<Value> = (0..5).map(|i| h.m.alloc_str(&format!("v{i}"))).collect();
-    // A vector with spare capacity: its allocation becomes the list's buffer.
-    let mut items = Vec::with_capacity(9);
+    let strs: Vec<Value> = (0..12).map(|i| h.m.alloc_str(&format!("v{i}"))).collect();
+    // A vector with spare capacity: its allocation becomes the list's buffer. (Vectors of up to
+    // `ListObj::INLINE_MAX` items are copied into the list object instead; see `inline_lists.rs`.)
+    let mut items = Vec::with_capacity(17);
     items.extend_from_slice(&strs);
     let a = h.m.alloc_list(items);
     let ha = h.m.root(a);
@@ -30,7 +31,7 @@ fn lists_built_from_vecs_and_slices() {
     let d = h.m.alloc_list(Vec::new());
     let hd = h.m.root(d);
     // Copies of a slice, with and without room to spare.
-    let e = h.m.alloc_list_from_slice(&strs[1..4], 8);
+    let e = h.m.alloc_list_from_slice(&strs[1..4], 9);
     let he = h.m.root(e);
     let f = h.m.alloc_list_from_slice(&[], 0);
     let hf = h.m.root(f);
@@ -40,13 +41,14 @@ fn lists_built_from_vecs_and_slices() {
         unsafe { as_list(v) }.to_vec().iter().map(|&s| str_of(s).unwrap().to_string()).collect()
     };
     let (a, b, c, d, e, f) = (h.m.get(ha), h.m.get(hb), h.m.get(hc), h.m.get(hd), h.m.get(he), h.m.get(hf));
-    assert_eq!(names(a), ["v0", "v1", "v2", "v3", "v4"]);
-    assert_eq!(unsafe { as_list(a) }.capacity(), 9);
-    assert_eq!(names(b), ["v0", "v1", "v2", "v3", "v4"]);
+    let all: Vec<String> = (0..12).map(|i| format!("v{i}")).collect();
+    assert_eq!(names(a), all);
+    assert_eq!(unsafe { as_list(a) }.capacity(), 17);
+    assert_eq!(names(b), all);
     assert_eq!(unsafe { as_list(c) }.capacity(), 3);
     assert!(unsafe { as_list(c) }.is_empty() && unsafe { as_list(d) }.is_empty());
     assert_eq!(names(e), ["v1", "v2", "v3"]);
-    assert_eq!(unsafe { as_list(e) }.capacity(), 8);
+    assert_eq!(unsafe { as_list(e) }.capacity(), 9);
     assert!(unsafe { as_list(f) }.is_empty());
     // Spare slots are initialized: pushing into them and growing past them works.
     for l in [a, b, c, d, e, f] {
@@ -57,8 +59,8 @@ fn lists_built_from_vecs_and_slices() {
     }
     h.gc();
     let a = h.m.get(ha);
-    assert_eq!(names(a).len(), 17);
-    assert_eq!(names(a)[16], "p11");
+    assert_eq!(names(a).len(), 24);
+    assert_eq!(names(a)[23], "p11");
     assert_eq!(names(h.m.get(hc)).len(), 12);
     h.finish();
 }

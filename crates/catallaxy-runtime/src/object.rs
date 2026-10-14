@@ -249,43 +249,117 @@ pub struct BigIntObj {
     pub value: BigInt,
 }
 
-/// A list: header, length and a pointer to a backing array.
+/// A list: header, length, a pointer to a backing array, and room for a few elements inline.
 ///
 /// Reads never lock, even on shared lists. The length and buffer pointer are atomic words, and a
 /// reader bounds-checks against the buffer it loaded, so it sees some consistent-enough state and
 /// never reads out of bounds. A writer (the owner, or a thread holding a shared list's lock) that
 /// outgrows the buffer copies it into a new one and swaps the pointer; the old buffer is retired
 /// to the collector, which frees it only once the world is stopped and no reader can hold it.
+///
+/// Small lists keep their elements in the object itself: `inline` is a [`WordBuf`] embedded at
+/// the end of the object (its slots follow the struct), and `buf` points at it. Readers do not
+/// tell the two cases apart; they load `buf` as always. A list that outgrows its inline slots
+/// moves to an out-of-line buffer exactly as above, and never moves back, so the inline slots are
+/// never written again. A racing reader that loaded the inline pointer before the move reads
+/// values the list held then, from memory that lives as long as the list does, so the inline
+/// buffer needs no retiring. It is never freed on its own: it goes with the object.
 #[repr(C)]
 pub struct ListObj {
     pub header: Header,
     len: AtomicUsize,
     buf: AtomicPtr<WordBuf>,
+    /// The inline buffer's capacity word; its slots follow the struct. Capacity 0 for lists
+    /// created out of line.
+    inline: WordBuf,
 }
 
+// Size classes are 16-byte steps; the inline capacities chosen below (odd) fill the object's
+// slot exactly only if the struct ends half way through a step.
+const _: () = assert!(std::mem::size_of::<ListObj>() % 16 == 8 && ListObj::INLINE_MAX % 2 == 1);
+
 impl ListObj {
+    /// Most elements a new list keeps inline (a 96-byte object). Odd, so the object fills its
+    /// size class. Chosen by measurement (issue #104).
+    pub const INLINE_MAX: usize = 7;
+    /// Inline capacity of a new empty (or one-element) list.
+    pub const INLINE_MIN: usize = 3;
+
+    /// The inline capacity of a new list that should have room for `cap` elements, or 0 if
+    /// they belong out of line. Rounded up to odd: an even count would leave a word of the
+    /// size-class slot unused.
+    #[inline]
+    pub fn inline_cap_for(cap: usize) -> usize {
+        if cap > Self::INLINE_MAX {
+            0
+        } else {
+            cap.max(Self::INLINE_MIN) | 1
+        }
+    }
+
+    /// The allocation size of a list with inline capacity `icap`.
+    #[inline]
+    pub fn size_for(icap: usize) -> usize {
+        std::mem::size_of::<ListObj>() + 8 * icap
+    }
+
     /// # Safety
-    /// `p` must point to freshly allocated, unpublished list memory.
-    pub(crate) unsafe fn init(p: *mut ListObj, items: Vec<Value>) {
+    /// `p` must point to freshly allocated, unpublished list memory of
+    /// [`ListObj::size_for`]`(icap)` bytes.
+    pub(crate) unsafe fn init(p: *mut ListObj, items: Vec<Value>, icap: usize) {
         let len = items.len();
+        if icap >= len && icap > 0 {
+            // Small: copy into the object and give the vector's allocation back.
+            Self::init_inline(p, items.iter().map(|v| v.0), icap, len);
+            return;
+        }
+        Self::init_inline(p, std::iter::empty(), 0, 0);
         // `Value` is a transparent `u64`, so the vector's allocation is reused as is.
         let mut items = std::mem::ManuallyDrop::new(items);
         let words = Vec::from_raw_parts(items.as_mut_ptr() as *mut u64, len, items.capacity());
         Self::init_buf(p, WordBuf::from_vec(words, Value::NIL.0), len);
     }
 
-    /// As [`ListObj::init`], copying `items` into a buffer of `cap` (at least `items.len()`).
+    /// As [`ListObj::init`], copying `items` into a buffer of `cap` (at least `items.len()`):
+    /// the inline one if `icap` is at least `cap`.
     ///
     /// # Safety
     /// As for [`ListObj::init`].
-    pub(crate) unsafe fn init_from_slice(p: *mut ListObj, items: &[Value], cap: usize) {
-        let buf = WordBuf::alloc_from(cap.max(items.len()), items.iter().map(|v| v.0), Value::NIL.0);
+    pub(crate) unsafe fn init_from_slice(p: *mut ListObj, items: &[Value], cap: usize, icap: usize) {
+        let cap = cap.max(items.len());
+        if icap >= cap && icap > 0 {
+            Self::init_inline(p, items.iter().map(|v| v.0), icap, items.len());
+            return;
+        }
+        Self::init_inline(p, std::iter::empty(), 0, 0);
+        let buf = WordBuf::alloc_from(cap, items.iter().map(|v| v.0), Value::NIL.0);
         Self::init_buf(p, buf, items.len());
+    }
+
+    /// Writes the inline buffer (`icap` slots holding `items`, then nil) and, if `icap > 0`,
+    /// points the list at it.
+    unsafe fn init_inline(p: *mut ListObj, items: impl IntoIterator<Item = u64>, icap: usize, len: usize) {
+        let inline = std::ptr::addr_of_mut!((*p).inline);
+        WordBuf::init_in_place(inline, icap, items, Value::NIL.0);
+        if icap > 0 {
+            Self::init_buf(p, inline, len);
+        }
     }
 
     unsafe fn init_buf(p: *mut ListObj, buf: *mut WordBuf, len: usize) {
         std::ptr::addr_of_mut!((*p).len).write(AtomicUsize::new(len));
         std::ptr::addr_of_mut!((*p).buf).write(AtomicPtr::new(buf));
+    }
+
+    /// The address of the inline buffer, for comparison only.
+    #[inline(always)]
+    fn inline_addr(&self) -> *mut WordBuf {
+        std::ptr::addr_of!(self.inline) as *mut WordBuf
+    }
+
+    /// Whether the elements are currently stored in the object itself.
+    pub fn is_inline(&self) -> bool {
+        self.buf.load(Ordering::Acquire) == self.inline_addr()
     }
 
     #[inline(always)]
@@ -414,7 +488,12 @@ impl ListObj {
 
     unsafe fn grow(&self, need: usize, access: Access) {
         let n = self.len.load(Ordering::Relaxed);
-        let cap = need.max(self.capacity() * 2).max(4);
+        let mut cap = need.max(self.capacity() * 2).max(4);
+        if self.is_inline() {
+            // Leaving the odd inline capacity: continue with powers of two, as a list that
+            // started empty out of line would.
+            cap = cap.next_power_of_two();
+        }
         let old = &self.slots()[..n];
         let buf = WordBuf::alloc_from(cap, old.iter().map(|s| s.load(Ordering::Relaxed)), Value::NIL.0);
         self.swap_buf(buf, access);
@@ -422,7 +501,11 @@ impl ListObj {
 
     unsafe fn swap_buf(&self, buf: *mut WordBuf, access: Access) {
         let old = self.buf.swap(buf, Ordering::AcqRel);
-        crate::buf::release(old, access);
+        // The inline buffer is part of the object: racing readers may still read it, and it
+        // is freed with the list.
+        if old != self.inline_addr() {
+            crate::buf::release(old, access);
+        }
     }
 }
 
@@ -608,10 +691,16 @@ unsafe fn trace_list(h: *const Header, t: &mut Tracer) {
     }
 }
 unsafe fn fin_list(h: *mut Header) {
-    WordBuf::free(*(*(h as *mut ListObj)).buf.get_mut() as *mut u8);
+    let l = &*(h as *const ListObj);
+    let buf = l.buf.load(Ordering::Relaxed);
+    if buf != l.inline_addr() {
+        WordBuf::free(buf as *mut u8);
+    }
 }
 unsafe fn size_list(h: *const Header) -> usize {
-    std::mem::size_of::<ListObj>() + 8 * (*(h as *const ListObj)).capacity()
+    let l = &*(h as *const ListObj);
+    let out = if l.is_inline() { 0 } else { l.capacity() };
+    ListObj::size_for(WordBuf::cap(&l.inline)) + 8 * out
 }
 
 unsafe fn trace_dict(h: *const Header, t: &mut Tracer) {
