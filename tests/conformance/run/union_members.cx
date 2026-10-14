@@ -1,0 +1,69 @@
+# Members of a union value: each member type must have the member, and its type is the union of
+# the members' types.
+class Base {
+  n: Int
+  fn get(self) -> Int { self.n }
+}
+class A < Base {}
+class B < Base {}
+
+class Cat {
+  name: String
+  age: Int
+  fn speak(self, times: Int = 1) -> String { "meow" * times }
+}
+class Dog {
+  name: String
+  age: Float
+  fn speak(self, times: Int = 2) -> String { "woof" * times }
+}
+
+extend Int { fn twice(self) -> Int { self * 2 } }
+extend String { fn twice(self) -> String { self + self } }
+
+interface Greeter {
+  fn id(self) -> Int
+  fn greet(self) -> String { "hello from #{self.id()}" }
+}
+class G {
+  fn id(self) -> Int { 7 }
+}
+class P {
+  fn greet(self) -> String { "hello from P" }
+}
+
+class Q {
+  fn scale(self, k: Float) -> Float { k * 2.0 }
+}
+class R {
+  fn scale(self, k: Float) -> Float { k * 3.0 }
+}
+
+fn inherited(x: A | B) -> Int { x.get() + x.n }
+fn names(x: Cat | Dog) -> String { x.name }
+fn ages(x: Cat | Dog) -> Int | Float { x.age }
+fn speak(x: Cat | Dog) -> String { x.speak() + " " + x.speak(times: 3) }
+fn twice(x: Int | String) -> Int | String { x.twice() }
+fn greet(x: G | P) -> String { x.greet() }
+fn scale(x: Q | R) -> Float { x.scale(2) }
+fn size(x: List[Int] | List[String]) -> Int { x.size }
+fn each(x: List[Int] | List[String]) {
+  for v in x { puts(v) }
+}
+
+puts(inherited(A.new(1)))
+puts(inherited(B.new(2)))
+puts(names(Dog.new("rex", 2.5)))
+puts(ages(Cat.new("tom", 3)))
+puts(ages(Dog.new("rex", 2.5)))
+puts(speak(Cat.new("tom", 3)))
+puts(speak(Dog.new("rex", 2.5)))
+puts(twice(21))
+puts(twice("ab"))
+puts(greet(G.new()))
+puts(greet(P.new()))
+puts(scale(Q.new()))
+puts(scale(R.new()))
+puts(size(["a", "b"]))
+each([1, 2])
+each(["x"])

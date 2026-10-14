@@ -172,6 +172,13 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
   optional). In a function that returns a `Result`, convert an optional first:
   `x.ok_or(error)?` or `x.ok_or_else { error }?` (`T?.ok_or(e: E) -> Result[T, E]`).
 - `e as? T` returns `T?` (runtime check; mainly for `Dyn` and unions).
+- A field or method of a union value (`x.n`, `x.m(a)` with `x: A | B`) must exist on every member type;
+  otherwise it is E0311, naming the members that lack it. A field's type is the union of the members'
+  field types, and a call's result is the union of the members' results. The call is dispatched on the
+  runtime value and passes its arguments by position, so each member's method must take the same
+  parameters (names, in order) with a default for each omitted argument (E0332), and each argument must
+  suit every member's parameter type (E0300). Members whose class lacks the method at runtime (they
+  reach it as an interface default or extension method) must all reach the same function (E0311).
 - Operators on class instances call methods named by the operator: `fn +(self, o: Vec) -> Vec`,
   `fn ==(self, o: Self) -> Bool`, `fn <=>(self, o: Self) -> Int`, `fn [](self, i: Int) -> T`,
   `fn []=(self, i: Int, v: T)`. Comparison operators on a type with `<=>` come from `Comparable`.

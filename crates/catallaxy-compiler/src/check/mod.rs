@@ -167,6 +167,9 @@ pub struct Checker {
     /// Type parameters instantiated by the last `instantiate_sig` (for bound checks).
     pub last_inst: Vec<(ParamId, TyId)>,
     pub last_inst_subst: FxHashMap<ParamId, TyId>,
+    /// For a union receiver: each member's method with its instantiated parameters and result,
+    /// from the last `instantiate_sig` (empty otherwise).
+    pub last_sigs: Vec<(lookup::MethodRef, Vec<PInfo>, TyId)>,
     pub pending_bounds: Vec<(ModId, Vec<ParamId>, Vec<ast::TypeParam>, collect::TypeScope)>,
 }
 
@@ -255,6 +258,7 @@ impl Checker {
             pattern_subjects: FxHashMap::default(),
             last_inst: Vec::new(),
             last_inst_subst: FxHashMap::default(),
+            last_sigs: Vec::new(),
             pending_bounds: Vec::new(),
         }
     }
