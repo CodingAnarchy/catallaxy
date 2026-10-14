@@ -1,0 +1,4 @@
+# expect: E0375
+# Sorting would compare an `Int` with a `String`.
+xs: List[Comparable] = [1, "a"]
+puts(xs.sorted)

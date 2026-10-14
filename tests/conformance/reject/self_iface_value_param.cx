@@ -1,0 +1,15 @@
+# expect: E0375
+# `x` and `y` may be different implementors, so `A.merge` could get a `B`.
+interface Merge {
+  fn merge(self, other: Self) -> Int
+}
+class A {
+  s: String
+  fn merge(self, other: A) -> Int { self.s.length + other.s.length }
+}
+class B {
+  n: Int
+  fn merge(self, other: B) -> Int { self.n + other.n }
+}
+fn go(x: Merge, y: Merge) -> Int { x.merge(y) }
+puts(go(A.new("hi"), B.new(7)))
