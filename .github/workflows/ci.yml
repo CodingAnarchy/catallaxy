@@ -52,7 +52,7 @@ jobs:
           ./ext 2>/dev/null | diff - crates/catallaxy-capi/examples/ext.out
           CATX_GC_STRESS=1 ./ext 2>/dev/null | diff - crates/catallaxy-capi/examples/ext.out
       - name: Clippy
-        run: cargo clippy --release --locked -- -D warnings
+        run: cargo clippy --release --locked --workspace --all-targets -- -D warnings
 
   vscode:
     name: VS Code extension
