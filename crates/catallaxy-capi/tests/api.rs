@@ -102,6 +102,8 @@ match bad.join() {
     // 6 * 7; two mapped items; "BC" + "790" (the digits of 0..299 are 790 characters); the
     // panic inside the callback propagates out of the native as a thread panic.
     assert_eq!(*SEEN.lock().unwrap(), vec![42, 2, 5, 1]);
+    // The test binary links the rlib, so the crate's `global-allocator` feature decides.
+    assert_eq!(cx_allocator_active(), cfg!(feature = "global-allocator") as std::ffi::c_int);
     assert_eq!(cx_is_nil(cx_nil()), 1);
     assert_eq!(cx_truthy(cx_bool(0)), 0);
     let mut f = 0.0;
