@@ -597,7 +597,7 @@ fn lsp_rename_interface_conversions() {
     lsp.finish();
 }
 
-const CONF_BUILTIN: &str ="interface Sized {
+const CONF_BUILTIN: &str = "interface Sized {
   fn length(self) -> Int
 }
 fn measure(x: Sized) -> Int { x.length() }

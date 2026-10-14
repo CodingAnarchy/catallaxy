@@ -564,7 +564,9 @@ impl Server<'_> {
                     .index
                     .occs
                     .iter()
-                    .filter(|o| o.is_decl && !u.syms.contains(&o.sym) && u.key(o.span).is_some_and(|k| keys.contains(&k)))
+                    .filter(|o| {
+                        o.is_decl && !u.syms.contains(&o.sym) && u.key(o.span).is_some_and(|k| keys.contains(&k))
+                    })
                     .map(|o| o.sym)
                     .collect();
                 for s in found {
