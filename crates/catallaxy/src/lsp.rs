@@ -6,7 +6,9 @@
 //! the requested document on demand and query the checker's side tables (see
 //! `catallaxy_compiler::query`). References, rename, signature help, inlay hints and symbol lists
 //! use the symbol index and outlines of `catallaxy_compiler::symbols`; references and rename cover
-//! every module of the compilation (the document and the modules it imports). Code actions
+//! the compilations of every open document (each document and the modules it imports), matching
+//! symbols across them by their declarations, and take along the methods that implement an
+//! interface member in the types used as that interface. Code actions
 //! offer the fixes attached to the document's diagnostics as quick fixes.
 
 use std::panic::AssertUnwindSafe;
@@ -482,11 +484,50 @@ impl Server<'_> {
 
 /// The symbol under a cursor, with the checked compilation and its index.
 struct AtSymbol {
+    path: PathBuf,
     ck: Checked,
     index: Index,
     sym: Symbol,
     /// The occurrence under the cursor.
     span: catallaxy_compiler::diag::Span,
+}
+
+/// Everything a rename of the symbol under a cursor rewrites, across compilations.
+struct Gathered {
+    /// Each occurrence once: its location and whether it declares its symbol.
+    occs: Vec<(lt::Location, bool)>,
+    /// Why the rename must be refused, if it must.
+    refusal: Option<String>,
+}
+
+/// A compilation with its symbol index, the canonical path of each of its files, and the
+/// symbols of the rename found in it.
+struct Unit {
+    ck: Checked,
+    index: Index,
+    files: Vec<PathBuf>,
+    syms: Vec<Symbol>,
+}
+
+impl Unit {
+    fn new(ck: Checked, index: Index) -> Unit {
+        let files = ck
+            .comp
+            .sm
+            .files
+            .iter()
+            .map(|f| {
+                let p = Path::new(&f.path);
+                std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+            })
+            .collect();
+        Unit { ck, index, files, syms: Vec::new() }
+    }
+
+    /// A span as a position independent of the compilation's file numbering.
+    fn key(&self, sp: catallaxy_compiler::diag::Span) -> Option<(PathBuf, u32, u32)> {
+        Some((self.files.get(sp.file as usize)?.clone(), sp.start, sp.end))
+    }
 }
 
 impl Server<'_> {
@@ -495,38 +536,93 @@ impl Server<'_> {
         let ck = self.compile(&path, None);
         let index = Index::build(&ck.comp.ck, &ck.comp.sm);
         let occ = *index.at(ck.file, off)?;
-        Some(AtSymbol { ck, index, sym: occ.sym, span: occ.span })
+        Some(AtSymbol { path, ck, index, sym: occ.sym, span: occ.span })
+    }
+
+    /// The occurrences of `at`'s symbol and of the symbols renamed with it (the methods that
+    /// implement an interface member, see [`Index::family`]), in the compilation of `at`'s
+    /// document and in those of the other open documents, which may import it. Symbols are
+    /// matched across compilations by their declarations.
+    fn gather(&self, at: AtSymbol) -> Gathered {
+        let AtSymbol { path, ck, index, sym, .. } = at;
+        let mut first = Unit::new(ck, index);
+        first.syms = first.index.family(sym);
+        let mut units = vec![first];
+        let mut others: Vec<&PathBuf> = self.docs.keys().filter(|p| **p != path).collect();
+        others.sort();
+        for p in others {
+            let ck = self.compile(p, None);
+            let index = Index::build(&ck.comp.ck, &ck.comp.sm);
+            units.push(Unit::new(ck, index));
+        }
+        let mut keys: rustc_hash::FxHashSet<(PathBuf, u32, u32)> = Default::default();
+        let mut grew = true;
+        while grew {
+            grew = false;
+            for u in units.iter_mut() {
+                let found: Vec<Symbol> = u
+                    .index
+                    .occs
+                    .iter()
+                    .filter(|o| {
+                        o.is_decl && !u.syms.contains(&o.sym) && u.key(o.span).is_some_and(|k| keys.contains(&k))
+                    })
+                    .map(|o| o.sym)
+                    .collect();
+                for s in found {
+                    for f in u.index.family(s) {
+                        if !u.syms.contains(&f) {
+                            u.syms.push(f);
+                        }
+                    }
+                }
+                for s in &u.syms {
+                    if let Some(k) = symbols::decl_span(&u.ck.comp.ck, *s).and_then(|sp| u.key(sp)) {
+                        grew |= keys.insert(k);
+                    }
+                }
+            }
+        }
+        let mut refusal = None;
+        let mut seen = rustc_hash::FxHashSet::default();
+        let mut occs = Vec::new();
+        for u in &units {
+            let c = &u.ck.comp;
+            for &s in &u.syms {
+                if refusal.is_none() && !u.index.renamable(&c.ck, s) {
+                    let name = symbols::symbol_name(&c.ck, &c.sm, s).unwrap_or_default();
+                    refusal = Some(match s {
+                        Symbol::Fn(f) if s != sym => format!(
+                            "renaming `{name}` would also rename `{}`, which is not declared in this program (it is built in or from the prelude)",
+                            query::fn_signature(&c.ck, f)
+                        ),
+                        _ => format!("`{name}` is not declared in this program (it is built in or from the prelude)"),
+                    });
+                }
+            }
+            for o in u.index.occs.iter().filter(|o| u.syms.contains(&o.sym)) {
+                let Some(loc) = Self::location(c, o.span) else { continue };
+                if seen.insert((loc.uri.as_str().to_string(), loc.range.start, loc.range.end)) {
+                    occs.push((loc, o.is_decl));
+                }
+            }
+        }
+        Gathered { occs, refusal }
     }
 
     fn references(&self, p: lt::ReferenceParams) -> Option<Vec<lt::Location>> {
         let at = self.symbol_at(&p.text_document_position)?;
         let with_decl = p.context.include_declaration;
-        Some(
-            at.index
-                .refs(at.sym)
-                .filter(|o| with_decl || !o.is_decl)
-                .filter_map(|o| Self::location(&at.ck.comp, o.span))
-                .collect(),
-        )
-    }
-
-    /// Why `at`'s symbol cannot be renamed, if it cannot.
-    fn rename_refusal(at: &AtSymbol) -> Option<String> {
-        let c = &at.ck.comp;
-        if at.index.renamable(&c.ck, at.sym) {
-            return None;
-        }
-        let name = symbols::symbol_name(&c.ck, &c.sm, at.sym).unwrap_or_default();
-        Some(format!("`{name}` is not declared in this program (it is built in or from the prelude)"))
+        Some(self.gather(at).occs.into_iter().filter(|(_, d)| with_decl || !d).map(|(l, _)| l).collect())
     }
 
     fn prepare_rename(&self, p: lt::TextDocumentPositionParams) -> Result<Option<lt::PrepareRenameResponse>, String> {
         let Some(at) = self.symbol_at(&p) else { return Ok(None) };
-        if let Some(why) = Self::rename_refusal(&at) {
+        let range = Self::range(at.ck.comp.sm.file(at.ck.file), at.span.start, at.span.end);
+        if let Some(why) = self.gather(at).refusal {
             return Err(why);
         }
-        let sf = at.ck.comp.sm.file(at.ck.file);
-        Ok(Some(lt::PrepareRenameResponse::Range(Self::range(sf, at.span.start, at.span.end))))
+        Ok(Some(lt::PrepareRenameResponse::Range(range)))
     }
 
     // `WorkspaceEdit::changes` is keyed by `Uri`, whose lazily computed parts are cells.
@@ -537,14 +633,13 @@ impl Server<'_> {
             return Err(format!("`{new_name}` is not a valid name"));
         }
         let Some(at) = self.symbol_at(&p.text_document_position) else { return Ok(None) };
-        if let Some(why) = Self::rename_refusal(&at) {
+        let g = self.gather(at);
+        if let Some(why) = g.refusal {
             return Err(why);
         }
         let mut changes: std::collections::HashMap<lt::Uri, Vec<lt::TextEdit>> = Default::default();
-        for o in at.index.refs(at.sym) {
-            if let Some(loc) = Self::location(&at.ck.comp, o.span) {
-                changes.entry(loc.uri).or_default().push(lt::TextEdit { range: loc.range, new_text: new_name.into() });
-            }
+        for (loc, _) in g.occs {
+            changes.entry(loc.uri).or_default().push(lt::TextEdit { range: loc.range, new_text: new_name.into() });
         }
         Ok(Some(lt::WorkspaceEdit { changes: Some(changes), ..Default::default() }))
     }
