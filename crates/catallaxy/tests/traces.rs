@@ -60,3 +60,13 @@ fn unjoined_thread_panic_is_reported_at_exit() {
     assert!(err.contains("panicked and was never joined: boom 7\n    at f ("), "{err}");
     assert!(err.contains("    at <spawn in main> ("), "{err}");
 }
+
+#[test]
+fn memory_errors_are_traced_like_other_panics() {
+    let src = "fn huge() -> Int { List.filled(100_000_000_000_000, 0).length }\n\
+               t = spawn { huge() }\nwhile not t.is_done() { sleep(0.01) }\n";
+    let (code, _, err) = run("memory", src);
+    assert_eq!(code, 0);
+    assert!(err.contains("never joined: MemoryError: cannot allocate"), "{err}");
+    assert!(err.contains("    at huge (") && err.contains("    at <spawn in main> ("), "{err}");
+}

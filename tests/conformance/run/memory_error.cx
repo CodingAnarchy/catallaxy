@@ -1,5 +1,5 @@
-# Requests too large to satisfy panic with a MemoryError (and a stack trace) instead of
-# aborting the process, so a thread's join reports them like any other panic.
+# Requests too large to satisfy panic with a MemoryError instead of aborting the process, so a
+# thread's join reports them like any other panic.
 fn huge_list() -> Int {
   xs = List.filled(100_000_000_000_000, 0)
   xs.length
@@ -8,8 +8,9 @@ fn attempt(name: String, f: fn() -> Int) {
   t = spawn move { f() }
   match t.join() {
     Ok(n) => puts("#{name}: ok #{n}")
-    # The reason in parentheses depends on the machine.
-    Err(e) => puts("#{name}: #{e.split("\n")[0].split(" (")[0]}, traced: #{e.contains("\n    at ")}")
+    # The reason in parentheses depends on the machine. `join` gives the message only (an
+    # unjoined thread's panic is reported with its trace at exit).
+    Err(e) => puts("#{name}: #{e.split(" (")[0]}, message only: #{not e.contains("\n")}")
   }
 }
 attempt("filled") { huge_list() }
