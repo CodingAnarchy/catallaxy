@@ -945,16 +945,21 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_postfix(&mut self) -> PResult<Expr> {
+        // `(recv.f)(x)` calls the value of `recv.f`; only an unparenthesized `recv.f(x)` is a method call.
+        let mut grouped = self.is_sym("(");
         let mut e = self.parse_primary()?;
         loop {
             let tight = !self.toks[self.pos].space_before;
+            let was_grouped = std::mem::take(&mut grouped);
             match self.tok() {
                 Tok::Sym("(") if tight => {
                     let args = self.parse_args()?;
                     let block = if self.can_take_block() { Some(Box::new(self.parse_block_arg()?)) } else { None };
                     let span = e.span.to(self.prev_span());
                     e = match e.kind {
-                        ExprKind::Member { recv, name, args: a, block: None, parens: false, safe } if a.is_empty() => {
+                        ExprKind::Member { recv, name, args: a, block: None, parens: false, safe }
+                            if a.is_empty() && !was_grouped =>
+                        {
                             self.mk(ExprKind::Member { recv, name, args, block, parens: true, safe }, span)
                         }
                         _ => self.mk(ExprKind::Call { callee: Box::new(e), args, block }, span),

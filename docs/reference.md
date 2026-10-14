@@ -239,7 +239,9 @@ xs.each { puts(it) }                          # `it` is the sole parameter of a 
 ```
 
 Calls always use parentheses, except that a zero-argument method may be called as `obj.name`
-(`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. Closures capture
+(`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. `obj.f(x)` calls the
+method `f`; to call a function stored in a field, wrap the callee in parentheses: `(obj.f)(x)`. Any
+parenthesized callee (`(xs[0])(x)`, `(make())(x)`) is evaluated first and then called. Closures capture
 variables by reference.
 
 A bare `{ ... }` in value position is a block that runs immediately, so `inc = { count += 1 }` would
