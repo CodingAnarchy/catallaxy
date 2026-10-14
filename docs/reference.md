@@ -225,6 +225,14 @@ Narrowing: after `if x != nil`, `if x is T`, `if let`, and in `match` arms on a 
 variable has the narrowed type for the rest of that branch. `x ??= v` and `x = v` with a non-nil `v` also
 narrow `x` to non-nil.
 
+Each branch of an `if` / `else if` chain, an `if let` or a `match` starts from the narrowings in effect
+before it, so an assignment in one branch does not affect the others. After it, a variable (or field
+path) is narrowed only if it is narrowed at the end of every branch that falls through (a missing `else`
+falls through with the condition false), to the union of those types; a branch that leaves with
+`return`, `break`, `continue` or `panic(...)` does not count. So `if x == nil { return }` and
+`if x == nil { x = 0 }` both leave `x` non-nil, and `if c { x = nil }` leaves it possibly nil. A `match`
+guard that fails has already run when the next arm is tried.
+
 A loop body runs again after itself, so a narrowing from before a loop holds in the loop (condition
 included) only if every assignment to the variable in the loop visibly keeps it: `x -= 1`, `x = x * 2`,
 `x ??= 0`, a literal, `T.new(...)`, `v!` or a call of a function whose declared result fits. Otherwise,

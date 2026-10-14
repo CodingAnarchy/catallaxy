@@ -11,7 +11,6 @@ const CATX: &str = env!("CARGO_BIN_EXE_catx");
 
 /// Codes whose entry has no example, and why. Every other entry needs one.
 const NO_EXAMPLE: &[(&str, &str)] = &[
-    ("E0302", "a consistency check of return-type inference that no known program reaches"),
     ("E0801", "reports a bug in `catx fmt`; no correct formatter produces it"),
     ("E0900", "needs a function with more than 250 live values, too long to show"),
 ];
