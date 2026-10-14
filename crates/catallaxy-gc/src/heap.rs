@@ -225,19 +225,60 @@ pub(crate) fn restore_headroom() -> bool {
     true
 }
 
-/// The global allocator for programs that embed the runtime (`catx` uses it): the system
-/// allocator, except that a refused request releases the headroom block and is retried once.
-/// The refusal also schedules a collection, which raises a `MemoryError` at a safepoint if
-/// memory does not come back (see the module docs). So allocations the runtime does not check
-/// itself, in the standard library's collections, get one more chance before the process aborts.
+/// The global allocator for programs that embed the runtime (`catx` and the C API libraries use
+/// it): the system allocator, except that a refused request releases the headroom block and is
+/// retried once. The refusal also schedules a collection, which raises a `MemoryError` at a
+/// safepoint if memory does not come back (see the module docs). So allocations the runtime does
+/// not check itself, in the standard library's collections, get one more chance before the
+/// process aborts.
+///
+/// A Rust program that embeds Catallaxy opts in with one line:
+/// `#[global_allocator] static ALLOC: catallaxy::Allocator = catallaxy::Allocator;`
 pub struct Allocator;
+
+/// The size of the request [`Allocator::is_global`] makes. No system grants it, and the
+/// allocator counts it in `PROBES` instead of releasing the headroom.
+const PROBE_SIZE: usize = isize::MAX as usize;
+static PROBES: AtomicUsize = AtomicUsize::new(0);
+
+impl Allocator {
+    /// Whether `Allocator` is the global allocator of the calling code (of the program, or of
+    /// the shared library the caller is linked into). It makes a request no system grants and
+    /// checks whether this allocator saw it; the headroom is not touched. Not for Miri or the
+    /// sanitizers, which stop at such a request instead of returning null.
+    pub fn is_global() -> bool {
+        let layout = Layout::from_size_align(PROBE_SIZE, 1).expect("probe layout");
+        let before = PROBES.load(Ordering::SeqCst);
+        // SAFETY: the layout has a nonzero size; a block, if one is returned, is freed at once.
+        // `black_box` keeps the compiler from assuming the request succeeds and removing it.
+        let p = std::hint::black_box(unsafe { alloc(layout) });
+        if !p.is_null() {
+            // SAFETY: just allocated with this layout.
+            unsafe { dealloc(p, layout) };
+            return false;
+        }
+        PROBES.load(Ordering::SeqCst) != before
+    }
+}
+
+/// Called when the system refuses a request of `size` bytes: whether to retry it (the headroom
+/// was released). Out of line, so that the fast path stays a call and a null check.
+#[cold]
+#[inline(never)]
+fn refused_retry(size: usize) -> bool {
+    if size == PROBE_SIZE {
+        PROBES.fetch_add(1, Ordering::SeqCst);
+        return false;
+    }
+    release_headroom()
+}
 
 // SAFETY: every call is forwarded to the system allocator with the same arguments.
 unsafe impl std::alloc::GlobalAlloc for Allocator {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let p = std::alloc::System.alloc(layout);
-        if p.is_null() && release_headroom() {
+        if p.is_null() && refused_retry(layout.size()) {
             return std::alloc::System.alloc(layout);
         }
         p
@@ -246,7 +287,7 @@ unsafe impl std::alloc::GlobalAlloc for Allocator {
     #[inline]
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         let p = std::alloc::System.alloc_zeroed(layout);
-        if p.is_null() && release_headroom() {
+        if p.is_null() && refused_retry(layout.size()) {
             return std::alloc::System.alloc_zeroed(layout);
         }
         p
@@ -260,7 +301,7 @@ unsafe impl std::alloc::GlobalAlloc for Allocator {
     #[inline]
     unsafe fn realloc(&self, p: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let q = std::alloc::System.realloc(p, layout, new_size);
-        if q.is_null() && release_headroom() {
+        if q.is_null() && refused_retry(new_size) {
             return std::alloc::System.realloc(p, layout, new_size);
         }
         q

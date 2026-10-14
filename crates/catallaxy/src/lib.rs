@@ -19,10 +19,21 @@
 //! ```
 //!
 //! A process runs one program: the VM's code and class tables are process-wide.
+//!
+//! This crate does not set a global allocator. A program that embeds it gets the out-of-memory
+//! handling of `catx` (a refused allocation inside the runtime releases a headroom block and is
+//! retried once, and a `MemoryError` follows at the next safepoint instead of an abort) with one
+//! line:
+//!
+//! ```
+//! #[global_allocator]
+//! static ALLOC: catallaxy::Allocator = catallaxy::Allocator;
+//! ```
 
 use std::path::Path;
 
 pub use catallaxy_compiler::diag::Diagnostic;
+pub use catallaxy_gc::Allocator;
 pub use catallaxy_runtime::{HandleScope, Local, Mutator, RtResult, Trap, Value};
 pub use catallaxy_vm::{NativeFn, Program, Vm};
 
