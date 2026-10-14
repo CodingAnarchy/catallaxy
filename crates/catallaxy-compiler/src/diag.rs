@@ -106,6 +106,7 @@ impl Diagnostic {
 }
 
 /// A loaded source file.
+#[derive(Clone)]
 pub struct SourceFile {
     pub path: String,
     pub text: String,
@@ -167,7 +168,7 @@ impl SourceFile {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SourceMap {
     pub files: Vec<SourceFile>,
 }

@@ -351,6 +351,7 @@ pub enum ScopeItem {
     Variant(EnumId, u32),
 }
 
+#[derive(Clone)]
 pub struct ModInfo {
     pub name: String,
     pub file: u32,

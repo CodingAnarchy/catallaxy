@@ -118,6 +118,8 @@ impl Checker {
                 ExprKind::Member { name, args, block, parens, .. } => {
                     if *parens || !args.is_empty() || block.is_some() || self.method_names.contains(&name.name) {
                         calls = true;
+                    } else if self.record_method_name_misses {
+                        self.method_name_misses.insert(name.name.clone());
                     }
                 }
                 ExprKind::Assign { target, .. } => match &target.kind {
@@ -4171,7 +4173,7 @@ impl Checker {
         let ret_is_nil = self.types.shallow_resolve(ret_ty) == nil;
         let body_ret = if ret_is_nil { self.types.fresh_var() } else { ret_ty };
         self.push_ctx(fid, kind, body_ret, e.span);
-        self.ctx().scan = std::rc::Rc::new(AssignScan::new(&body.stmts));
+        self.ctx().scan = std::sync::Arc::new(AssignScan::new(&body.stmts));
         let mut plocals = Vec::new();
         if implicit_it {
             plocals.push(self.new_local("it", ptys[0], e.span, true));
@@ -4369,7 +4371,7 @@ impl Checker {
             let fid = self.new_closure_fn(e, None);
             let nil = self.types.nil;
             self.push_ctx(fid, CtxKind::ForBody, nil, e.span);
-            self.ctx().scan = std::rc::Rc::new(AssignScan::new(&body.stmts));
+            self.ctx().scan = std::sync::Arc::new(AssignScan::new(&body.stmts));
             self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: true });
             let param = self.new_local("$item", elem, pattern.span, true);
             self.bind_irrefutable(pattern, elem);
