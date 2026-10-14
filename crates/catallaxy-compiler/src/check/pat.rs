@@ -194,6 +194,10 @@ impl Checker {
             self.suppress_diags -= 1;
             self.diags.truncate(before);
             let t = tt.ty;
+            if let Ty::Iface(i, _) = self.types.get(t).clone() {
+                // Resolved with diagnostics off (an unknown name is E0366 below).
+                self.check_iface_value_type(i, p.span);
+            }
             if !matches!(self.types.get(t), Ty::Error) {
                 if !args.is_empty() {
                     self.err("E0365", "type patterns do not take arguments; bind with `name: Type`", p.span);
@@ -685,6 +689,9 @@ impl Checker {
                 Some(self.types.intern(Ty::Enum(e, vec![dyn_; n])))
             }
             ScopeItem::Iface(i) if !self.ifaces[i as usize].params.is_empty() => {
+                // The erased form of an interface is still a value type.
+                let span = path[0].span.to(path[path.len() - 1].span);
+                self.check_iface_value_type(i, span);
                 let n = self.ifaces[i as usize].params.len();
                 Some(self.types.intern(Ty::Iface(i, vec![dyn_; n])))
             }

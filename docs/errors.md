@@ -1426,6 +1426,27 @@ Test for the class alone (`is Box`, `as? Box`, `b: Box =>`), which keeps the typ
 type implies (`Box[Int] | Box[String]` here, `Box[Dyn]` for a `Dyn` value), and check the contents; or
 give each case its own class or enum variant and test for that.
 
+## E0375
+
+Interface with `Self` parameters used as a value type. In an interface, `Self` is the implementing
+type, so `fn merge(self, other: Self)` means "merge with another value of my own type". Two values of
+the interface type may be different implementors, and a call like `x.merge(y)` would pass one
+implementor's value to another's method. Such an interface (the prelude's `Comparable` is one) can
+only be a bound on a type parameter, not the type of a parameter, field, variable, result, list
+element or union member. Interfaces that use `Self` only as a result (`fn copy(self) -> Self`) can be
+value types.
+
+```cx
+interface Merge {
+  fn merge(self, other: Self) -> Int
+}
+fn go(x: Merge, y: Merge) -> Int { x.merge(y) }
+```
+
+Introduce a type parameter bounded by the interface, so both values have the same type:
+`fn go[T: Merge](x: T, y: T) -> Int`. For a collection, make the element type a type parameter
+(`fn top[T: Comparable](xs: List[T])`).
+
 ## E0380
 
 Format spec does not apply to the type. The spec is valid but not for this value: `.2f` on a
