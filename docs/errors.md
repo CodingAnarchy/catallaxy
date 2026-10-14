@@ -536,14 +536,6 @@ fn name() -> String { 42 }
 
 Return a value of the declared type, or change the declared type.
 
-## E0302
-
-Conflicting return types. The checker could not settle on one result type for a function without a
-result annotation. The values a function returns are normally joined into a union (`Int | String`),
-so this is a consistency check that no known program reaches; there is no example.
-
-Annotate the function's result type.
-
 ## E0303
 
 Unknown name. A name is not a local, parameter, function, constant or import in scope.

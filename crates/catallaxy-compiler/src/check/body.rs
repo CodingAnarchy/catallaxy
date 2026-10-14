@@ -224,9 +224,15 @@ impl Checker {
                     Diag::error("E0230", format!("recursive function `{name}` needs a return type annotation"), span)
                         .suggest("annotate the return type", span.after(), " -> T"),
                 );
+                // The result is unknown from here on: an error, which fits any use (`unify` with
+                // an error does not bind, so bind it here). Uses of the result can then no longer
+                // pin it to a type that the body's returns contradict.
                 let err = self.types.error;
-                let r = self.fns[fid as usize].ret;
-                self.unify(r, err);
+                let r = self.types.shallow_resolve(self.fns[fid as usize].ret);
+                if let Ty::Var(v) = self.types.get(r) {
+                    let v = *v;
+                    self.bind_var(v, err);
+                }
             }
             return;
         }
@@ -326,17 +332,15 @@ impl Checker {
             let mut all = self.ctx().returns.clone();
             all.push(body_ty);
             let joined = self.join(&all);
-            if !self.unify(f.ret, joined) {
-                // Fall back to a union with what was already inferred (recursive uses).
-                let cur = self.types.resolve(f.ret);
-                let msg = format!(
-                    "cannot infer a single return type for `{}`: `{}` vs `{}`",
-                    f.name,
-                    self.show(cur),
-                    self.show(joined)
-                );
-                self.err("E0302", msg, span);
-            }
+            // The result is still a free variable here: only a use of it while the body is being
+            // checked could have bound it, and such a (recursive) use is E0230, which binds it to
+            // an error that unifies with anything.
+            let unified = self.unify(f.ret, joined);
+            debug_assert!(
+                unified || self.diags.iter().any(|d| d.is_error()) || self.suppressed_errors > 0,
+                "the inferred result of `{}` was bound before its body was checked",
+                f.name
+            );
         }
         // Finalize local types: unbound variables (e.g. an unused `[]`) default to Never.
         let never = self.types.never;
