@@ -471,17 +471,151 @@ fn lsp_field_declarations_and_interface_calls() {
     field.push(last);
     assert_eq!(refs(&mut lsp, 2, pos(t, 5, "s", 0)), field);
 
-    let member =
-        vec![spot(&uri, pos(t, 1, "area", 0)), spot(&uri, pos(t, 2, "area", 0)), spot(&uri, pos(t, 9, "area", 0))];
+    // The member, the calls through the interface, and the method of `Sq`, which is used as a
+    // `Shape` (interfaces are structural, so they are renamed together).
+    let member = vec![
+        spot(&uri, pos(t, 1, "area", 0)),
+        spot(&uri, pos(t, 2, "area", 0)),
+        spot(&uri, pos(t, 6, "area", 0)),
+        spot(&uri, pos(t, 9, "area", 0)),
+    ];
     assert_eq!(refs(&mut lsp, 3, pos(t, 9, "area", 0)), member);
     assert_eq!(refs(&mut lsp, 4, pos(t, 1, "area", 0)), member);
-    // The class's own method is a separate symbol (interfaces are structural).
-    assert_eq!(refs(&mut lsp, 5, pos(t, 6, "area", 0)), vec![spot(&uri, pos(t, 6, "area", 0))]);
+    assert_eq!(refs(&mut lsp, 5, pos(t, 6, "area", 0)), member);
 
     let h = lsp.request(6, "textDocument/hover", at(pos(t, 9, "area", 0)));
     assert!(h["result"]["contents"]["value"].as_str().unwrap().contains("fn Shape.area(self) -> Float"), "{h}");
     let d = lsp.request(7, "textDocument/definition", at(pos(t, 2, "area", 0)));
     assert_eq!(d["result"]["range"]["start"], pos(t, 1, "area", 0), "{d}");
+    lsp.finish();
+}
+
+const CONF_SHAPES: &str = "pub interface Shape {
+  fn area(self) -> Float
+}
+pub fn total(xs: List[Shape]) -> Float {
+  sum = 0.0
+  for x in xs { sum = sum + x.area() }
+  sum
+}
+";
+
+const CONF_KINDS: &str = "pub class Sq {
+  s: Float
+  fn area(self) -> Float { self.s * self.s }
+}
+pub class Disc {
+  r: Float
+  fn area(self) -> Float { 3.0 * self.r * self.r }
+}
+pub class Tri {
+  b: Float
+  fn area(self) -> Float { self.b / 2.0 }
+}
+";
+
+const CONF_MAIN: &str = "import conf_shapes.{Shape, total}
+import conf_kinds.{Sq, Disc, Tri}
+fn larger[T: Shape](a: T, b: T) -> Float { if a.area() > b.area() { a.area() } else { b.area() } }
+sq = Sq.new(3.0)
+puts(total([sq]) + sq.area())
+puts(Disc.new(1.0).area())
+puts(larger(Tri.new(1.0), Tri.new(2.0)))
+";
+
+/// Renaming an interface member renames the methods of the classes used as that interface
+/// (a list element, a generic bound) in every open document, and the calls to them; a class
+/// with a method of the same name that is never used as the interface keeps it.
+#[test]
+fn lsp_rename_interface_conformers() {
+    let (mut lsp, _) = Lsp::init();
+    let shapes = lsp.open("conf_shapes.cx", CONF_SHAPES);
+    let kinds = lsp.open("conf_kinds.cx", CONF_KINDS);
+    let main = lsp.open("conf_main.cx", CONF_MAIN);
+    let at = |uri: &str, p: Value| json!({"textDocument": {"uri": uri}, "position": p});
+    let refs = |lsp: &mut Lsp, id: i64, uri: &str, p: Value| {
+        let mut params = at(uri, p);
+        params["context"] = json!({"includeDeclaration": true});
+        ref_spots(&lsp.request(id, "textDocument/references", params))
+    };
+    let rename = |lsp: &mut Lsp, id: i64, uri: &str, p: Value| {
+        let mut params = at(uri, p);
+        params["newName"] = json!("size");
+        edit_spots(&lsp.request(id, "textDocument/rename", params), "size")
+    };
+    let mut family = vec![
+        spot(&shapes, pos(CONF_SHAPES, 1, "area", 0)),
+        spot(&shapes, pos(CONF_SHAPES, 5, "area", 0)),
+        // `Sq` (a list element) and `Tri` (a bound), not `Disc`.
+        spot(&kinds, pos(CONF_KINDS, 2, "area", 0)),
+        spot(&kinds, pos(CONF_KINDS, 10, "area", 0)),
+        spot(&main, pos(CONF_MAIN, 4, "area", 0)),
+    ];
+    family.extend((0..4).map(|i| spot(&main, pos(CONF_MAIN, 2, "area", i))));
+    family.sort();
+
+    // From the interface member, whose own module knows no class.
+    assert_eq!(rename(&mut lsp, 2, &shapes, pos(CONF_SHAPES, 1, "area", 0)), family);
+    // From the conforming classes' methods, and from calls.
+    assert_eq!(rename(&mut lsp, 3, &kinds, pos(CONF_KINDS, 2, "area", 0)), family);
+    assert_eq!(rename(&mut lsp, 4, &kinds, pos(CONF_KINDS, 10, "area", 0)), family);
+    assert_eq!(refs(&mut lsp, 5, &main, pos(CONF_MAIN, 4, "area", 0)), family);
+    assert_eq!(refs(&mut lsp, 6, &shapes, pos(CONF_SHAPES, 5, "area", 0)), family);
+    let r = lsp.request(7, "textDocument/prepareRename", at(&kinds, pos(CONF_KINDS, 10, "area", 0)));
+    assert_eq!(r["result"]["start"], pos(CONF_KINDS, 10, "area", 0), "{r}");
+
+    // `Disc` is never used as a `Shape`: its method stays a symbol of its own.
+    let disc = vec![spot(&kinds, pos(CONF_KINDS, 6, "area", 0)), spot(&main, pos(CONF_MAIN, 5, "area", 0))];
+    assert_eq!(refs(&mut lsp, 8, &main, pos(CONF_MAIN, 5, "area", 0)), disc);
+    assert_eq!(rename(&mut lsp, 9, &kinds, pos(CONF_KINDS, 6, "area", 0)), disc);
+    lsp.finish();
+}
+
+const CONF_WAYS: &str = "interface Shape { fn area(self) -> Float }
+class A { fn area(self) -> Float { 1.0 } }
+class B { fn area(self) -> Float { 2.0 } }
+class C { fn area(self) -> Float { 3.0 } }
+class D { fn area(self) -> Float { 4.0 } }
+fn make() -> Shape { A.new() }
+s: Shape = B.new()
+d: Dict[String, Shape] = [\"c\": C.new()]
+puts(make().area() + s.area() + D.new().area() + d.size.to_f)
+";
+
+/// Conversions by return, assignment and dict element all count; `D` is never a `Shape`.
+#[test]
+fn lsp_rename_interface_conversions() {
+    let (mut lsp, _) = Lsp::init();
+    let uri = lsp.open("conf_ways.cx", CONF_WAYS);
+    let t = CONF_WAYS;
+    let mut p = json!({"textDocument": {"uri": uri}, "position": pos(t, 0, "area", 0)});
+    p["newName"] = json!("size");
+    let mut want: Vec<_> = (0..4).map(|l| spot(&uri, pos(t, l, "area", 0))).collect();
+    want.extend((0..2).map(|i| spot(&uri, pos(t, 8, "area", i))));
+    want.sort();
+    assert_eq!(edit_spots(&lsp.request(2, "textDocument/rename", p), "size"), want);
+    lsp.finish();
+}
+
+const CONF_BUILTIN: &str ="interface Sized {
+  fn length(self) -> Int
+}
+fn measure(x: Sized) -> Int { x.length() }
+puts(measure(\"abc\"))
+";
+
+/// A member implemented by a built-in type is not renamed: the type would stop conforming.
+#[test]
+fn lsp_rename_interface_member_implemented_by_builtin() {
+    let (mut lsp, _) = Lsp::init();
+    let uri = lsp.open("conf_builtin.cx", CONF_BUILTIN);
+    let p = json!({"textDocument": {"uri": uri}, "position": pos(CONF_BUILTIN, 1, "length", 0)});
+    let r = lsp.request(2, "textDocument/prepareRename", p.clone());
+    assert!(r["error"]["message"].as_str().unwrap_or_default().contains("String.length"), "{r}");
+    let mut p = p;
+    p["newName"] = json!("size");
+    let r = lsp.request(3, "textDocument/rename", p);
+    assert!(r.get("error").is_some(), "{r}");
     lsp.finish();
 }
 

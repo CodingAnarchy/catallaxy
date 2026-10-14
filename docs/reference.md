@@ -547,8 +547,12 @@ unsaved edits. It provides:
   completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
 - find references and rename (with prepare-rename) for locals, parameters (including named
   arguments), functions, methods (an override and the method it overrides rename together), fields,
-  classes, enums, variants, interfaces and constants. They cover the document and every module it
-  imports; names from the prelude cannot be renamed;
+  classes, enums, variants, interfaces and constants. An interface member renames together with the
+  same-named methods of every type whose values are used as that interface (passed, assigned,
+  returned, put in a list or dict, or checked against a generic bound), so those types keep
+  conforming; renaming such a method renames the member too. They cover the document, every module
+  it imports, and the other open documents and their imports; names from the prelude cannot be
+  renamed, nor can a member that a built-in type implements;
 - signature help for function, method and constructor calls, showing default values and marking
   the trailing-block parameter, with the active parameter following commas and named arguments;
 - inlay hints with the inferred types of unannotated variables, `for`/`let`/`if let` bindings and
