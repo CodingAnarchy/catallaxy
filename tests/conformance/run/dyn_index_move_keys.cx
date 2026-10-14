@@ -1,0 +1,19 @@
+# A `Dyn` list indexed out of range is nil, as a missing object key is.
+doc = Json.parse("{\"users\": [\"ann\", \"bob\"]}").unwrap()
+puts(doc["users"][1])
+puts(doc["users"][5])
+puts(doc["users"][-1])
+puts(doc["users"][-3])
+puts(doc["missing"])
+
+# A fresh literal can be moved (it has no other reference).
+m = Mutex.new(move ["hits": 0])
+m.lock { |d| d["hits"] = (d["hits"] ?? 0) + 1 }
+puts(m.lock { |d| d["hits"] })
+
+# Frozen lists and tuples are fine keys.
+seen = Set.new()
+seen.add(freeze([1, 2]))
+puts(seen.contains(freeze([1, 2])))
+pairs = [(1, "a"): true]
+puts(pairs[(1, "a")])

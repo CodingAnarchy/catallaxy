@@ -55,7 +55,16 @@ impl Checker {
             Ty::Union(ts) => {
                 let nil = self.types.nil;
                 if ts.contains(&nil) {
-                    let rest: Vec<String> = ts.iter().filter(|&&x| x != nil).map(|&x| self.show_atom(x)).collect();
+                    // An optional whose other member is not inferred yet (a variable first
+                    // assigned `nil`) is, so far, just `Nil`: never show the placeholder `_?`.
+                    let rest: Vec<String> = ts
+                        .iter()
+                        .filter(|&&x| x != nil && !matches!(self.types.get(self.types.shallow_resolve(x)), Ty::Var(_)))
+                        .map(|&x| self.show_atom(x))
+                        .collect();
+                    if rest.is_empty() {
+                        return "Nil".into();
+                    }
                     if rest.len() == 1 {
                         return format!("{}?", rest[0]);
                     }
@@ -273,6 +282,11 @@ impl Checker {
                 return true;
             }
         }
+        if Some(iid) == self.well_known.comparable {
+            if let Some(r) = self.builtin_comparable(s) {
+                return r;
+            }
+        }
         let cacheable = !self.types.has_vars(s) && !self.types.has_vars(d) && !self.types.has_open(s);
         if cacheable {
             if let Some(&r) = self.satisfies_cache.get(&(s, d)) {
@@ -289,6 +303,31 @@ impl Checker {
             self.satisfies_cache.insert((s, d), r);
         }
         r
+    }
+
+    /// `Comparable` for builtin types without a `<=>` method: tuples and lists compare
+    /// lexicographically when their elements are comparable, and `Dyn` is checked at run time.
+    /// `None` for every other type (they satisfy it structurally).
+    pub fn builtin_comparable(&mut self, s: TyId) -> Option<bool> {
+        let s = self.types.shallow_resolve(s);
+        match self.types.get(s).clone() {
+            Ty::Frozen(inner) => self.builtin_comparable(inner),
+            Ty::Dyn => Some(true),
+            Ty::Tuple(elems) => {
+                let cmp = self.comparable_ty()?;
+                Some(elems.into_iter().all(|e| self.assignable(e, cmp)))
+            }
+            Ty::Class(builtin::LIST, args) if args.len() == 1 => {
+                let cmp = self.comparable_ty()?;
+                Some(self.assignable(args[0], cmp))
+            }
+            _ => None,
+        }
+    }
+
+    fn comparable_ty(&mut self) -> Option<TyId> {
+        let iid = self.well_known.comparable?;
+        Some(self.types.intern(Ty::Iface(iid, Vec::new())))
     }
 
     /// Required methods of interface type `d` that `s` lacks (or has with incompatible signatures).

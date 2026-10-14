@@ -44,6 +44,38 @@ pub fn panic<T>(msg: impl Into<String>) -> RtResult<T> {
     Err(Trap::Panic(msg.into()))
 }
 
+/// Checks a request for `count` items of `size` bytes before allocating it, so that sizes the
+/// machine cannot provide raise a `MemoryError` panic (with the program's stack trace) instead
+/// of aborting the process in the allocator. Returns the size in bytes.
+pub fn check_alloc(count: usize, size: usize) -> RtResult<usize> {
+    let Some(bytes) = count.checked_mul(size) else {
+        return panic(format!("MemoryError: cannot allocate {count} items of {size} bytes"));
+    };
+    catallaxy_gc::limits::check_request(bytes).map_err(|e| Trap::Panic(format!("MemoryError: {e}")))?;
+    Ok(bytes)
+}
+
+/// An empty vector with room for exactly `n` items, or a `MemoryError` panic if that much
+/// memory cannot be had (see [`check_alloc`]).
+pub fn try_vec<T>(n: usize) -> RtResult<Vec<T>> {
+    let bytes = check_alloc(n, std::mem::size_of::<T>())?;
+    let mut v = Vec::new();
+    if v.try_reserve_exact(n).is_err() {
+        return panic(format!("MemoryError: cannot allocate {bytes} bytes (the allocator refused)"));
+    }
+    Ok(v)
+}
+
+/// An empty string with room for exactly `bytes` bytes, or a `MemoryError` panic.
+pub fn try_string(bytes: usize) -> RtResult<String> {
+    check_alloc(bytes, 1)?;
+    let mut s = String::new();
+    if s.try_reserve_exact(bytes).is_err() {
+        return panic(format!("MemoryError: cannot allocate {bytes} bytes (the allocator refused)"));
+    }
+    Ok(s)
+}
+
 pub struct Mutator {
     pub tid: u16,
     pub rec: Arc<ThreadRecord>,

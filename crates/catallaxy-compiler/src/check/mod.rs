@@ -46,12 +46,34 @@ pub enum CtxKind {
     },
 }
 
+/// A field path rooted at a local (or `self`): `n.next` is `(n, ["next"])`.
+pub type FieldPath = (LocalId, Vec<String>);
+
+/// What a narrowing applies to.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum NKey {
+    Local(LocalId),
+    /// A field path. `stable` when no call can change it: every field on the path belongs to a
+    /// frozen class or is read through a frozen value.
+    Path(FieldPath, bool),
+}
+
+impl From<LocalId> for NKey {
+    fn from(l: LocalId) -> Self {
+        NKey::Local(l)
+    }
+}
+
 pub struct FnCtx {
     pub fn_id: FnId,
     pub kind: CtxKind,
     pub ret: TyId,
     pub scopes: Vec<FxHashMap<String, LocalId>>,
     pub narrow: Vec<FxHashMap<LocalId, TyId>>,
+    /// Narrowed field paths, layered like `narrow`: (type, stable). They apply only in this
+    /// context (a closure may run after the field changed) and are dropped by any assignment to
+    /// a field of the same name, a reassignment of the root, or (unless stable) any call.
+    pub path_narrow: Vec<FxHashMap<FieldPath, (TyId, bool)>>,
     /// Loop nesting inside this context: each entry collects `break` value types.
     pub loops: Vec<LoopCtx>,
     pub captures: Vec<LocalId>,
@@ -84,6 +106,10 @@ pub struct Checker {
     pub expr_ty: FxHashMap<NodeId, TyId>,
     pub names: FxHashMap<NodeId, NameRes>,
     pub calls: FxHashMap<NodeId, CallRes>,
+    /// For a method call dispatched by name at runtime (on an interface or a type parameter's
+    /// bound), the interface member the checker resolved it to. Editor
+    /// queries (hover, definition, references) use it; codegen does not.
+    pub dyn_targets: FxHashMap<NodeId, FnId>,
     pub bins: FxHashMap<NodeId, BinRes>,
     pub fors: FxHashMap<NodeId, ForKind>,
     pub assigns: FxHashMap<NodeId, AssignRes>,
@@ -113,6 +139,10 @@ pub struct Checker {
     pub prelude_ifaces: Vec<IfaceId>,
     pub satisfies_cache: FxHashMap<(TyId, TyId), bool>,
     pub satisfies_stack: Vec<(TyId, TyId)>,
+    /// Bumped whenever a call drops unstable field-path narrowings.
+    pub path_epoch: u32,
+    /// Every method name of every type (built on first use, for loop pre-scans).
+    pub method_names: FxHashSet<String>,
     /// When set, `Open` requirements are recorded against this function.
     pub open_owner: Option<FnId>,
     pub well_known: WellKnown,
@@ -162,6 +192,9 @@ pub struct WellKnown {
     pub enumerable: Option<IfaceId>,
     pub comparable: Option<IfaceId>,
     pub display: Option<IfaceId>,
+    /// The prelude's `compare_values`: the runtime `<=>` of builtin comparable values (tuples
+    /// and lists), the fallback when `<=>` is dispatched dynamically on one of them.
+    pub compare_values: Option<FnId>,
 }
 
 impl Checker {
@@ -184,6 +217,7 @@ impl Checker {
             expr_ty: FxHashMap::default(),
             names: FxHashMap::default(),
             calls: FxHashMap::default(),
+            dyn_targets: FxHashMap::default(),
             bins: FxHashMap::default(),
             fors: FxHashMap::default(),
             assigns: FxHashMap::default(),
@@ -204,6 +238,8 @@ impl Checker {
             prelude_ifaces: Vec::new(),
             satisfies_cache: FxHashMap::default(),
             satisfies_stack: Vec::new(),
+            path_epoch: 0,
+            method_names: FxHashSet::default(),
             open_owner: None,
             well_known: WellKnown::default(),
             checked_bodies: FxHashSet::default(),

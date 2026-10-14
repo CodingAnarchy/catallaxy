@@ -503,6 +503,12 @@ impl Checker {
             }
         }
         let rows = expanded;
+        // No row is left: every value is a witness. Below the top level, report the most general
+        // one (`_`) rather than enumerating constructors, which for a recursive enum would nest
+        // `.B(.B(...))` until the depth limit and hide the real gap.
+        if rows.is_empty() && depth > 0 {
+            return vec![vec!["_".to_string(); tys.len()]];
+        }
         let t = tys[0];
         let rest = &tys[1..];
         // Only split on constructors when some row actually inspects this column; otherwise the

@@ -2,91 +2,15 @@
 //! with collections running in between. Run under Miri as part of the safety gates.
 
 use std::cell::UnsafeCell;
-use std::sync::Mutex as StdMutex;
 
-use catallaxy_gc::{enter_native, install, leave_native, register_thread, unregister_thread, RootSource, Tracer};
 use catallaxy_runtime::dict::DictTable;
 use catallaxy_runtime::object::*;
-use catallaxy_runtime::ops::{self, Interop};
+use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership::{self, Access};
-use catallaxy_runtime::{Mutator, RtResult, Sym, Value};
+use catallaxy_runtime::Value;
 
-/// A minimal host: one mutator whose roots are its handle stack.
-struct Host {
-    /// Shared with the collector's root scan, so owned through a raw pointer.
-    raw: *mut Mutator,
-    m: &'static mut Mutator,
-    finished: bool,
-}
-
-struct HandleRoots(*const Vec<Value>);
-impl RootSource for HandleRoots {
-    fn trace_roots(&self, t: &mut Tracer) {
-        for &v in unsafe { &*self.0 } {
-            if v.is_ptr() {
-                t.mark(v.as_ptr());
-            }
-        }
-    }
-}
-
-impl Interop for Host {
-    fn mutator(&mut self) -> &mut Mutator {
-        self.m
-    }
-    fn call_method(&mut self, _: Value, _: Sym, _: &[Value]) -> RtResult<Option<Value>> {
-        Ok(None)
-    }
-}
-
-impl Host {
-    fn new() -> Self {
-        let rec = register_thread();
-        let raw = Box::into_raw(Box::new(Mutator::new(rec)));
-        let roots: Box<dyn RootSource> = Box::new(HandleRoots(unsafe { (*raw).handles_ptr() }));
-        let m = unsafe { &mut *raw };
-        unsafe { install(&m.rec, Box::into_raw(roots), m.heap_ptr()) };
-        leave_native(&m.rec);
-        Host { raw, m, finished: false }
-    }
-    fn gc(&mut self) {
-        catallaxy_gc::collect_now(&self.m.rec);
-    }
-    fn minor(&mut self) {
-        catallaxy_gc::collect_minor(&self.m.rec);
-    }
-    fn finish(mut self) {
-        self.unregister();
-    }
-    fn unregister(&mut self) {
-        if std::mem::replace(&mut self.finished, true) {
-            return;
-        }
-        enter_native(&self.m.rec);
-        unregister_thread(&self.m.rec);
-        self.m.release_pages();
-        // The mutator is intentionally leaked: the collector may still hold its root pointer.
-        let _ = self.raw;
-    }
-}
-
-impl Drop for Host {
-    /// Also runs when a test thread panics: a thread left registered as running would make
-    /// every later collection wait for it forever, turning one failure into a hung test run.
-    fn drop(&mut self) {
-        self.unregister();
-    }
-}
-
-static SERIAL: StdMutex<()> = StdMutex::new(());
-
-fn n(i: usize) -> usize {
-    if cfg!(miri) {
-        (i / 50).max(3)
-    } else {
-        i
-    }
-}
+mod common;
+use common::*;
 
 #[test]
 fn lists_built_from_vecs_and_slices() {
@@ -175,51 +99,6 @@ fn containers_survive_collection() {
         let idx = ops::dict_lookup(&mut h, d, k).unwrap().expect("key present");
         assert_eq!(unsafe { as_dict(d).table() }.entry(idx).value, Value::small_int(i as i64));
     }
-    h.finish();
-}
-
-#[test]
-fn string_char_positions_use_the_index() {
-    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    let mut h = Host::new();
-    let texts = [
-        "a".repeat(300),
-        "aé€😀".repeat(90),
-        "日本語".repeat(100) + "tail",
-        "héllo".to_string(),
-        String::new(),
-        "x".repeat(StrObj::INDEX_MIN - 1) + "é",
-    ];
-    for text in &texts {
-        let v = h.m.alloc_str(text);
-        let hv = h.m.root(v);
-        // Strings with an index carry it through a collection.
-        h.gc();
-        let v = h.m.get(hv);
-        let o = unsafe { as_str_obj(v) };
-        let chars: Vec<(usize, char)> = text.char_indices().collect();
-        assert_eq!(o.char_count(), chars.len());
-        assert_eq!(o.is_ascii(), text.is_ascii());
-        let step = if cfg!(miri) { 7 } else { 1 };
-        for (i, &(b, c)) in chars.iter().enumerate().step_by(step) {
-            assert_eq!(o.byte_offset(i), b);
-            assert_eq!(o.char_offset(b), i);
-            assert_eq!(o.char_at(i), c.to_string());
-        }
-        assert_eq!(o.byte_offset(chars.len()), text.len());
-        assert_eq!(o.char_offset(text.len()), chars.len());
-        let (a, z) = (chars.len() / 3, chars.len() * 2 / 3 + 1);
-        let want: String = text.chars().skip(a).take(z.min(chars.len()).saturating_sub(a)).collect();
-        assert_eq!(o.char_slice(a, z), want);
-        assert_eq!(o.char_slice(z, a), "");
-        assert!(o.alloc_size() >= StrObj::BASE + text.len());
-    }
-    // Concatenated parts with a known character count.
-    let v = h.m.alloc_str_parts(&[&"é".repeat(200), &"z".repeat(100)]);
-    let o = unsafe { as_str_obj(v) };
-    assert_eq!(o.char_count(), 300);
-    assert_eq!(o.char_at(250), "z");
-    assert_eq!(o.char_at(199), "é");
     h.finish();
 }
 

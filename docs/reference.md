@@ -32,11 +32,14 @@ program's main body; top-level statements in an imported module run once, when i
 import geometry                 # binds module `geometry`; use geometry.area(...)
 import geometry.{Point, area}   # binds selected public items directly
 import lib.shapes               # lib/shapes.cx, bound as `shapes`
+import shapes.geometry as geo   # shapes/geometry.cx, bound as `geo`
 ```
 
 Module paths are resolved relative to the importing file's directory (`a.b` → `a/b.cx`), then the
 entry file's directory. A module that cannot be found is error E0204. Only `pub` items are visible to
-importers. Cyclic imports are an error.
+importers. Cyclic imports are an error. A module is bound to the last segment of its path unless
+renamed with `as`; two imports may not bind the same name to different modules or items (E0206), so
+`import a.util` and `import b.util` need an `as` on one of them.
 
 The standard library (`docs/stdlib.md`) needs no import: `Json`, `File`, `Regex`, `Time` and the rest
 are in scope in every module, and there are no `std.*` modules to import. `Time.now()` (seconds,
@@ -56,7 +59,7 @@ Module-wide state uses:
 
 | Type | Meaning |
 | --- | --- |
-| `Int` | arbitrary-precision integer |
+| `Int` | arbitrary-precision integer (so there is no `Int.MAX` or `Int.MIN`: start a running extreme from `nil` or the first element, or use `min`/`max`/`min_by`/`max_by`) |
 | `Float` | IEEE 754 double |
 | `Bool` | `true` / `false` |
 | `String` | immutable UTF-8 text (always frozen); `s[i]` and slices index characters, in O(1) for ASCII text |
@@ -166,11 +169,17 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
 - `x ?? d` is `x` unless nil. `x?.m` short-circuits to `nil`. `x!` panics on nil.
 - `e?`: on `Result[T, E]`, unwraps `Ok` or returns `Err` from the enclosing function (whose result must be
   a `Result` with a compatible error type); on `T?`, unwraps or returns `nil` (enclosing result must be
-  optional).
+  optional). In a function that returns a `Result`, convert an optional first:
+  `x.ok_or(error)?` or `x.ok_or_else { error }?` (`T?.ok_or(e: E) -> Result[T, E]`).
 - `e as? T` returns `T?` (runtime check; mainly for `Dyn` and unions).
 - Operators on class instances call methods named by the operator: `fn +(self, o: Vec) -> Vec`,
   `fn ==(self, o: Self) -> Bool`, `fn <=>(self, o: Self) -> Int`, `fn [](self, i: Int) -> T`,
   `fn []=(self, i: Int, v: T)`. Comparison operators on a type with `<=>` come from `Comparable`.
+- `Int`, `Float`, `String` and classes with `<=>` are `Comparable`; tuples and lists are `Comparable` when
+  their elements are, and order lexicographically (`(1, "b") < (1, "c")`, `[1, 2] < [1, 2, 0]`). Sorting
+  needs it: `sorted`, `sort`, `sort_in_place`, `min` and `max` require `Comparable` items, and `sort_by`,
+  `min_by` and `max_by` a `Comparable` key (`recs.sort_by { |r| (r.last, r.first) }`). Use `sort_with`
+  for any other order.
 
 ### 4.3 Control flow
 
@@ -206,7 +215,15 @@ block cannot follow a call without parentheses: write `if xs.any() { ... }` not 
 | `pattern if guard` | guard |
 
 Narrowing: after `if x != nil`, `if x is T`, `if let`, and in `match` arms on a variable subject, the
-variable has the narrowed type for the rest of that branch.
+variable has the narrowed type for the rest of that branch. `x ??= v` and `x = v` with a non-nil `v` also
+narrow `x` to non-nil.
+
+A field path on a local or `self` (`n.next`, `self.head.next`) is narrowed by `!= nil` / `== nil` tests
+and by assigning it a non-nil value, as long as nothing could have changed it since: the narrowing ends at
+any assignment to a field of that name, a reassignment of the root variable, any call (unless every field
+on the path belongs to a `frozen class` or is read through a frozen value), and it does not reach into
+closures or across loop iterations that might change it. Fields of shared classes are never narrowed.
+When it does not apply, bind the value: `if let next = n.next { ... }`.
 
 ### 4.5 Functions, closures, blocks
 
@@ -224,6 +241,10 @@ xs.each { puts(it) }                          # `it` is the sole parameter of a 
 Calls always use parentheses, except that a zero-argument method may be called as `obj.name`
 (`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. Closures capture
 variables by reference.
+
+A bare `{ ... }` in value position is a block that runs immediately, so `inc = { count += 1 }` would
+store `nil`; that is error E0372. Write `inc = { || count += 1 }` or `fn() { count += 1 }` for code to run
+later.
 
 `return` inside a closure block (`{ |x| ... }`, `{ ... }` passed to a call) or an anonymous function
 returns from that block only, like `next` in Ruby, not from the enclosing function. Bodies of `if`,
@@ -245,6 +266,9 @@ fn first_big(xs: List[Int]) -> Int? {
   computed key: `[(host): 1]`.
 - `(1, "a")` is a tuple; `(x,)` a one-element tuple.
 - Dicts and sets iterate in insertion order.
+- Dict and set keys are hashed by value, so they must not change once inserted: a `Dict` or `Set` whose
+  keys are owned lists, dicts or sets (also inside a tuple) is error E0373. Use frozen keys
+  (`Set[frozen List[Int]]`, filled with `freeze(k)`) or tuples.
 
 Indexing a `List` or `String` with a range slices it: `xs[1..2]` and `xs[1...3]` are new lists of the
 elements at those positions, `"hello"[1..3]` is `"ell"` (positions count characters). Negative positions
@@ -346,7 +370,9 @@ s = Shape.Circle(2.0)
 area = match s { .Circle(r) => 3.14 * r * r, .Rect(w, h) => w * h, .Empty => 0.0 }
 ```
 
-Enums may be generic and have methods. Enum values are immutable.
+Enums may be generic and have methods. Enum values are immutable. When no variant has a payload,
+`E.values()` returns every variant in declaration order (`List[E]`), unless the enum declares its own
+static `values`; on an enum with payloads it is an error (E0367).
 
 `extend T { fn ... }` adds methods to an existing type (`String`, `List[T]`, a user class). Extensions
 resolve statically and are visible only in modules that declare or import them (`import m` brings
@@ -400,8 +426,16 @@ Annotate the parameter to use any of these.
 - Recoverable errors use `Result[T, E]`, `Ok(v)`, `Err(e)` and `?`. There are no exceptions.
 - `panic(msg)`, failed `assert(cond, msg)`, out-of-bounds indexing, `x!` on nil, integer division by zero
   and ownership violations panic. A panic unwinds only the current thread. In the main thread it prints the
-  message and a stack trace to stderr and exits with status 101.
-- `Thread.join` returns `Result[T, String]`: `Err` carries the panic message.
+  message and a stack trace to stderr and exits with status 101. Trace frames name functions, `<main>`
+  for the entry file's top level, `<block in f>`, `<spawn in f>` and `<parallel block in f>` (a
+  `par_*` block, whichever thread ran it).
+- `Thread.join` returns `Result[T, String]`: `Err` carries the panic message. A thread that panicked and
+  was never joined is reported, with its trace, on stderr when the program ends.
+- Running out of memory panics with a message starting `MemoryError:` where the runtime can see it coming:
+  a single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,
+  `s * n` or `s.ljust(n)` with a huge `n`, and, when `CATX_MAX_HEAP` is set, a collection that finds more
+  live data than the limit (the next thread to reach a safepoint panics). The allocator failing anywhere
+  else still aborts the process.
 
 ## 8. Concurrency
 
@@ -429,6 +463,8 @@ Captured variables inside `spawn` and `par_*` blocks are copied (they cannot be 
 reassigned); moving a value (`move x`, `spawn move`) makes `x` unusable until reassigned. Both apply
 to every local the compiler knows refers to the same object (`b = a`). Aliases it cannot see, such as
 an object also stored in a field or list, are caught at run time by the ownership checks below.
+Only locals and fresh literals can be moved; a literal has no other reference, so `move` on it
+(`Mutex.new(move ["hits": 0])`) is accepted and optional.
 At runtime every object is owned (by one thread), frozen or shared. Touching another thread's owned
 object panics with `OwnershipError`; under `catx run --promote-on-access` the object is promoted to
 shared instead and a warning is logged. Single operations on shared objects are atomic; compound ones
@@ -479,7 +515,8 @@ OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse`
 ## 9. Dyn
 
 `Dyn` values come from `Json.parse` and other dynamic sources. Any operation on `Dyn` (`d["k"]`, `d[0]`,
-`d.method(...)`, arithmetic) is checked at runtime and yields `Dyn`. Convert with `as?`:
+`d.method(...)`, arithmetic) is checked at runtime and yields `Dyn`. As a missing object key gives `nil`, so does a list index out
+of range (`doc["users"][5]`). Convert with `as?`:
 `name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. JSON objects parse to records that behave exactly like `Dict[String, Dyn]` (`as? Dict[String, Dyn]` succeeds); records parsed with the same keys share a hidden class, so `d.name` is served from a per-site cache. `Json.stringify` writes object keys in sorted order and integers of any size (including big integers) as JSON numbers; it writes a class instance as an object of its fields, or as whatever its `to_json` method returns (`Deque` writes an array).
 
 ## 10. Tooling

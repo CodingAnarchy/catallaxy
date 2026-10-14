@@ -31,6 +31,7 @@ impl Checker {
             ret,
             scopes: vec![FxHashMap::default()],
             narrow: vec![FxHashMap::default()],
+            path_narrow: vec![FxHashMap::default()],
             loops: Vec::new(),
             captures: Vec::new(),
             returns: Vec::new(),
@@ -45,18 +46,25 @@ impl Checker {
         let c = self.ctx();
         c.scopes.push(FxHashMap::default());
         c.narrow.push(FxHashMap::default());
+        c.path_narrow.push(FxHashMap::default());
     }
 
     pub fn pop_scope(&mut self) {
         let c = self.ctx();
         c.scopes.pop();
         c.narrow.pop();
+        c.path_narrow.pop();
     }
 
     pub fn declare_local(&mut self, name: &str, ty: TyId, span: Span) -> LocalId {
         let id = self.new_local(name, ty, span, false);
         self.ctx().scopes.last_mut().unwrap().insert(name.to_string(), id);
         id
+    }
+
+    /// A local of the current context by name, without recording a capture.
+    pub fn lookup_local_quiet(&self, name: &str) -> Option<LocalId> {
+        self.ctxs.last()?.scopes.iter().rev().find_map(|s| s.get(name).copied())
     }
 
     /// Resolves a local by name, recording captures across closure boundaries.
@@ -105,14 +113,43 @@ impl Checker {
         self.locals[id as usize].ty
     }
 
-    pub fn narrow(&mut self, id: LocalId, ty: TyId) {
-        self.ctx().narrow.last_mut().unwrap().insert(id, ty);
+    pub fn narrow(&mut self, key: impl Into<NKey>, ty: TyId) {
+        match key.into() {
+            NKey::Local(id) => {
+                self.ctx().narrow.last_mut().unwrap().insert(id, ty);
+            }
+            NKey::Path(p, stable) => {
+                self.ctx().path_narrow.last_mut().unwrap().insert(p, (ty, stable));
+            }
+        }
     }
 
+    /// Forgets what is known about a reassigned local, and about field paths rooted at it.
     pub fn clear_narrowing(&mut self, id: LocalId) {
         for layer in self.ctx().narrow.iter_mut() {
             layer.remove(&id);
         }
+        self.clear_paths(|p, _| p.0 == id);
+    }
+
+    /// The narrowed type of a field path in the current context, if any.
+    pub fn path_ty(&self, p: &FieldPath) -> Option<TyId> {
+        let c = self.ctxs.last()?;
+        c.path_narrow.iter().rev().find_map(|layer| layer.get(p).map(|&(t, _)| t))
+    }
+
+    /// Drops field-path narrowings matching `pred(path, stable)` in the current context.
+    pub fn clear_paths(&mut self, pred: impl Fn(&FieldPath, bool) -> bool) {
+        let Some(c) = self.ctxs.last_mut() else { return };
+        for layer in c.path_narrow.iter_mut() {
+            layer.retain(|p, &mut (_, stable)| !pred(p, stable));
+        }
+    }
+
+    /// A call may change any field: drop the field-path narrowings that are not stable.
+    pub fn clear_unstable_paths(&mut self) {
+        self.path_epoch += 1;
+        self.clear_paths(|_, stable| !stable);
     }
 
     // ---- bodies ------------------------------------------------------------------------------
@@ -135,6 +172,7 @@ impl Checker {
         for g in 0..self.globals.len() {
             self.ensure_global(g as GlobalId);
         }
+        self.check_local_keys();
     }
 
     pub fn check_fn_body(&mut self, fid: FnId) {
@@ -322,6 +360,29 @@ impl Checker {
             self.locals[l as usize].ty = r;
         }
         self.ctxs.pop();
+    }
+
+    /// E0373 for user variables (and parameters) holding a `Dict`/`Set` with mutable keys,
+    /// once every body (closures included) has been checked and their types are known.
+    fn check_local_keys(&mut self) {
+        let mut fids: Vec<FnId> = self.fn_locals.keys().copied().collect();
+        fids.sort_unstable();
+        for fid in fids {
+            let f = &self.fns[fid as usize];
+            // Generated constructors repeat the fields, which are checked themselves.
+            if self.mods[f.module as usize].is_prelude || matches!(f.synth, Synth::Constructor(_)) {
+                continue;
+            }
+            for l in self.fn_locals[&fid].clone() {
+                let info = &self.locals[l as usize];
+                if info.name == "self" || info.name.starts_with('$') {
+                    continue;
+                }
+                let (what, ty, span) = (format!("`{}`", info.name), info.ty, info.span);
+                let ty = self.types.resolve(ty);
+                self.check_mutable_key(&what, ty, span);
+            }
+        }
     }
 
     /// Checks a constant's or module variable's initializer (once).

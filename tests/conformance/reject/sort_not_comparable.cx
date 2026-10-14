@@ -1,0 +1,7 @@
+# expect: E0311, E0368, E0316
+# Sorting needs `Comparable` items (or sort keys); a tuple is comparable only if its elements are.
+class K { v: Int }
+xs = [K.new(2), K.new(1)]
+a = xs.sorted()
+b = xs.sort_by { |k| (k.v, k) }
+c = (1, K.new(1)) < (1, K.new(2))
