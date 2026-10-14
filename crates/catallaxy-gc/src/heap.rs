@@ -401,7 +401,10 @@ impl PagePool {
     }
 
     fn new_segment(&self) {
-        let mut base = map_segment();
+        // Once the OS has refused memory, segments come from the reserve until a collection has
+        // looked again: mapping more would take the room the headroom block just made.
+        let refused = self.reserve_short() || !headroom_held();
+        let mut base = if refused { ptr::null_mut() } else { map_segment() };
         if base.is_null() {
             base = self.draw_reserve();
         }
