@@ -1488,6 +1488,13 @@ impl<'a> Codegen<'a> {
                         self.emit(st, encode(Op::ToS, r, r, 0));
                     }
                 }
+                StrPart::Fmt(x, spec, _) => {
+                    self.expr_to(st, x, r);
+                    let [w0, w1] = spec.encode();
+                    self.emit(st, encode(Op::Format, r, r, 0));
+                    self.emit(st, w0);
+                    self.emit(st, w1);
+                }
             }
         }
         self.emit(st, encode(Op::Concat, dst, base, parts.len() as u8));
@@ -2308,7 +2315,7 @@ fn peephole(code: &mut [u32]) {
         let mut pc = 0;
         while pc < code.len() {
             v.push(pc);
-            pc += 1 + Op::from_u8(op_of(code[pc])).has_data() as usize;
+            pc += 1 + Op::from_u8(op_of(code[pc])).data_len();
         }
         v
     };

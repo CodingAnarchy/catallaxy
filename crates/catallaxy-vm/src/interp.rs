@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use catallaxy_gc::{Header, ObjState, RootSource, ThreadRecord, Tracer};
 use catallaxy_runtime::class::{class_of, heap_class, ids, ObjKind, BUILTINS};
+use catallaxy_runtime::fmtspec::{self, FormatSpec};
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ops::{self, Interop};
 use catallaxy_runtime::ownership::{self, check_read, check_write, Access};
@@ -108,6 +109,16 @@ impl RootSource for VmRoots {
             ops_mark(t, v);
         }
     }
+}
+
+/// The panic raised when a collection finds more live data than `CATX_MAX_HEAP` allows.
+#[cold]
+fn heap_limit_error() -> Trap {
+    Trap::Panic(format!(
+        "MemoryError: {:.1} MB live after collection, over the CATX_MAX_HEAP limit of {:.1} MB",
+        catallaxy_gc::stats::live_bytes() as f64 / 1e6,
+        catallaxy_gc::limits::max_heap().unwrap_or(0) as f64 / 1e6
+    ))
 }
 
 #[inline(always)]
@@ -250,6 +261,13 @@ impl Vm {
         unsafe { *self.stack.add(i) = v }
     }
 
+    /// Sets stack slots `lo..hi` to nil, so values left by a popped frame are not roots.
+    fn clear_regs(&mut self, lo: usize, hi: usize) {
+        for i in lo..hi.min(self.stack_cap) {
+            self.set_reg(i, Value::NIL);
+        }
+    }
+
     /// A handle scope for native code: values rooted in it survive collections triggered by
     /// calls back into the VM, and are released when the scope is dropped.
     pub fn handle_scope(&mut self) -> catallaxy_runtime::HandleScope<'static> {
@@ -352,6 +370,7 @@ impl Vm {
                     self.unwind_to(idx + 1);
                     if kind == UNWIND_RETURN {
                         let f = self.rs().frames.pop().unwrap();
+                        self.clear_regs(f.base, f.base + f.func.nregs);
                         self.release_locks();
                         if idx == stop {
                             return Ok(value);
@@ -380,6 +399,12 @@ impl Vm {
 
     /// Pops frames down to `depth`, releasing locks they held.
     fn unwind_to(&mut self, depth: usize) {
+        if let Some(f) = self.rs().frames.get(depth) {
+            // The popped frames' registers would otherwise stay reachable from the scan of a
+            // lower frame's register window (see `return_value!`).
+            let (lo, hi) = (f.base, self.stack_top());
+            self.clear_regs(lo, hi);
+        }
         self.rs().frames.truncate(depth);
         self.release_locks();
     }
@@ -486,6 +511,16 @@ impl Vm {
                 regs = unsafe { self.stack.add(fr.base) };
             }};
         }
+        // A safepoint's slow path (the frame's pc is saved): takes part in a pending collection,
+        // then panics with a MemoryError if the heap is over `CATX_MAX_HEAP`.
+        macro_rules! poll_slow {
+            () => {{
+                catallaxy_gc::safepoint_slow(&self.m.rec);
+                if catallaxy_gc::limits::take_over_limit() {
+                    return Err(heap_limit_error());
+                }
+            }};
+        }
         // Pushes a bytecode frame for `f` whose arguments are already at absolute slot `base`.
         macro_rules! enter {
             ($f:expr, $base:expr, $ret:expr, $closure:expr, $nargs:expr) => {{
@@ -510,14 +545,22 @@ impl Vm {
                 pc = 0;
                 regs = unsafe { self.stack.add(base) };
                 if unsafe { (*poll).load(Ordering::Relaxed) } {
-                    catallaxy_gc::safepoint_slow(&self.m.rec);
+                    poll_slow!();
                 }
             }};
         }
         // Pops the current frame (its return slot is already in `fr`) and resumes the caller.
+        //
+        // The caller's registers above the return slot are cleared: the callee and its callees
+        // left values there, and the collector scans the caller's whole register window, so
+        // they would otherwise keep dead objects alive. The compiler allocates registers like a
+        // stack and a call's register is the first free one, so none of them is live in the
+        // caller (a bytecode callee overwrites them on entry anyway). Slots above the caller's
+        // window are not scanned and are reset by the next frame that covers them.
         macro_rules! return_value {
             ($v:expr) => {{
                 let v: Value = $v;
+                let ret = fr.ret;
                 let frames = frames!();
                 frames.pop();
                 if unsafe { !(*rs).held_locks.is_empty() } {
@@ -526,8 +569,14 @@ impl Vm {
                 if frames!().len() == stop {
                     return Ok(v);
                 }
-                unsafe { *self.stack.add(fr.ret) = v };
                 load_frame!();
+                let end = fr.base + fr.func.nregs;
+                let mut i = ret + 1;
+                while i < end {
+                    unsafe { *self.stack.add(i) = Value::NIL };
+                    i += 1;
+                }
+                unsafe { *self.stack.add(ret) = v };
             }};
         }
         macro_rules! call_native {
@@ -835,17 +884,17 @@ impl Vm {
                 // ---- strings ----
                 Op::Concat => {
                     let (b, n) = (b_of(w), c_of(w));
-                    let mut s = String::new();
                     for i in 0..n {
-                        match str_of(r!(b + i)) {
-                            Some(x) => s.push_str(x),
-                            None => {
-                                save!();
-                                return Err(Trap::Panic("internal error: Concat of a non-string".into()));
-                            }
+                        if str_of(r!(b + i)).is_none() {
+                            save!();
+                            return Err(Trap::Panic("internal error: Concat of a non-string".into()));
                         }
                     }
-                    let v = self.m.alloc_str(&s);
+                    // Allocation never collects, so the parts stay valid while they are copied.
+                    let v = self.m.alloc_concat(n, |i| {
+                        let x = r!(b + i);
+                        unsafe { as_str_obj(x) }
+                    });
                     set!(a, v);
                 }
                 Op::ToS => {
@@ -859,6 +908,14 @@ impl Vm {
                         set!(a, v);
                     }
                 }
+                Op::Format => {
+                    let spec = FormatSpec::decode([data!(), data!()]);
+                    let x = r!(b_of(w));
+                    save!();
+                    let s = tri!(fmtspec::format_value(self, x, &spec));
+                    let v = self.m.alloc_str(&s);
+                    set!(a, v);
+                }
 
                 // ---- control ----
                 Op::Jmp => {
@@ -866,7 +923,7 @@ impl Vm {
                     pc = (pc as isize + off) as usize;
                     if off < 0 && unsafe { (*poll).load(Ordering::Relaxed) } {
                         save!();
-                        catallaxy_gc::safepoint_slow(&self.m.rec);
+                        poll_slow!();
                     }
                 }
                 Op::JNLtI => {
@@ -1147,11 +1204,8 @@ impl Vm {
                 // ---- collections ----
                 Op::NewList => {
                     let (b, n) = (b_of(w), c_of(w));
-                    let mut items = Vec::with_capacity(n.max(4));
-                    for i in 0..n {
-                        items.push(r!(b + i));
-                    }
-                    let v = self.m.alloc_list(items);
+                    let items = unsafe { std::slice::from_raw_parts(regs.add(b), n) };
+                    let v = self.m.alloc_list_from_slice(items, n.max(4));
                     set!(a, v);
                 }
                 Op::NewDict => {
@@ -1364,7 +1418,7 @@ impl Vm {
                 Op::Safepoint => {
                     if unsafe { (*poll).load(Ordering::Relaxed) } {
                         save!();
-                        catallaxy_gc::safepoint_slow(&self.m.rec);
+                        poll_slow!();
                     }
                 }
             }

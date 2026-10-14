@@ -107,19 +107,125 @@ pub struct ImplicitSig {
 
 #[derive(Clone, Debug)]
 pub struct OpenInfo {
+    /// The untyped parameter this open type is (or is derived from).
     pub param_name: String,
+    /// For a derived open, the expression it stands for (`p.name`, `p + _`); `None` for the
+    /// parameter itself.
+    pub label: Option<String>,
     pub reqs: Vec<OpenReq>,
     pub uppers: Vec<(TyId, Span)>,
 }
 
+/// One structural requirement on an implicit-generic parameter (or on a value derived from one),
+/// recorded with the types the body uses it at. Each call site checks every requirement against
+/// the argument's type with the same rules as typed code, and maps `ret` to the type it produces.
 #[derive(Clone, Debug)]
 pub enum OpenReq {
-    Method { name: String, args: Vec<TyId>, named: Vec<Option<String>>, ret: TyId, span: Span },
-    BinOp { op: ast::BinOp, rhs: TyId, ret: TyId, span: Span },
-    Unary { op: ast::UnOp, ret: TyId, span: Span },
-    Index { args: Vec<TyId>, ret: TyId, span: Span },
-    Iter { elem: TyId, span: Span },
-    Call { args: Vec<TyId>, ret: TyId, span: Span },
+    /// `x.name(args)` or `x.name`. `named` holds argument labels (`None` for positional) for the
+    /// leading `named.len()` entries of `args`; with `block`, the last entry is a trailing block.
+    Method {
+        name: String,
+        args: Vec<TyId>,
+        named: Vec<Option<String>>,
+        block: bool,
+        ret: TyId,
+        span: Span,
+    },
+    /// `x op rhs`.
+    BinOp {
+        op: ast::BinOp,
+        rhs: TyId,
+        ret: TyId,
+        span: Span,
+    },
+    /// `lhs op x` where `lhs` is not open.
+    BinOpRhs {
+        op: ast::BinOp,
+        lhs: TyId,
+        ret: TyId,
+        span: Span,
+    },
+    Unary {
+        op: ast::UnOp,
+        ret: TyId,
+        span: Span,
+    },
+    Index {
+        args: Vec<TyId>,
+        ret: TyId,
+        span: Span,
+    },
+    /// `x[index] = value` (or `x[index] op= value`).
+    SetIndex {
+        index: TyId,
+        value: TyId,
+        op: Option<ast::BinOp>,
+        span: Span,
+    },
+    Iter {
+        elem: TyId,
+        span: Span,
+    },
+    Call {
+        args: Vec<TyId>,
+        ret: TyId,
+        span: Span,
+    },
+}
+
+impl OpenReq {
+    /// The open type standing for this requirement's result, if any.
+    pub fn result(&self) -> Option<TyId> {
+        match self {
+            OpenReq::Method { ret, .. }
+            | OpenReq::BinOp { ret, .. }
+            | OpenReq::BinOpRhs { ret, .. }
+            | OpenReq::Unary { ret, .. }
+            | OpenReq::Index { ret, .. }
+            | OpenReq::Call { ret, .. } => Some(*ret),
+            OpenReq::Iter { elem, .. } => Some(*elem),
+            OpenReq::SetIndex { .. } => None,
+        }
+    }
+
+    /// The types this requirement is used at (its inputs, not its result).
+    pub fn inputs(&self) -> Vec<TyId> {
+        match self {
+            OpenReq::Method { args, .. } | OpenReq::Index { args, .. } | OpenReq::Call { args, .. } => args.clone(),
+            OpenReq::BinOp { rhs, .. } => vec![*rhs],
+            OpenReq::BinOpRhs { lhs, .. } => vec![*lhs],
+            OpenReq::SetIndex { index, value, .. } => vec![*index, *value],
+            OpenReq::Unary { .. } | OpenReq::Iter { .. } => Vec::new(),
+        }
+    }
+
+    /// The same requirement with its inputs replaced (in `inputs` order) and its result `ret`.
+    pub fn with(&self, inputs: &[TyId], ret: TyId) -> OpenReq {
+        let mut r = self.clone();
+        match &mut r {
+            OpenReq::Method { args, ret: rr, .. }
+            | OpenReq::Index { args, ret: rr, .. }
+            | OpenReq::Call { args, ret: rr, .. } => {
+                args.copy_from_slice(inputs);
+                *rr = ret;
+            }
+            OpenReq::BinOp { rhs, ret: rr, .. } => {
+                *rhs = inputs[0];
+                *rr = ret;
+            }
+            OpenReq::BinOpRhs { lhs, ret: rr, .. } => {
+                *lhs = inputs[0];
+                *rr = ret;
+            }
+            OpenReq::SetIndex { index, value, .. } => {
+                *index = inputs[0];
+                *value = inputs[1];
+            }
+            OpenReq::Unary { ret: rr, .. } => *rr = ret,
+            OpenReq::Iter { elem, .. } => *elem = ret,
+        }
+        r
+    }
 }
 
 #[derive(Clone, Debug)]

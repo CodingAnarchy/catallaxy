@@ -1,4 +1,5 @@
-//! End-to-end tests of `catx lsp`, `catx repl`, `catx fmt` and `catx check`.
+//! End-to-end tests of `catx lsp`, `catx repl`, `catx fmt` and `catx check`, and of `catx run`
+//! under a fixed `TZ`.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -390,6 +391,100 @@ fn lsp_references_and_rename() {
     lsp.finish();
 }
 
+const ALIAS_MAIN: &str = "import alias_geo as g
+p: g.Point = g.Point.new(1)
+puts(g.origin().sum + p.sum)
+";
+
+#[test]
+fn lsp_import_alias() {
+    let (mut lsp, _) = Lsp::init();
+    let geo = lsp.open("alias_geo.cx", GEO);
+    let main = lsp.open("alias_main.cx", ALIAS_MAIN);
+    let t = ALIAS_MAIN;
+    let at = |p: Value| json!({"textDocument": {"uri": main}, "position": p});
+
+    // Go to definition through the alias.
+    let d = lsp.request(2, "textDocument/definition", at(pos(t, 2, "origin", 0)));
+    assert_eq!(d["result"]["uri"], json!(geo), "{d}");
+    assert_eq!(d["result"]["range"]["start"], pos(GEO, 5, "origin", 0), "{d}");
+    let d = lsp.request(6, "textDocument/definition", at(pos(t, 1, "Point", 1)));
+    assert_eq!(d["result"]["uri"], json!(geo), "{d}");
+    assert_eq!(d["result"]["range"]["start"]["line"], 0, "{d}");
+
+    // References and rename of the class cover the uses through the alias.
+    let mut p = at(pos(t, 1, "Point", 0));
+    p["context"] = json!({"includeDeclaration": true});
+    let r = ref_spots(&lsp.request(3, "textDocument/references", p));
+    let mut want = vec![
+        spot(&geo, pos(GEO, 0, "Point", 0)),
+        spot(&geo, pos(GEO, 5, "Point", 0)),
+        spot(&geo, pos(GEO, 5, "Point", 1)),
+        spot(&main, pos(t, 1, "Point", 0)),
+        spot(&main, pos(t, 1, "Point", 1)),
+    ];
+    want.sort();
+    assert_eq!(r, want);
+    let mut p = at(pos(t, 1, "Point", 1));
+    p["newName"] = json!("Pt");
+    assert_eq!(edit_spots(&lsp.request(4, "textDocument/rename", p), "Pt"), want);
+
+    // Completion after the alias lists the module's items.
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": main, "version": 2}, "contentChanges": [{"text": format!("{t}g.\n")}]
+    }}));
+    let c = lsp.request(5, "textDocument/completion", at(json!({"line": 3, "character": 2})));
+    let labels: Vec<&str> = c["result"].as_array().unwrap().iter().filter_map(|i| i["label"].as_str()).collect();
+    assert!(labels.contains(&"origin") && labels.contains(&"Point"), "{labels:?}");
+    lsp.finish();
+}
+
+const IFACE: &str = "interface Shape {
+  fn area(self) -> Float
+  fn twice(self) -> Float { self.area() * 2.0 }
+}
+class Sq {
+  s: Float
+  fn area(self) -> Float { self.s * self.s }
+}
+xs: List[Shape] = [Sq.new(3.0)]
+puts(xs[0].area() + Sq.new(1.0).s)
+";
+
+/// From a field's declaration (where the generated constructor's parameter also sits), and
+/// calls dispatched through an interface (which name the interface member).
+#[test]
+fn lsp_field_declarations_and_interface_calls() {
+    let (mut lsp, _) = Lsp::init();
+    let uri = lsp.open("nav_iface.cx", IFACE);
+    let t = IFACE;
+    let at = |p: Value| json!({"textDocument": {"uri": uri}, "position": p});
+    let refs = |lsp: &mut Lsp, id: i64, p: Value| {
+        let mut params = at(p);
+        params["context"] = json!({"includeDeclaration": true});
+        ref_spots(&lsp.request(id, "textDocument/references", params))
+    };
+    let field = vec![spot(&uri, pos(t, 5, "s", 0)), spot(&uri, pos(t, 6, ".s", 0)), spot(&uri, pos(t, 6, ".s", 1))];
+    let mut field: Vec<_> = field.into_iter().map(|(u, l, c)| if l == 6 { (u, l, c + 1) } else { (u, l, c) }).collect();
+    let mut last = spot(&uri, pos(t, 9, ".s", 0));
+    last.2 += 1;
+    field.push(last);
+    assert_eq!(refs(&mut lsp, 2, pos(t, 5, "s", 0)), field);
+
+    let member =
+        vec![spot(&uri, pos(t, 1, "area", 0)), spot(&uri, pos(t, 2, "area", 0)), spot(&uri, pos(t, 9, "area", 0))];
+    assert_eq!(refs(&mut lsp, 3, pos(t, 9, "area", 0)), member);
+    assert_eq!(refs(&mut lsp, 4, pos(t, 1, "area", 0)), member);
+    // The class's own method is a separate symbol (interfaces are structural).
+    assert_eq!(refs(&mut lsp, 5, pos(t, 6, "area", 0)), vec![spot(&uri, pos(t, 6, "area", 0))]);
+
+    let h = lsp.request(6, "textDocument/hover", at(pos(t, 9, "area", 0)));
+    assert!(h["result"]["contents"]["value"].as_str().unwrap().contains("fn Shape.area(self) -> Float"), "{h}");
+    let d = lsp.request(7, "textDocument/definition", at(pos(t, 2, "area", 0)));
+    assert_eq!(d["result"]["range"]["start"], pos(t, 1, "area", 0), "{d}");
+    lsp.finish();
+}
+
 #[test]
 fn lsp_signature_help() {
     let (mut lsp, caps) = Lsp::init();
@@ -524,6 +619,38 @@ fn lsp_inlay_hints() {
 }
 
 #[test]
+fn lsp_format_spec_interpolation() {
+    let (mut lsp, _) = Lsp::init();
+    let text =
+        "price = 2.5\nputs(\"#{price:>8.2f}\")\nputs(\"#{[1].map { |v| v * 2 }.length:03}\")\nputs(\"#{\"s\":.2f}\")\n";
+    let (uri, _) = file_uri("fmt_spec.cx");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+        "textDocument": {"uri": uri, "languageId": "catallaxy", "version": 1, "text": text}
+    }}));
+    let diags = lsp.wait("publishDiagnostics", |v| v["method"] == "textDocument/publishDiagnostics");
+    let list = diags["params"]["diagnostics"].as_array().unwrap();
+    assert!(list.iter().any(|d| d["code"] == "E0380" && d["range"]["start"]["line"] == 3), "{diags}");
+    assert_eq!(list.len(), 1, "{diags}");
+    // Hover over `price` inside the formatted interpolation.
+    let h = lsp.request(
+        2,
+        "textDocument/hover",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 1, "character": 10}}),
+    );
+    let value = h["result"]["contents"]["value"].as_str().unwrap_or_default();
+    assert!(value.contains("price: Float"), "{h}");
+    // Block parameters inside a formatted interpolation still get inlay hints.
+    let r = lsp.request(
+        3,
+        "textDocument/inlayHint",
+        json!({"textDocument": {"uri": uri}, "range": {"start": {"line": 2, "character": 0}, "end": {"line": 3, "character": 0}}}),
+    );
+    let labels: Vec<&str> = r["result"].as_array().unwrap().iter().filter_map(|h| h["label"].as_str()).collect();
+    assert!(labels.contains(&": Int"), "{r}");
+    lsp.finish();
+}
+
+#[test]
 fn lsp_document_and_workspace_symbols() {
     let (mut lsp, caps) = Lsp::init();
     assert_eq!(caps["documentSymbolProvider"], true, "{caps}");
@@ -630,6 +757,22 @@ fn fmt_and_check_walk_directories() {
     let (code, _, err) = catx(&["check".as_ref(), dir.as_os_str()]);
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("E0300"), "{err}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn local_offset_follows_tz() {
+    // `TZ=XYZ-5:30` (POSIX and the Windows CRT agree) is a fixed zone 5h30m east of UTC.
+    let dir = scratch_dir("tz");
+    let prog = dir.join("tz.cx");
+    std::fs::write(&prog, "t = DateTime.of(2024, 7, 1, 12)\nputs(t.to_local())\nputs(DateTime.now().offset)\n")
+        .unwrap();
+    let cases = [("XYZ-5:30", "2024-07-01T17:30:00+05:30\n19800\n"), ("XYZ+3", "2024-07-01T09:00:00-03:00\n-10800\n")];
+    for (tz, want) in cases {
+        let out = Command::new(CATX).arg("run").arg(&prog).env("TZ", tz).output().expect("run catx");
+        let got = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+        assert_eq!(got, want, "TZ={tz}: {}", String::from_utf8_lossy(&out.stderr));
+    }
     std::fs::remove_dir_all(&dir).ok();
 }
 

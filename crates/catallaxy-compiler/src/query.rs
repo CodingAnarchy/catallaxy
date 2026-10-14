@@ -44,7 +44,7 @@ pub fn children(e: &Expr) -> Vec<&Expr> {
         | ExprKind::Error => {}
         ExprKind::Str(parts) => {
             for p in parts {
-                if let StrPart::Expr(x) = p {
+                if let StrPart::Expr(x) | StrPart::Fmt(x, ..) = p {
                     out.push(x);
                 }
             }
@@ -323,7 +323,7 @@ pub fn called_fn(ck: &Checker, e: &Expr) -> Option<u32> {
     match ck.calls.get(&e.id)? {
         CallRes::Fn { dispatch, .. } => match dispatch {
             Dispatch::Static(f) | Dispatch::Virtual(f, _) => Some(*f),
-            Dispatch::Dynamic(_, f) => *f,
+            Dispatch::Dynamic(_, f) => f.or_else(|| ck.dyn_targets.get(&e.id).copied()),
         },
         CallRes::FnValue(f) => Some(*f),
         CallRes::Construct { ctor, .. } => Some(*ctor),
@@ -398,6 +398,15 @@ pub fn definition(ck: &Checker, m: ModId, offset: u32) -> Option<Span> {
             NameRes::Variant(x, v) => ck.enums[*x as usize].variants[*v as usize].span,
             NameRes::Module(_) => return None,
         },
+        // `module.Type` used as a path.
+        ExprKind::Member { name, .. } if contains(name.span, offset) && ck.names.contains_key(&e.id) => {
+            match ck.names.get(&e.id)? {
+                NameRes::Class(c) => ck.classes.get(c)?.span,
+                NameRes::Enum(x) => ck.enums[*x as usize].span,
+                NameRes::Iface(x) => ck.ifaces[*x as usize].span,
+                _ => return None,
+            }
+        }
         ExprKind::Member { recv, name, .. } if contains(name.span, offset) => match ck.calls.get(&e.id)? {
             CallRes::Field { index, .. } => {
                 let t = ck.types.shallow_resolve(*ck.expr_ty.get(&recv.id)?);

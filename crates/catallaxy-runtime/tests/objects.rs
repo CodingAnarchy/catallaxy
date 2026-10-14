@@ -2,90 +2,65 @@
 //! with collections running in between. Run under Miri as part of the safety gates.
 
 use std::cell::UnsafeCell;
-use std::sync::Mutex as StdMutex;
 
-use catallaxy_gc::{enter_native, install, leave_native, register_thread, unregister_thread, RootSource, Tracer};
 use catallaxy_runtime::dict::DictTable;
 use catallaxy_runtime::object::*;
-use catallaxy_runtime::ops::{self, Interop};
+use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership::{self, Access};
-use catallaxy_runtime::{Mutator, RtResult, Sym, Value};
+use catallaxy_runtime::Value;
 
-/// A minimal host: one mutator whose roots are its handle stack.
-struct Host {
-    /// Shared with the collector's root scan, so owned through a raw pointer.
-    raw: *mut Mutator,
-    m: &'static mut Mutator,
-    finished: bool,
-}
+mod common;
+use common::*;
 
-struct HandleRoots(*const Vec<Value>);
-impl RootSource for HandleRoots {
-    fn trace_roots(&self, t: &mut Tracer) {
-        for &v in unsafe { &*self.0 } {
-            if v.is_ptr() {
-                t.mark(v.as_ptr());
-            }
+#[test]
+fn lists_built_from_vecs_and_slices() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let strs: Vec<Value> = (0..5).map(|i| h.m.alloc_str(&format!("v{i}"))).collect();
+    // A vector with spare capacity: its allocation becomes the list's buffer.
+    let mut items = Vec::with_capacity(9);
+    items.extend_from_slice(&strs);
+    let a = h.m.alloc_list(items);
+    let ha = h.m.root(a);
+    // A vector with no spare capacity, an empty one with capacity, and one with none.
+    let b = h.m.alloc_list(strs.clone());
+    let hb = h.m.root(b);
+    let c = h.m.alloc_list(Vec::with_capacity(3));
+    let hc = h.m.root(c);
+    let d = h.m.alloc_list(Vec::new());
+    let hd = h.m.root(d);
+    // Copies of a slice, with and without room to spare.
+    let e = h.m.alloc_list_from_slice(&strs[1..4], 8);
+    let he = h.m.root(e);
+    let f = h.m.alloc_list_from_slice(&[], 0);
+    let hf = h.m.root(f);
+    h.gc();
+    h.gc();
+    let names = |v: Value| -> Vec<String> {
+        unsafe { as_list(v) }.to_vec().iter().map(|&s| str_of(s).unwrap().to_string()).collect()
+    };
+    let (a, b, c, d, e, f) = (h.m.get(ha), h.m.get(hb), h.m.get(hc), h.m.get(hd), h.m.get(he), h.m.get(hf));
+    assert_eq!(names(a), ["v0", "v1", "v2", "v3", "v4"]);
+    assert_eq!(unsafe { as_list(a) }.capacity(), 9);
+    assert_eq!(names(b), ["v0", "v1", "v2", "v3", "v4"]);
+    assert_eq!(unsafe { as_list(c) }.capacity(), 3);
+    assert!(unsafe { as_list(c) }.is_empty() && unsafe { as_list(d) }.is_empty());
+    assert_eq!(names(e), ["v1", "v2", "v3"]);
+    assert_eq!(unsafe { as_list(e) }.capacity(), 8);
+    assert!(unsafe { as_list(f) }.is_empty());
+    // Spare slots are initialized: pushing into them and growing past them works.
+    for l in [a, b, c, d, e, f] {
+        for i in 0..12 {
+            let s = h.m.alloc_str(&format!("p{i}"));
+            unsafe { as_list(l).push(s, Access::Local) };
         }
     }
-}
-
-impl Interop for Host {
-    fn mutator(&mut self) -> &mut Mutator {
-        self.m
-    }
-    fn call_method(&mut self, _: Value, _: Sym, _: &[Value]) -> RtResult<Option<Value>> {
-        Ok(None)
-    }
-}
-
-impl Host {
-    fn new() -> Self {
-        let rec = register_thread();
-        let raw = Box::into_raw(Box::new(Mutator::new(rec)));
-        let roots: Box<dyn RootSource> = Box::new(HandleRoots(unsafe { (*raw).handles_ptr() }));
-        let m = unsafe { &mut *raw };
-        unsafe { install(&m.rec, Box::into_raw(roots), m.heap_ptr()) };
-        leave_native(&m.rec);
-        Host { raw, m, finished: false }
-    }
-    fn gc(&mut self) {
-        catallaxy_gc::collect_now(&self.m.rec);
-    }
-    fn minor(&mut self) {
-        catallaxy_gc::collect_minor(&self.m.rec);
-    }
-    fn finish(mut self) {
-        self.unregister();
-    }
-    fn unregister(&mut self) {
-        if std::mem::replace(&mut self.finished, true) {
-            return;
-        }
-        enter_native(&self.m.rec);
-        unregister_thread(&self.m.rec);
-        self.m.release_pages();
-        // The mutator is intentionally leaked: the collector may still hold its root pointer.
-        let _ = self.raw;
-    }
-}
-
-impl Drop for Host {
-    /// Also runs when a test thread panics: a thread left registered as running would make
-    /// every later collection wait for it forever, turning one failure into a hung test run.
-    fn drop(&mut self) {
-        self.unregister();
-    }
-}
-
-static SERIAL: StdMutex<()> = StdMutex::new(());
-
-fn n(i: usize) -> usize {
-    if cfg!(miri) {
-        (i / 50).max(3)
-    } else {
-        i
-    }
+    h.gc();
+    let a = h.m.get(ha);
+    assert_eq!(names(a).len(), 17);
+    assert_eq!(names(a)[16], "p11");
+    assert_eq!(names(h.m.get(hc)).len(), 12);
+    h.finish();
 }
 
 #[test]
@@ -460,6 +435,55 @@ fn minor_collection_frees_young_garbage_and_keeps_roots() {
     let keep = h.m.get(hk);
     assert_eq!(str_of(keep), Some("kept"));
     assert!(!young(keep), "survivors are promoted");
+    h.finish();
+}
+
+#[test]
+fn root_only_large_objects_stay_young_until_the_heap_references_them() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let text = "x".repeat(4096);
+    let list = h.m.alloc_list(Vec::new());
+    let hl = h.m.root(list);
+    h.gc(); // the list is old now
+    assert!(!young(h.m.get(hl)));
+
+    // Reachable only from a root: it survives a minor collection without being promoted.
+    let s = h.m.alloc_str(&text);
+    let hs = h.m.root(s);
+    h.minor();
+    let s = h.m.get(hs);
+    assert!(young(s), "a root-only large object stays young");
+    assert_eq!(str_of(s), Some(text.as_str()));
+
+    // Stored into an old list (through the write barrier) and dropped from the roots: the next
+    // minor collection finds it through the remembered set, and promotes it.
+    ownership::write_list(h.m, h.m.get(hl), |l, access| unsafe { l.push(s, access) }).unwrap();
+    h.m.set(hs, Value::NIL);
+    let _ = h.m.alloc_str(&"garbage ".repeat(600));
+    h.minor();
+    let s = ownership::read_list(h.m, h.m.get(hl)).unwrap().get(0).unwrap();
+    assert!(!young(s), "a heap-referenced large object is promoted");
+    assert_eq!(str_of(s), Some(text.as_str()));
+
+    // Referenced by a young object as well as a root: promoted with it.
+    let s2 = h.m.alloc_str(&text);
+    let pair = h.m.alloc_tuple(&[s2]);
+    let hp = h.m.root(pair);
+    h.m.root(s2);
+    h.minor();
+    let pair = h.m.get(hp);
+    assert!(!young(pair) && !young(unsafe { as_tuple(pair) }.elems()[0]));
+
+    // A root-only large object freed once the root lets go.
+    let s3 = h.m.alloc_str(&text);
+    let h3 = h.m.root(s3);
+    h.minor();
+    assert!(young(h.m.get(h3)));
+    h.m.set(h3, Value::NIL);
+    let before = catallaxy_gc::stats::minors().3;
+    h.minor();
+    assert!(catallaxy_gc::stats::minors().3 >= before + text.len(), "freed by the next minor collection");
     h.finish();
 }
 

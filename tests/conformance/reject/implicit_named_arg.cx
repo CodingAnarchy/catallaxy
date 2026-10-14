@@ -1,0 +1,4 @@
+# expect: E0342
+class C { fn put(self, key: String, n: Int = 0) -> Int { n } }
+fn f(x) { x.put(count: 1, key: "k") }
+f(C.new())

@@ -1,0 +1,37 @@
+# CSV with quoting.
+
+text = "name,quote,n\r\n\"Smith, Ann\",\"She said \"\"hi\"\"\",1\n\nBob,\"two\nlines\",2\nEve,5\" pipe,\n"
+rows = Csv.parse(text).unwrap()
+puts(rows.length)
+for r in rows { puts(inspect(r)) }
+
+puts(Csv.parse("").unwrap())
+puts(Csv.parse("a,\"b").unwrap_err())
+puts(Csv.parse("\"a\"b,c").unwrap_err())
+puts(Csv.parse("a;b;\"c;d\"", sep: ";").unwrap())
+puts(Csv.parse("a\tb", sep: "\t").unwrap())
+
+# Records keyed by the header row.
+recs = Csv.parse_records(text).unwrap()
+puts(recs[0]["name"])
+puts(recs[1]["quote"]!.lines())
+puts(recs[2].get("n"))
+puts(Csv.parse_records("a,b\n1,2,3\n").unwrap_err())
+
+# Writing quotes only what needs it, and round-trips.
+out = Csv.format(rows)
+print(out)
+puts(Csv.parse(out).unwrap() == rows)
+puts(Csv.format_row(["x", "", "y z", "a,b"]))
+puts(Csv.format_row(["a;b", "c,d"], sep: ";"))
+puts(Csv.format([[""], ["a"]]).length)
+puts(Csv.parse(Csv.format([[""], ["a"]])).unwrap())
+
+# Files.
+tmp = Env.get("TMPDIR") ?? Env.get("TEMP") ?? Env.get("TMP") ?? "/tmp"
+path = Path.join(tmp, "catx_csv_#{Time.millis()}_#{Random.int(0, 1000000)}.csv")
+Csv.write(path, [["id", "label"], ["1", "a, b"]]).unwrap()
+puts(Csv.read(path).unwrap())
+File.write(path, "\"open").unwrap()
+puts(Csv.read(path).unwrap_err().ends_with(": line 1: unterminated quoted field"))
+File.delete(path).unwrap()

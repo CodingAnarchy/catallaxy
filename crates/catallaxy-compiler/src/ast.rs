@@ -1,6 +1,7 @@
 //! Abstract syntax tree. Every expression carries a unique id used by the checker's side tables.
 
 use crate::diag::Span;
+pub use catallaxy_vm::fmtspec::FormatSpec;
 
 pub type NodeId = u32;
 
@@ -138,6 +139,8 @@ pub struct ExtendDecl {
 pub struct ImportDecl {
     pub path: Vec<Ident>,
     pub items: Option<Vec<Ident>>,
+    /// `import a.b as c`: the name the module is bound to (default: the last path segment).
+    pub alias: Option<Ident>,
     pub span: Span,
 }
 
@@ -273,6 +276,8 @@ pub struct Arg {
 pub enum StrPart {
     Lit(String),
     Expr(Expr),
+    /// `#{expr:spec}`: the parsed format spec and the span of its text.
+    Fmt(Expr, FormatSpec, Span),
 }
 
 #[derive(Clone, Debug)]
