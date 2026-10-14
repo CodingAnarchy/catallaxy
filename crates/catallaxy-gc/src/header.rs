@@ -293,7 +293,27 @@ impl Header {
     // Only shared objects are locked. Their owner bits are otherwise unused, so they hold the
     // lock holder's thread id, which makes the lock reentrant (bits 6..16 count recursion).
 
+    /// How many more times `tid` may re-enter this object's lock: the 10-bit recursion count
+    /// holds at most this many nested acquisitions in all. Code that nests acquisitions without
+    /// bound (`with lock` in a recursive function) must check [`Header::lock_depth`] against it
+    /// and refuse first: [`Header::try_lock`] treats an overflow as an internal error.
+    pub const MAX_LOCK_NESTING: u32 = (DEPTH_MASK >> DEPTH_SHIFT) as u32;
+
+    /// How many times the holder has acquired this object's lock (0 if it is not locked).
+    #[inline]
+    pub fn lock_depth(&self) -> u32 {
+        let m = self.meta.load(Ordering::Relaxed);
+        if m & LOCK_BIT == 0 {
+            0
+        } else {
+            ((m & DEPTH_MASK) >> DEPTH_SHIFT) as u32 + 1
+        }
+    }
+
     /// Tries to take the lock for thread `tid` (reentrant). Never blocks.
+    ///
+    /// # Panics
+    /// If `tid` already holds the lock [`Header::MAX_LOCK_NESTING`] times.
     #[inline]
     pub fn try_lock(&self, tid: u16) -> bool {
         let cur = self.meta.load(Ordering::Relaxed);

@@ -149,30 +149,41 @@ fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
         drop(slot2);
         catallaxy_gc::leave_native(&child.m.rec);
         let closure = child.extra_roots()[0];
-        let result = child.call_value(closure, &[]);
-        // Fibers the thread started finish before the thread does.
-        crate::fiber::drain(&mut child);
-        let outcome = match result {
-            Ok(v) => {
+        // A Rust panic in the runtime (an internal error) must not end the OS thread silently:
+        // joiners would wait forever, and the collector would wait for a thread that is gone.
+        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let result = child.call_value(closure, &[]);
+            // Fibers the thread started finish before the thread does.
+            crate::fiber::drain(&mut child);
+            result
+        }));
+        let failed = |msg: String, trace: &[String]| {
+            // `join` hands the message to the program; a thread nobody joins is
+            // reported (with its trace) when the program ends.
+            UNJOINED_PANICS.lock().push((inner2.clone(), tid, with_trace(msg.clone(), trace)));
+            ThreadOutcome::Panicked(msg)
+        };
+        let outcome = match run {
+            Ok(Ok(v)) => {
                 ownership::transfer_deep(v, child.tid(), TRANSIT_TID);
                 ThreadOutcome::Done(v)
             }
-            Err(Trap::Panic(msg)) => {
+            Ok(Err(Trap::Panic(msg))) => {
                 let trace = child.panic_trace.take().unwrap_or_default();
-                let mut full = msg.clone();
-                for line in trace.iter().take(8) {
-                    full.push_str(&format!("\n    at {line}"));
-                }
-                // `join` hands the message to the program; a thread nobody joins is
-                // reported (with its trace) when the program ends.
-                UNJOINED_PANICS.lock().push((inner2.clone(), child.tid(), full));
-                ThreadOutcome::Panicked(msg)
+                failed(msg, &trace)
             }
-            Err(Trap::Exit(code)) => {
+            Ok(Err(Trap::Exit(code))) => {
                 flush();
                 std::process::exit(code);
             }
-            Err(Trap::Unwind { .. }) => ThreadOutcome::Panicked("internal error: stray non-local exit".into()),
+            Ok(Err(Trap::Unwind { .. })) => ThreadOutcome::Panicked("internal error: stray non-local exit".into()),
+            Err(payload) => {
+                // Release the object locks the thread's frames held, so other threads can go on.
+                let trace = child.recover_from_internal_panic();
+                crate::fiber::abandon();
+                let msg = internal_error_message(&*payload).unwrap_or_else(|| "internal error".into());
+                failed(msg, &trace)
+            }
         };
         {
             let mut o = inner2.outcome.lock();
@@ -511,13 +522,27 @@ fn mark(t: &mut Tracer, v: Value) {
 }
 
 fn worker_main() {
-    let rec = catallaxy_gc::register_thread();
-    let Ok(mut vm) = Vm::try_new(rec.clone(), THREAD_STACK) else {
-        // No memory for its registers: the pool runs without this worker.
-        catallaxy_gc::unregister_thread(&rec);
-        POOL.failed.fetch_add(1, Ordering::Release);
-        return;
-    };
+    // A worker whose VM met an internal error (a Rust panic) starts over with a fresh one.
+    loop {
+        let rec = catallaxy_gc::register_thread();
+        let Ok(mut vm) = Vm::try_new(rec.clone(), THREAD_STACK) else {
+            // No memory for its registers: the pool runs without this worker.
+            catallaxy_gc::unregister_thread(&rec);
+            POOL.failed.fetch_add(1, Ordering::Release);
+            return;
+        };
+        // `worker_loop` returns only by unwinding; the task's job already has its error and its
+        // count (see `run_task`).
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker_loop(&mut vm)));
+        vm.recover_from_internal_panic();
+        crate::fiber::abandon();
+        vm.extra_roots().clear();
+        vm.shutdown();
+    }
+}
+
+/// Runs tasks until a Rust panic unwinds out of one.
+fn worker_loop(vm: &mut Vm) {
     // Workers idle in the native state.
     loop {
         let task = loop {
@@ -533,18 +558,30 @@ fn worker_main() {
             }
         };
         catallaxy_gc::leave_native(&vm.m.rec);
-        run_task(&mut vm, task);
-        crate::fiber::drain(&mut vm);
+        run_task(vm, task);
+        crate::fiber::drain(vm);
         catallaxy_gc::enter_native(&vm.m.rec);
     }
 }
 
+/// Runs one task of a job and counts it done. A Rust panic in the block (an internal error)
+/// fails the job like a Catallaxy panic, so the job's caller is not left waiting, and then
+/// carries on unwinding: the thread's VM is not trusted afterwards.
 fn run_task(vm: &mut Vm, task: Task) {
     let job = &task.job;
     let failed = job.error.lock().is_some();
+    let mut internal = None;
     if !failed {
         let depth = vm.frame_depth();
-        let r = run_range(vm, job, task.start, task.end, task.chunk);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_range(vm, job, task.start, task.end, task.chunk)
+        }));
+        let r = r.unwrap_or_else(|payload| {
+            vm.panic_trace = Some(vm.backtrace());
+            let msg = internal_error_message(&*payload).unwrap_or_else(|| "internal error".into());
+            internal = Some(payload);
+            Err(Trap::Panic(msg))
+        });
         if let Err(e) = r {
             // Keep the block's own frames: the caller adds its frames when it re-raises.
             let mut trace = vm.panic_trace.take().unwrap_or_default();
@@ -565,6 +602,9 @@ fn run_task(vm: &mut Vm, task: Task) {
         let (m, cv) = &job.done;
         *m.lock() = true;
         cv.notify_all();
+    }
+    if let Some(payload) = internal {
+        std::panic::resume_unwind(payload);
     }
 }
 

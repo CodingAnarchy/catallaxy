@@ -43,6 +43,26 @@ pub fn flush() {
     }
 }
 
+/// The Catallaxy panic message for a Rust panic caught at a thread's or fiber's entry (an
+/// internal error of the runtime), or `None` if the payload is not a panic message (such as the
+/// forced unwind that drops a suspended fiber), which the catcher must resume.
+pub fn internal_error_message(payload: &(dyn std::any::Any + Send)) -> Option<String> {
+    let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else {
+        payload.downcast_ref::<String>()?.clone()
+    };
+    Some(format!("internal error: {msg}"))
+}
+
+/// Appends up to eight frames of `trace` to a panic message, as a thread's panic report does.
+fn with_trace(mut msg: String, trace: &[String]) -> String {
+    for line in trace.iter().take(8) {
+        msg.push_str(&format!("\n    at {line}"));
+    }
+    msg
+}
+
 static EXTENSIONS: std::sync::LazyLock<parking_lot::RwLock<rustc_hash::FxHashMap<String, NativeFn>>> =
     std::sync::LazyLock::new(Default::default);
 

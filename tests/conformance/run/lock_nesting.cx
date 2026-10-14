@@ -1,0 +1,25 @@
+# `with lock` is reentrant up to 1,000 levels on one object; deeper is a LockError panic, which
+# ends only that thread and releases what it held.
+shared class Counter {
+  n: Int = 0
+}
+
+fn nest(c: Counter, k: Int) -> Int {
+  if k == 0 {
+    return c.n
+  }
+  with lock(c) {
+    c.n += 1
+    nest(c, k - 1)
+  }
+}
+
+c = Counter.new()
+puts(nest(c, 1000))
+match (spawn { nest(c, 1100) }).join() {
+  Ok(n) => puts("ok #{n}")
+  Err(e) => puts(e)
+}
+gc()
+with lock(c) { puts(c.n) }
+puts((spawn { nest(Counter.new(), 10) }).join().unwrap())

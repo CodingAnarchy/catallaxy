@@ -1,0 +1,4 @@
+1000
+LockError: `with lock` nested more than 1000 deep on one object
+2000
+10

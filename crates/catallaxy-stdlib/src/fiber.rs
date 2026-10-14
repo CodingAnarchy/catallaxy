@@ -315,7 +315,18 @@ pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
         // SAFETY: the VM lives until the scheduler releases it after this body returns.
         let vm = unsafe { &mut *(vm_ptr as *mut Vm) };
         let closure = vm.extra_roots()[0];
-        let r = vm.call_value(closure, &[]);
+        // A Rust panic in the runtime (an internal error) ends only this fiber, like a
+        // Catallaxy panic; unwinding it through the coroutine would take the thread down too.
+        let r = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.call_value(closure, &[]))) {
+            Ok(r) => r,
+            Err(payload) => {
+                // Not a panic message: corosensei dropping a suspended fiber, which must unwind.
+                let Some(msg) = crate::internal_error_message(&*payload) else { std::panic::resume_unwind(payload) };
+                let trace = vm.recover_from_internal_panic();
+                vm.panic_trace = Some(trace);
+                Err(Trap::Panic(msg))
+            }
+        };
         let outcome = match r {
             Ok(v) => {
                 // Store the result in the handle while this thread still owns it, so it is freed
@@ -468,6 +479,17 @@ fn park() {
     // SAFETY: set by the running fiber's body; valid while it runs.
     unsafe { suspend(y) };
     flag.store(false, Ordering::Release);
+}
+
+/// Drops this thread's fibers without running them: its main VM met an internal error and is
+/// about to be shut down. Call it before the shutdown (fibers unwind on their own stacks).
+pub fn abandon() {
+    CURRENT.with(|c| c.set(ROOT));
+    RUNNING_FLAG.with(|f| *f.borrow_mut() = None);
+    YIELDER.with(|c| c.set(std::ptr::null()));
+    // Taken out first: a fiber's unwinding must not find the scheduler borrowed.
+    let sched = SCHED.with(|s| s.borrow_mut().take());
+    drop(sched);
 }
 
 /// Runs every fiber that finished, on any thread, at the end of the thread's main code.

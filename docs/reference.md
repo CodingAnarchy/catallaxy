@@ -481,6 +481,11 @@ Annotate the parameter to use any of these.
   `par_*` block, whichever thread ran it).
 - `Thread.join` returns `Result[T, String]`: `Err` carries the panic message. A thread that panicked and
   was never joined is reported, with its trace, on stderr when the program ends.
+- `with lock` is reentrant: a thread may lock an object it already holds, up to 1,000 levels deep.
+  Deeper nesting panics with `LockError:`.
+- An internal error of the runtime (a bug in Catallaxy, or in a native extension) is a panic whose
+  message starts `internal error:`. It ends only the thread, fiber or `par_*` call it happened in, like
+  any panic, and releases the locks that thread held.
 - Running out of memory panics with a message starting `MemoryError:`, like any other panic (so on another
   thread `join` returns it as `Err`, and the program can carry on once the data is dropped):
   - A single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,
