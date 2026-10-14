@@ -586,18 +586,27 @@ unsaved edits. It provides:
   classes, enums, variants, interfaces and constants. An interface member renames together with the
   same-named methods of every type whose values are used as that interface (passed, assigned,
   returned, put in a list or dict, or checked against a generic bound), so those types keep
-  conforming; renaming such a method renames the member too. They cover the document, every module
-  it imports, and the other open documents and their imports; names from the prelude cannot be
-  renamed, nor can a member that a built-in type implements;
+  conforming; renaming such a method renames the member too. They cover the workspace (below);
+  names from the prelude cannot be renamed, nor can a member that a built-in type implements;
 - signature help for function, method and constructor calls, showing default values and marking
   the trailing-block parameter, with the active parameter following commas and named arguments;
 - inlay hints with the inferred types of unannotated variables, `for`/`let`/`if let` bindings and
   block parameters, and the inferred requirement of each untyped parameter of an implicit-generic
   function (`fn shout(x)` shows `x: { fn upcase(self) -> _ }`);
 - document symbols (an outline of items, members and top-level variables) and workspace symbols
-  (over the open documents and the modules they import);
+  (over the workspace);
 - code actions: every fix attached to a diagnostic is offered as a quick fix, and the first
   applicable one (see `catx fix`) is marked preferred.
+
+The workspace of references, rename and workspace symbols is every `.cx` file under the workspace
+folders the client names (`workspaceFolders`, else `rootUri`; folders added or removed later count)
+plus every open document, each with the modules it imports, whether or not the file is open.
+Directories named `target` or `node_modules` and hidden directories (`.git` and the like) are
+skipped. An open document's text takes precedence over the file on disk. Each file's compilation is
+cached and reused while the files it loaded are unchanged, so after the first request only edited
+files and the files that import them are checked again. At most 2000 files are taken from the
+workspace folders (set `CATX_LSP_MAX_FILES` to change the limit); a larger workspace is cut, and the
+server says so in its log.
 
 `catx fix [--dry-run] paths...` applies the checker's fixes. For each file (directories are walked as
 for `catx fmt`, skipping `reject/`) it applies the first applicable fix of every diagnostic, checks

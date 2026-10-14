@@ -17,8 +17,13 @@ struct Lsp {
 
 impl Lsp {
     fn start() -> Lsp {
+        Lsp::start_with(&[])
+    }
+
+    fn start_with(env: &[(&str, &str)]) -> Lsp {
         let mut child = Command::new(CATX)
             .arg("lsp")
+            .envs(env.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -85,8 +90,12 @@ fn file_uri(name: &str) -> (String, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("catx-lsp-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
-    // A real file URI on every platform: `file:///C:/Users/...` on Windows, percent-encoded the way
-    // the server encodes the locations it returns.
+    (path_uri(&path), path)
+}
+
+/// A real file URI on every platform: `file:///C:/Users/...` on Windows, percent-encoded the way
+/// the server encodes the locations it returns.
+fn path_uri(path: &std::path::Path) -> String {
     let p = path.to_string_lossy().replace('\\', "/");
     let mut uri = String::from("file://");
     if !p.starts_with('/') {
@@ -99,7 +108,7 @@ fn file_uri(name: &str) -> (String, std::path::PathBuf) {
             uri.push_str(&format!("%{b:02X}"));
         }
     }
-    (uri, path)
+    uri
 }
 
 #[test]
@@ -815,6 +824,201 @@ fn lsp_document_and_workspace_symbols() {
     assert!(!names.contains(&"Color"), "{names:?}");
     let s = r["result"].as_array().unwrap().iter().find(|s| s["name"] == "Shape").unwrap();
     assert_eq!(s["location"]["uri"], json!(uri));
+    lsp.finish();
+}
+
+const WS_SHAPES: &str = "pub interface Shape {
+  fn area(self) -> Float
+}
+pub fn total(xs: List[Shape]) -> Float {
+  sum = 0.0
+  for x in xs { sum = sum + x.area() }
+  sum
+}
+";
+
+const WS_KINDS: &str = "pub class Sq {
+  s: Float
+  fn area(self) -> Float { self.s * self.s }
+}
+pub class Disc {
+  r: Float
+  fn area(self) -> Float { 3.0 * self.r * self.r }
+}
+";
+
+const WS_MAIN: &str = "import ws_shapes.{Shape, total}
+import ws_kinds.{Sq, Disc}
+puts(total([Sq.new(2.0)]))
+puts(Sq.new(3.0).area() + Disc.new(1.0).area())
+";
+
+/// A workspace folder with sources in a subdirectory and in directories that are skipped.
+fn workspace_dir(tag: &str) -> std::path::PathBuf {
+    let dir = scratch_dir(tag);
+    std::fs::write(dir.join("ws_shapes.cx"), WS_SHAPES).unwrap();
+    std::fs::write(dir.join("ws_kinds.cx"), WS_KINDS).unwrap();
+    std::fs::write(dir.join("ws_main.cx"), WS_MAIN).unwrap();
+    std::fs::create_dir_all(dir.join("sub/deeper")).unwrap();
+    std::fs::write(dir.join("sub/deeper/deep.cx"), "class DeepThing {\n  n: Int = 0\n}\n").unwrap();
+    for skipped in ["target", "node_modules", ".git", ".hidden"] {
+        std::fs::create_dir_all(dir.join(skipped)).unwrap();
+        std::fs::write(dir.join(skipped).join("skipped.cx"), "fn skipped_thing() -> Int { 1 }\n").unwrap();
+    }
+    dir
+}
+
+impl Lsp {
+    /// Starts a server on the workspace folder `dir` and completes the handshake.
+    fn init_workspace(dir: &std::path::Path, env: &[(&str, &str)]) -> Lsp {
+        let mut lsp = Lsp::start_with(env);
+        let root = path_uri(dir);
+        let r = lsp.request(
+            1,
+            "initialize",
+            json!({"processId": null, "rootUri": root, "capabilities": {},
+                   "workspaceFolders": [{"uri": root, "name": "ws"}]}),
+        );
+        assert_eq!(r["result"]["capabilities"]["workspace"]["workspaceFolders"]["supported"], true, "{r}");
+        lsp.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
+        lsp
+    }
+
+    /// Opens `path` with `text` (not written to disk) and waits for its diagnostics.
+    fn open_unsaved(&mut self, path: &std::path::Path, text: &str) -> String {
+        let uri = path_uri(path);
+        self.send(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+            "textDocument": {"uri": uri, "languageId": "catallaxy", "version": 1, "text": text}
+        }}));
+        let u = uri.clone();
+        self.wait("publishDiagnostics", move |v| {
+            v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == json!(u)
+        });
+        uri
+    }
+}
+
+fn symbol_names(r: &Value) -> Vec<String> {
+    let list = r["result"].as_array().unwrap_or_else(|| panic!("{r}"));
+    let mut names: Vec<String> = list.iter().map(|s| s["name"].as_str().unwrap().to_string()).collect();
+    names.sort();
+    names
+}
+
+/// References, rename, interface conformers and workspace symbols cover the files under the
+/// workspace folder that are neither open nor imported by an open document; open documents'
+/// text wins over the disk; skipped directories stay out.
+#[test]
+fn lsp_workspace_unopened_files() {
+    let dir = workspace_dir("lsp-ws");
+    let mut lsp = Lsp::init_workspace(&dir, &[]);
+    let shapes = lsp.open_unsaved(&dir.join("ws_shapes.cx"), WS_SHAPES);
+    let kinds = path_uri(&dir.join("ws_kinds.cx"));
+    let main = path_uri(&dir.join("ws_main.cx"));
+    let at = |uri: &str, p: Value| json!({"textDocument": {"uri": uri}, "position": p});
+    let refs = |lsp: &mut Lsp, id: i64, uri: &str, p: Value| {
+        let mut params = at(uri, p);
+        params["context"] = json!({"includeDeclaration": true});
+        ref_spots(&lsp.request(id, "textDocument/references", params))
+    };
+    let rename = |lsp: &mut Lsp, id: i64, uri: &str, p: Value| {
+        let mut params = at(uri, p);
+        params["newName"] = json!("size");
+        edit_spots(&lsp.request(id, "textDocument/rename", params), "size")
+    };
+
+    // `total` is used only in `ws_main.cx`, which no open document imports.
+    let mut want = vec![spot(&shapes, pos(WS_SHAPES, 3, "total", 0)), spot(&main, pos(WS_MAIN, 0, "total", 0))];
+    want.push(spot(&main, pos(WS_MAIN, 2, "total", 0)));
+    want.sort();
+    assert_eq!(refs(&mut lsp, 2, &shapes, pos(WS_SHAPES, 3, "total", 0)), want);
+
+    // `Sq` conforms to `Shape` only in `ws_main.cx`'s compilation: renaming the member from its
+    // own module takes along `Sq.area` (unopened) and its call in `ws_main.cx`, not `Disc.area`.
+    let mut family = vec![
+        spot(&shapes, pos(WS_SHAPES, 1, "area", 0)),
+        spot(&shapes, pos(WS_SHAPES, 5, "area", 0)),
+        spot(&kinds, pos(WS_KINDS, 2, "area", 0)),
+        spot(&main, pos(WS_MAIN, 3, "area", 0)),
+    ];
+    family.sort();
+    assert_eq!(rename(&mut lsp, 3, &shapes, pos(WS_SHAPES, 1, "area", 0)), family);
+    assert_eq!(refs(&mut lsp, 4, &shapes, pos(WS_SHAPES, 5, "area", 0)), family);
+
+    // Workspace symbols: a nested directory is searched, skipped ones are not.
+    let r = lsp.request(5, "workspace/symbol", json!({"query": "DeepThing"}));
+    assert_eq!(symbol_names(&r), ["DeepThing"]);
+    assert_eq!(r["result"][0]["location"]["uri"], json!(path_uri(&dir.join("sub/deeper/deep.cx"))));
+    let r = lsp.request(6, "workspace/symbol", json!({"query": "skipped_thing"}));
+    assert_eq!(symbol_names(&r), Vec::<String>::new());
+    let r = lsp.request(7, "workspace/symbol", json!({"query": "disc"}));
+    assert_eq!(symbol_names(&r), ["Disc"]);
+
+    // An open document's text wins over the disk: `ws_kinds.cx` gains a line in the editor.
+    let edited = format!("# edited, not saved\n{WS_KINDS}");
+    lsp.open_unsaved(&dir.join("ws_kinds.cx"), &edited);
+    let mut family = vec![
+        spot(&shapes, pos(WS_SHAPES, 1, "area", 0)),
+        spot(&shapes, pos(WS_SHAPES, 5, "area", 0)),
+        spot(&kinds, pos(&edited, 3, "area", 0)),
+        spot(&main, pos(WS_MAIN, 3, "area", 0)),
+    ];
+    family.sort();
+    assert_eq!(rename(&mut lsp, 8, &shapes, pos(WS_SHAPES, 1, "area", 0)), family);
+
+    // An unopened file changed on disk is recompiled.
+    let main2 = format!("{WS_MAIN}puts(Sq.new(4.0).area())\n");
+    std::fs::write(dir.join("ws_main.cx"), &main2).unwrap();
+    family.push(spot(&main, pos(&main2, 4, "area", 0)));
+    family.sort();
+    assert_eq!(refs(&mut lsp, 9, &shapes, pos(WS_SHAPES, 1, "area", 0)), family);
+
+    // A file created on disk is found; one deleted is dropped.
+    std::fs::write(dir.join("sub/fresh.cx"), "fn fresh_thing() -> Int { 2 }\n").unwrap();
+    lsp.send(json!({"jsonrpc": "2.0", "method": "workspace/didChangeWatchedFiles", "params": {
+        "changes": [{"uri": path_uri(&dir.join("sub/fresh.cx")), "type": 1}]
+    }}));
+    let r = lsp.request(10, "workspace/symbol", json!({"query": "fresh_thing"}));
+    assert_eq!(symbol_names(&r), ["fresh_thing"]);
+    std::fs::remove_file(dir.join("sub/fresh.cx")).unwrap();
+    let r = lsp.request(11, "workspace/symbol", json!({"query": "fresh_thing"}));
+    assert_eq!(symbol_names(&r), Vec::<String>::new());
+    lsp.finish();
+}
+
+/// Workspace folders added and removed after initialize.
+#[test]
+fn lsp_workspace_folders_change() {
+    let dir = workspace_dir("lsp-ws-folders");
+    let other = scratch_dir("lsp-ws-other");
+    std::fs::write(other.join("elsewhere.cx"), "fn elsewhere_thing() -> Int { 3 }\n").unwrap();
+    let mut lsp = Lsp::init_workspace(&dir, &[]);
+    let query = |lsp: &mut Lsp, id: i64| symbol_names(&lsp.request(id, "workspace/symbol", json!({"query": "thing"})));
+    assert_eq!(query(&mut lsp, 2), ["DeepThing"]);
+    let folder = json!([{"uri": path_uri(&other), "name": "other"}]);
+    lsp.send(json!({"jsonrpc": "2.0", "method": "workspace/didChangeWorkspaceFolders", "params": {
+        "event": {"added": folder, "removed": []}
+    }}));
+    assert_eq!(query(&mut lsp, 3), ["DeepThing", "elsewhere_thing"]);
+    lsp.send(json!({"jsonrpc": "2.0", "method": "workspace/didChangeWorkspaceFolders", "params": {
+        "event": {"added": [], "removed": [{"uri": path_uri(&dir), "name": "ws"}]}
+    }}));
+    assert_eq!(query(&mut lsp, 4), ["elsewhere_thing"]);
+    lsp.finish();
+}
+
+/// A workspace larger than the file limit is cut, and the server says so in the log.
+#[test]
+fn lsp_workspace_file_limit_is_logged() {
+    let dir = workspace_dir("lsp-ws-cap");
+    let mut lsp = Lsp::init_workspace(&dir, &[("CATX_LSP_MAX_FILES", "2")]);
+    lsp.send(json!({"jsonrpc": "2.0", "id": 2, "method": "workspace/symbol", "params": {"query": ""}}));
+    // The log message comes before the answer.
+    let log = lsp.wait("a log message", |v| v["method"] == "window/logMessage");
+    let msg = log["params"]["message"].as_str().unwrap();
+    assert!(msg.contains("more than 2 .cx files"), "{msg}");
+    let r = lsp.wait("workspace/symbol", |v| v["id"] == json!(2));
+    assert!(r["result"].is_array(), "{r}");
     lsp.finish();
 }
 
