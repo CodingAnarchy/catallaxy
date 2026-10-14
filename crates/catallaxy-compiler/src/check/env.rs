@@ -373,6 +373,13 @@ pub struct LocalInfo {
     pub ctx: u32,
     pub captured: bool,
     pub assigns: u32,
+    /// Assigned inside a closure or block, which may run during any call: its narrowing ends at
+    /// the next call (`Checker::drop_call_narrowings`). Found by the function's pre-scan
+    /// (`AssignScan`) or when such an assignment is checked.
+    pub closure_assigned: bool,
+    /// Assigned more than once somewhere in its function (by name, from the pre-scan, so later
+    /// assignments count too): a closure cannot rely on a narrowing of it.
+    pub reassigned: bool,
     pub is_param: bool,
     pub span: Span,
     pub used: bool,

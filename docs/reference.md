@@ -233,6 +233,13 @@ it, and the body must check `x` again. A narrowing the loop keeps also holds aft
 case where a kept narrowing is broken by the checked type of an assignment (an operator method that
 returns an optional, say), the assignment is E0324.
 
+A closure (a `fn` literal, a block passed to a call, a `Fiber.start` block, the body of a `for` over a
+user `Enumerable`) may be stored and run during any later call, so a narrowing of a variable that some
+closure assigns ends at the next call, wherever the closure is written. Inside a closure, a captured
+variable that is assigned anywhere else in its function keeps no narrowing from outside the closure,
+and a nil test inside the closure holds only until the next call (another fiber may run meanwhile).
+When the narrowing must outlive a call, bind the value: `if let v = x { ... }`.
+
 A field path on a local or `self` (`n.next`, `self.head.next`) is narrowed by `!= nil` / `== nil` tests
 and by assigning it a non-nil value, as long as nothing could have changed it since: the narrowing ends at
 any assignment to a field of that name, a reassignment of the root variable, any call (unless every field
