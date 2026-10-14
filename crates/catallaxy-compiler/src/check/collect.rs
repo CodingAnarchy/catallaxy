@@ -241,6 +241,9 @@ impl Checker {
                     self.fns[fid as usize].is_pub = f.is_pub;
                     self.fns[fid as usize].doc = f.doc.clone();
                     self.declare(m, &f.name, ScopeItem::Fn(fid));
+                    if self.mods[m as usize].is_prelude && f.name.name == "compare_values" {
+                        self.well_known.compare_values = Some(fid);
+                    }
                 }
                 Item::Const(c) => {
                     let gid = self.new_global(&c.name.name, true, m, c.is_pub, c.name.span, GlobalInit::Item(m, i));
@@ -1064,7 +1067,13 @@ impl Checker {
             self.fns[fid as usize].is_pub = x.is_pub || md.is_pub || is_prelude;
             self.fill_sig(fid, md, &mut scope, false);
             if md.is_native {
-                self.fns[fid as usize].native_name = Some(format!("ext.{}", md.name.name));
+                // A prelude extension of a builtin class with bounded parameters (`extend[T:
+                // Comparable] List[T]`) implements its natives under the class's name.
+                let owner = match self.types.get(target) {
+                    Ty::Class(c, _) if is_prelude && self.classes[c].is_builtin => self.classes[c].name.clone(),
+                    _ => "ext".to_string(),
+                };
+                self.fns[fid as usize].native_name = Some(format!("{owner}.{}", md.name.name));
             }
             methods.insert(md.name.name.clone(), fid);
         }
