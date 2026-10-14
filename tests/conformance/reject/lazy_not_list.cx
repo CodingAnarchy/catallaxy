@@ -1,0 +1,4 @@
+# expect: E0300
+# A lazy pipeline is a Lazy, not a list, until it is consumed with to_list.
+nat = Lazy.iterate(0) { |n| n + 1 }
+xs: List[Int] = nat.map { |n| n * 2 }.take(2)

@@ -299,14 +299,17 @@ impl Checker {
             }
             match &imp.items {
                 None => {
-                    let alias = path.last().unwrap().clone();
-                    self.mods[m as usize].imported.insert(alias, (ScopeItem::Module(target), imp.span));
+                    let (alias, span) = match &imp.alias {
+                        Some(a) => (a.name.clone(), a.span),
+                        None => (path.last().unwrap().clone(), imp.span),
+                    };
+                    self.bind_import(m, alias, ScopeItem::Module(target), span);
                 }
                 Some(list) => {
                     for name in list {
                         match self.mods[target as usize].items.get(&name.name).copied() {
                             Some(si) if self.item_is_pub(si) => {
-                                self.mods[m as usize].imported.insert(name.name.clone(), (si, name.span));
+                                self.bind_import(m, name.name.clone(), si, name.span);
                             }
                             Some(_) => {
                                 self.err("E0202", format!("`{}` is private to module `{}`", name.name, key), name.span)
@@ -315,6 +318,24 @@ impl Checker {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// Binds an imported name in module `m`; two imports may not bind one name to different things.
+    fn bind_import(&mut self, m: ModId, name: String, si: ScopeItem, span: Span) {
+        match self.mods[m as usize].imported.get(&name) {
+            Some(&(prev, _)) if prev != si => {
+                let hint = if matches!(si, ScopeItem::Module(_)) {
+                    "; give one module another name with `import a.b as name`"
+                } else {
+                    ""
+                };
+                self.err("E0206", format!("`{name}` is already imported{hint}"), span);
+            }
+            Some(_) => {}
+            None => {
+                self.mods[m as usize].imported.insert(name, (si, span));
             }
         }
     }

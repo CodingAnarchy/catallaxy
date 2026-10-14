@@ -582,7 +582,7 @@ impl Checker {
                 let t = self.check_expr(x, None);
                 if let Ty::Open(o) = self.types.get(self.types.shallow_resolve(t)).clone() {
                     let ret = self.new_open(o);
-                    self.opens[o as usize].reqs.push(OpenReq::Unary { op, ret, span: e.span });
+                    self.push_req(o, OpenReq::Unary { op, ret, span: e.span });
                     self.bins.insert(e.id, BinRes::Arith(ArithKind::Generic));
                     return ret;
                 }
@@ -613,8 +613,37 @@ impl Checker {
     fn new_open(&mut self, from: OpenId) -> TyId {
         let name = self.opens[from as usize].param_name.clone();
         let o = self.opens.len() as OpenId;
-        self.opens.push(OpenInfo { param_name: name, reqs: Vec::new(), uppers: Vec::new() });
+        self.opens.push(OpenInfo { param_name: name, label: None, reqs: Vec::new(), uppers: Vec::new() });
         self.types.intern(Ty::Open(o))
+    }
+
+    /// Records a requirement on open `o`, naming the open that stands for its result.
+    fn push_req(&mut self, o: OpenId, req: OpenReq) {
+        if let Some(r) = req.result() {
+            if let Ty::Open(ro) = self.types.get(self.types.shallow_resolve(r)).clone() {
+                if ro != o && self.opens[ro as usize].label.is_none() {
+                    let p = self.open_label(o);
+                    let label = match &req {
+                        OpenReq::Method { name, .. } => format!("{p}.{name}"),
+                        OpenReq::BinOp { op, .. } => format!("{p} {} _", op.symbol()),
+                        OpenReq::BinOpRhs { op, .. } => format!("_ {} {p}", op.symbol()),
+                        OpenReq::Unary { op, .. } => format!("{}{p}", if *op == UnOp::Neg { "-" } else { "~" }),
+                        OpenReq::Index { .. } => format!("{p}[_]"),
+                        OpenReq::Call { .. } => format!("{p}(_)"),
+                        OpenReq::Iter { .. } => format!("element of {p}"),
+                        OpenReq::SetIndex { .. } => p,
+                    };
+                    self.opens[ro as usize].label = Some(label);
+                }
+            }
+        }
+        self.opens[o as usize].reqs.push(req);
+    }
+
+    /// How diagnostics name open `o`: the parameter, or the expression derived from it.
+    pub fn open_label(&self, o: OpenId) -> String {
+        let info = &self.opens[o as usize];
+        info.label.clone().unwrap_or_else(|| info.param_name.clone())
     }
 
     fn check_binary(&mut self, e: &Expr, op: BinOp, l: &Expr, r: &Expr, expected: Option<TyId>) -> TyId {
@@ -675,7 +704,7 @@ impl Checker {
                 _ => self.new_open(o),
             };
             if !matches!(op, BinOp::Eq | BinOp::Ne) {
-                self.opens[o as usize].reqs.push(OpenReq::BinOp { op, rhs: rt, ret, span: e.span });
+                self.push_req(o, OpenReq::BinOp { op, rhs: rt, ret, span: e.span });
             }
             let res = match op {
                 BinOp::Eq | BinOp::Ne => BinRes::Eq,
@@ -686,6 +715,42 @@ impl Checker {
             };
             self.bins.insert(e.id, res);
             return ret;
+        }
+        // An open right side with a known left side: evaluated generically, so each call site must
+        // show the operator is defined for the argument's type.
+        if let Ty::Open(o) = self.types.get(self.types.shallow_resolve(rt)).clone() {
+            let lr = self.types.shallow_resolve(lt);
+            if !matches!(self.types.get(lr), Ty::Dyn | Ty::Error) && !matches!(op, BinOp::Eq | BinOp::Ne) {
+                if op == BinOp::In {
+                    // `a in x` is `x.contains(a)`.
+                    let ret = self.new_open(o);
+                    self.push_req(
+                        o,
+                        OpenReq::Method {
+                            name: "contains".into(),
+                            args: vec![lt],
+                            named: vec![None],
+                            block: false,
+                            ret,
+                            span: e.span,
+                        },
+                    );
+                    self.bins.insert(e.id, BinRes::Method(Dispatch::Dynamic("contains".into(), None), true));
+                    return ret;
+                }
+                let ret = match op {
+                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => bool_,
+                    _ => self.new_open(o),
+                };
+                self.push_req(o, OpenReq::BinOpRhs { op, lhs: lt, ret, span: e.span });
+                let res = match op {
+                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Cmp => BinRes::Compare(ArithKind::Generic),
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => BinRes::Bitwise,
+                    _ => BinRes::Arith(ArithKind::Generic),
+                };
+                self.bins.insert(e.id, res);
+                return ret;
+            }
         }
         let lk = self.numeric_kind(lt);
         let rk = self.numeric_kind(rt);
@@ -1255,6 +1320,12 @@ impl Checker {
         let ci = self.return_ctx();
         let ret = self.types.shallow_resolve(self.ctxs[ci].ret);
         let tr = self.types.shallow_resolve(t);
+        if let Ty::Open(o) = self.types.get(tr).clone() {
+            let pname = self.opens[o as usize].param_name.clone();
+            let msg = format!("`?` on a value derived from untyped parameter `{pname}`; annotate its type");
+            self.err("E0369", msg, e.span);
+            return self.types.error;
+        }
         if let Ty::Enum(eid, args) = self.types.get(tr).clone() {
             if Some(eid) == self.well_known.result {
                 let (ok_t, err_t) = (args[0], args[1]);
@@ -1449,6 +1520,16 @@ impl Checker {
             }
             ExprKind::Member { recv, name, .. } => {
                 let rt = self.check_expr(recv, None);
+                if let Ty::Open(o) = self.types.get(self.types.shallow_resolve(rt)).clone() {
+                    let pname = self.opens[o as usize].param_name.clone();
+                    let msg = format!(
+                        "cannot assign field `{}` through untyped parameter `{pname}`; annotate its type",
+                        name.name
+                    );
+                    self.err("E0369", msg, target.span);
+                    self.check_expr(value, None);
+                    return;
+                }
                 if matches!(self.types.get(self.types.shallow_resolve(rt)), Ty::Frozen(_)) {
                     let msg = format!("cannot assign field `{}` of a frozen value", name.name);
                     self.err("E0610", msg, target.span);
@@ -1495,6 +1576,21 @@ impl Checker {
                     return;
                 }
                 let it = self.check_expr(&args[0], None);
+                if let Ty::Open(o) = self.types.get(self.types.shallow_resolve(rt)).clone() {
+                    let vt = self.check_expr(value, None);
+                    if let Some(op) = op {
+                        let res = match op {
+                            BinOp::Or | BinOp::And => BinRes::Logic,
+                            BinOp::Coalesce => BinRes::Coalesce,
+                            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => BinRes::Bitwise,
+                            _ => BinRes::Arith(ArithKind::Generic),
+                        };
+                        self.bins.insert(e.id, res);
+                    }
+                    self.push_req(o, OpenReq::SetIndex { index: it, value: vt, op, span: e.span });
+                    self.assigns.insert(e.id, AssignRes::IndexGeneric);
+                    return;
+                }
                 if matches!(self.types.get(self.types.shallow_resolve(rt)), Ty::Frozen(_)) {
                     self.err("E0610", "cannot modify a frozen collection", target.span);
                 }
@@ -1626,6 +1722,18 @@ impl Checker {
                         if !self.item_is_pub(si) {
                             let msg = format!("`{}` is private to module `{}`", name.name, self.mods[m as usize].name);
                             self.err("E0202", msg, name.span);
+                        }
+                        // Record `module.Type` for tooling, like a bare type name above.
+                        let res = match si {
+                            ScopeItem::Class(c) => Some(NameRes::Class(c)),
+                            ScopeItem::Enum(en) => Some(NameRes::Enum(en)),
+                            ScopeItem::Iface(i) => Some(NameRes::Iface(i)),
+                            _ => None,
+                        };
+                        if let Some(r) = res {
+                            if e.id < u32::MAX - 2 {
+                                self.names.insert(e.id, r);
+                            }
                         }
                         Some(match si {
                             ScopeItem::Class(c) => PathRes::Class(c, None),
@@ -1782,10 +1890,16 @@ impl Checker {
                 ctr
             }
             Ty::Open(o) => {
-                let tys: Vec<TyId> = args.iter().map(|a| self.check_expr(&a.value, None)).collect();
+                if let Some(a) = args.iter().find(|a| a.name.is_some()) {
+                    self.err("E0336", "a function value takes positional arguments only", a.value.span);
+                }
+                let mut tys: Vec<TyId> = args.iter().map(|a| self.check_expr(&a.value, None)).collect();
+                if let Some(b) = block {
+                    tys.push(self.check_expr(b, None));
+                }
                 let ret = self.new_open(o);
-                self.opens[o as usize].reqs.push(OpenReq::Call { args: tys, ret, span: e.span });
-                let slots = (0..args.len()).map(ArgSlot::Arg).collect();
+                self.push_req(o, OpenReq::Call { args: tys, ret, span: e.span });
+                let slots = (0..args.len()).map(ArgSlot::Arg).chain(block.map(|_| ArgSlot::Block)).collect();
                 self.calls.insert(e.id, CallRes::Closure { args: slots });
                 ret
             }
@@ -2028,7 +2142,11 @@ impl Checker {
 
     /// Instantiates a function with untyped parameters at one call site.
     fn call_implicit(&mut self, e: &Expr, f: FnId, args: &[Arg], block: Option<&Expr>) -> TyId {
-        self.ensure_signature(f);
+        // The requirements come from the body, so it is checked first even when the result type
+        // is annotated.
+        if self.fns[f as usize].state == CheckState::Unchecked {
+            self.check_fn_body(f);
+        }
         if self.fns[f as usize].state == CheckState::InProgress {
             let name = self.fns[f as usize].name.clone();
             let msg = format!("recursive call to `{name}`, whose parameters are untyped; annotate its parameters");
@@ -2095,48 +2213,103 @@ impl Checker {
 
     /// Checks recorded open requirements against concrete argument types, returning the
     /// instantiated result type.
+    ///
+    /// Requirements are checked once the types they mention are known: a requirement such as
+    /// `a + b.n` on `a` waits until `b.n` has been resolved from `b`'s argument type.
     fn apply_opens(&mut self, span: Span, fname: &str, map: &FxHashMap<OpenId, TyId>, ret: TyId) -> TyId {
+        #[derive(Clone, Copy)]
+        enum Item {
+            Req(OpenId, usize),
+            Upper(OpenId, usize),
+        }
         let mut map = map.clone();
-        let mut work: Vec<OpenId> = map.keys().copied().collect();
-        work.sort_unstable();
-        let mut i = 0;
-        while i < work.len() {
-            let o = work[i];
-            i += 1;
-            let concrete = map[&o];
-            let info = self.opens[o as usize].clone();
-            for req in &info.reqs {
-                let produced = self.apply_req(span, fname, &info.param_name, concrete, req, &map);
-                let ret_open = match req {
-                    OpenReq::Method { ret, .. }
-                    | OpenReq::BinOp { ret, .. }
-                    | OpenReq::Unary { ret, .. }
-                    | OpenReq::Index { ret, .. }
-                    | OpenReq::Call { ret, .. } => Some(*ret),
-                    OpenReq::Iter { elem, .. } => Some(*elem),
-                };
-                if let (Some(ro), Some(p)) = (ret_open, produced) {
-                    if let Ty::Open(ro) = self.types.get(ro).clone() {
-                        if let std::collections::hash_map::Entry::Vacant(v) = map.entry(ro) {
-                            v.insert(p);
-                            work.push(ro);
+        let mut pending: Vec<Item> = Vec::new();
+        let add = |c: &Checker, o: OpenId, pending: &mut Vec<Item>| {
+            let info = &c.opens[o as usize];
+            pending.extend((0..info.reqs.len()).map(|i| Item::Req(o, i)));
+            pending.extend((0..info.uppers.len()).map(|i| Item::Upper(o, i)));
+        };
+        let mut roots: Vec<OpenId> = map.keys().copied().collect();
+        roots.sort_unstable();
+        for o in roots {
+            add(self, o, &mut pending);
+        }
+        while !pending.is_empty() {
+            // The first item whose inputs are all known; if none (not expected), the first item.
+            let pick = pending
+                .iter()
+                .position(|it| {
+                    let deps = match *it {
+                        Item::Req(o, i) => self.opens[o as usize].reqs[i].inputs(),
+                        Item::Upper(o, i) => vec![self.opens[o as usize].uppers[i].0],
+                    };
+                    let mut opens = Vec::new();
+                    for d in deps {
+                        self.collect_opens(d, &mut opens);
+                    }
+                    opens.iter().all(|o| map.contains_key(o))
+                })
+                .unwrap_or(0);
+            let item = pending.remove(pick);
+            match item {
+                Item::Req(o, i) => {
+                    let concrete = map[&o];
+                    let req = self.opens[o as usize].reqs[i].clone();
+                    let produced = self.apply_req(span, fname, o, concrete, &req, &map);
+                    if let Some(ro) = req.result() {
+                        if let Ty::Open(ro) = self.types.get(ro).clone() {
+                            if let std::collections::hash_map::Entry::Vacant(v) = map.entry(ro) {
+                                v.insert(produced);
+                                add(self, ro, &mut pending);
+                            }
                         }
                     }
                 }
-            }
-            for (up, usp) in &info.uppers {
-                let up = self.subst_opens(*up, &map);
-                if !self.assignable(concrete, up) {
-                    let msg = format!(
-                        "argument type `{}` cannot be used as `{}` in `{fname}`",
-                        self.show(concrete),
-                        self.show(up)
-                    );
-                    self.emit(Diag::error("E0341", msg, span).note_at("required here", *usp));
+                Item::Upper(o, i) => {
+                    let concrete = map[&o];
+                    let (up, usp) = self.opens[o as usize].uppers[i];
+                    let up = self.subst_opens(up, &map);
+                    if !self.assignable(concrete, up) {
+                        let msg = match &self.opens[o as usize].label {
+                            None => format!(
+                                "`{}` passed to `{fname}` as `{}` is used as `{}`",
+                                self.show(concrete),
+                                self.opens[o as usize].param_name,
+                                self.show(up)
+                            ),
+                            Some(l) => format!(
+                                "in this call to `{fname}`, `{l}` is `{}`, which is used as `{}`",
+                                self.show(concrete),
+                                self.show(up)
+                            ),
+                        };
+                        self.emit(Diag::error("E0341", msg, span).note_at("required here", usp));
+                    }
                 }
             }
         }
         self.subst_opens(ret, &map)
+    }
+
+    /// Open types mentioned in `t`.
+    fn collect_opens(&self, t: TyId, out: &mut Vec<OpenId>) {
+        let t = self.types.shallow_resolve(t);
+        match self.types.get(t) {
+            Ty::Open(o) => out.push(*o),
+            Ty::Class(_, a) | Ty::Enum(_, a) | Ty::Iface(_, a) | Ty::Tuple(a) | Ty::Union(a) | Ty::Inter(a) => {
+                for &x in a {
+                    self.collect_opens(x, out);
+                }
+            }
+            Ty::Fn(p, r) => {
+                for &x in p {
+                    self.collect_opens(x, out);
+                }
+                self.collect_opens(*r, out);
+            }
+            Ty::Frozen(i) => self.collect_opens(*i, out),
+            _ => {}
+        }
     }
 
     fn subst_opens(&mut self, t: TyId, map: &FxHashMap<OpenId, TyId>) -> TyId {
@@ -2151,6 +2324,10 @@ impl Checker {
                 let a = a.into_iter().map(|x| self.subst_opens(x, map)).collect();
                 self.types.intern(Ty::Enum(e, a))
             }
+            Ty::Iface(i, a) => {
+                let a = a.into_iter().map(|x| self.subst_opens(x, map)).collect();
+                self.types.intern(Ty::Iface(i, a))
+            }
             Ty::Tuple(a) => {
                 let a = a.into_iter().map(|x| self.subst_opens(x, map)).collect();
                 self.types.tuple(a)
@@ -2159,126 +2336,430 @@ impl Checker {
                 let a = a.into_iter().map(|x| self.subst_opens(x, map)).collect();
                 self.types.union(a)
             }
+            Ty::Inter(a) => {
+                let a = a.into_iter().map(|x| self.subst_opens(x, map)).collect();
+                self.types.inter(a)
+            }
             Ty::Fn(p, r) => {
                 let p = p.into_iter().map(|x| self.subst_opens(x, map)).collect();
                 let r = self.subst_opens(r, map);
                 self.types.func(p, r)
             }
+            Ty::Frozen(i) => {
+                let i = self.subst_opens(i, map);
+                self.freeze_ty(i)
+            }
             _ => t,
         }
     }
 
+    /// Checks one requirement against the type `recv` passed for an open, returning the type it
+    /// produces.
     fn apply_req(
         &mut self,
         span: Span,
         fname: &str,
-        pname: &str,
+        open: OpenId,
         recv: TyId,
         req: &OpenReq,
         map: &FxHashMap<OpenId, TyId>,
-    ) -> Option<TyId> {
+    ) -> TyId {
+        let recv = self.types.shallow_resolve(recv);
         // A requirement on an open of the calling function propagates to it.
-        if let Ty::Open(co) = self.types.get(self.types.shallow_resolve(recv)).clone() {
+        if let Ty::Open(co) = self.types.get(recv).clone() {
             let ret = self.new_open(co);
-            let mut r = req.clone();
-            match &mut r {
-                OpenReq::Method { ret: rr, args, .. } => {
-                    *rr = ret;
-                    for a in args.iter_mut() {
-                        *a = self.subst_opens(*a, map);
+            let inputs: Vec<TyId> = req.inputs().into_iter().map(|t| self.subst_opens(t, map)).collect();
+            let r = req.with(&inputs, ret);
+            self.push_req(co, r);
+            return ret;
+        }
+        match self.types.get(recv).clone() {
+            Ty::Dyn => self.types.dyn_,
+            Ty::Error => self.types.error,
+            Ty::Never => self.types.never,
+            // Erased generics dispatch on the runtime value: each member of a union must satisfy the
+            // requirement, and the result is the union of what each produces.
+            Ty::Union(parts) => {
+                let mut outs = Vec::new();
+                for p in parts {
+                    let t = self.req_on(span, fname, open, p, recv, req, map);
+                    if self.types.is_error(t) {
+                        return t;
                     }
+                    outs.push(t);
                 }
-                OpenReq::BinOp { ret: rr, rhs, .. } => {
-                    *rr = ret;
-                    *rhs = self.subst_opens(*rhs, map);
-                }
-                OpenReq::Unary { ret: rr, .. } | OpenReq::Index { ret: rr, .. } | OpenReq::Call { ret: rr, .. } => {
-                    *rr = ret
-                }
-                OpenReq::Iter { elem, .. } => *elem = ret,
+                self.types.union(outs)
             }
-            self.opens[co as usize].reqs.push(r);
-            return Some(ret);
+            _ => self.req_on(span, fname, open, recv, recv, req, map),
         }
-        if matches!(self.types.get(self.types.shallow_resolve(recv)), Ty::Dyn | Ty::Error) {
-            return Some(self.types.dyn_);
-        }
+    }
+
+    /// `apply_req` for one non-union type `recv` (a member of the argument type `whole`).
+    #[allow(clippy::too_many_arguments)]
+    fn req_on(
+        &mut self,
+        span: Span,
+        fname: &str,
+        open: OpenId,
+        recv: TyId,
+        whole: TyId,
+        req: &OpenReq,
+        map: &FxHashMap<OpenId, TyId>,
+    ) -> TyId {
+        let err = self.types.error;
         let fail = |c: &mut Checker, what: String, at: Span| {
-            let msg = format!("`{}` passed to `{fname}` as `{pname}` {what}", c.show(recv));
+            let shown = if recv == whole {
+                format!("`{}`", c.show(whole))
+            } else {
+                format!("`{}` (part of `{}`)", c.show(recv), c.show(whole))
+            };
+            let msg = match &c.opens[open as usize].label {
+                None => format!("{shown} passed to `{fname}` as `{}` {what}", c.opens[open as usize].param_name),
+                Some(l) => format!("in this call to `{fname}`, `{l}` is {shown}, which {what}"),
+            };
             c.emit(Diag::error("E0342", msg, span).note_at("required by this use", at));
         };
+        let inputs: Vec<TyId> = req.inputs().into_iter().map(|t| self.subst_opens(t, map)).collect();
         match req {
-            OpenReq::Method { name, args, ret: _, span: rs, .. } => {
+            OpenReq::Method { name, named, block, span: rs, .. } => {
+                let args = inputs;
                 if args.is_empty() {
                     if let Some((_, ft)) = self.lookup_field(recv, name) {
-                        return Some(ft);
+                        return ft;
                     }
                 }
-                match self.lookup_method(recv, name, true) {
-                    Some(m) => {
-                        let (ps, r) = self.instantiate_sig(&m);
-                        let req_n = ps.iter().filter(|p| !p.has_default).count();
-                        if args.len() < req_n || args.len() > ps.len() {
-                            fail(self, format!("has `{name}` with a different number of parameters"), *rs);
-                            return Some(self.types.error);
-                        }
-                        for (k, &a) in args.iter().enumerate() {
-                            let a = self.subst_opens(a, map);
-                            if !self.assignable(a, ps[k].ty) && !self.try_int_to_float(a, ps[k].ty) {
-                                fail(self, format!("has `{name}` but it does not accept `{}`", self.show(a)), *rs);
+                let Some(m) = self.lookup_method(recv, name, true) else {
+                    fail(self, format!("has no method or field `{name}`"), *rs);
+                    return err;
+                };
+                let f = self.fns[m.fid as usize].clone();
+                if f.self_kind == ast::SelfKind::None {
+                    fail(self, format!("has `{name}` only as a static function"), *rs);
+                    return err;
+                }
+                if !self.runtime_dispatchable(recv, name, &m.dispatch) {
+                    let msg = format!(
+                        "has `{name}` only as an extension or interface default method, which a call through an untyped parameter cannot reach"
+                    );
+                    fail(self, msg, *rs);
+                    return err;
+                }
+                if m.frozen {
+                    if f.mutating {
+                        fail(self, format!("is frozen, but `{name}` mutates it"), *rs);
+                        return err;
+                    } else if !f.is_native {
+                        let shown = self.show(recv);
+                        self.frozen_calls.push((*rs, m.fid, shown));
+                    }
+                }
+                let (ps, ret) = self.instantiate_sig(&m);
+                let inst = std::mem::take(&mut self.last_inst);
+                let inst_subst = std::mem::take(&mut self.last_inst_subst);
+                // Match arguments to parameters as a call does: positional, named, trailing block.
+                let mut slots: Vec<Option<usize>> = vec![None; ps.len()];
+                let mut pos = 0;
+                for k in 0..args.len() {
+                    let is_block = *block && k + 1 == args.len();
+                    let j = if is_block {
+                        match (0..ps.len()).rev().find(|&j| slots[j].is_none()) {
+                            Some(j) => j,
+                            None => {
+                                fail(self, format!("has `{name}`, but it does not take a block"), *rs);
+                                return err;
                             }
                         }
-                        Some(r)
+                    } else if let Some(Some(n)) = named.get(k) {
+                        match ps.iter().position(|p| &p.name == n) {
+                            Some(j) if slots[j].is_none() => j,
+                            _ => {
+                                fail(self, format!("has `{name}`, but it has no parameter named `{n}`"), *rs);
+                                return err;
+                            }
+                        }
+                    } else {
+                        while pos < ps.len() && slots[pos].is_some() {
+                            pos += 1;
+                        }
+                        if pos >= ps.len() {
+                            fail(self, format!("has `{name}`, but it takes {} argument(s)", ps.len()), *rs);
+                            return err;
+                        }
+                        pos
+                    };
+                    slots[j] = Some(k);
+                    // The body is compiled once and passes arguments by position.
+                    if j != k {
+                        let msg = format!(
+                            "has `{name}`, but a call through an untyped parameter passes arguments by position, so they must follow the order of `{name}`'s parameters"
+                        );
+                        fail(self, msg, *rs);
+                        return err;
                     }
-                    None => {
-                        fail(self, format!("has no method `{name}`"), *rs);
-                        Some(self.types.error)
+                }
+                for (j, p) in ps.iter().enumerate() {
+                    match slots[j] {
+                        None if !p.has_default => {
+                            fail(self, format!("has `{name}`, but it needs argument `{}`", p.name), *rs);
+                            return err;
+                        }
+                        Some(k) if !self.assignable(args[k], p.ty) => {
+                            let msg = format!(
+                                "has `{name}`, but its parameter `{}` is `{}`, not `{}`",
+                                p.name,
+                                self.show(p.ty),
+                                self.show(args[k])
+                            );
+                            fail(self, msg, *rs);
+                            return err;
+                        }
+                        _ => {}
                     }
                 }
-            }
-            OpenReq::BinOp { op, rhs, span: rs, .. } => {
-                let rhs = self.subst_opens(*rhs, map);
-                let dummy = Expr { id: u32::MAX, kind: ExprKind::Error, span: *rs };
-                self.suppress_diags += 1;
-                let before = self.diags.len();
-                let t = self.binary_types(&dummy, *op, &dummy, &dummy, recv, rhs);
-                self.suppress_diags -= 1;
-                self.diags.truncate(before);
-                self.bins.remove(&u32::MAX);
-                self.coerce.remove(&u32::MAX);
-                if self.types.is_error(t) {
-                    fail(self, format!("does not support `{}` with `{}`", op.symbol(), self.show(rhs)), *rs);
+                for (tp, v) in inst {
+                    let actual = self.types.resolve(v);
+                    if matches!(self.types.get(actual), Ty::Var(_) | Ty::Error) {
+                        continue;
+                    }
+                    for b in self.params[tp as usize].bounds.clone() {
+                        let b = self.types.subst(b, &inst_subst, Some(m.self_ty));
+                        if !self.assignable(actual, b) {
+                            let msg = format!(
+                                "has `{name}`, but `{}` does not satisfy its bound `{}`",
+                                self.show(actual),
+                                self.show(b)
+                            );
+                            fail(self, msg, *rs);
+                            return err;
+                        }
+                    }
                 }
-                Some(t)
+                self.types.resolve(ret)
             }
-            OpenReq::Unary { op, span: rs, .. } => {
-                if self.numeric_kind(recv).is_some() {
-                    Some(recv)
-                } else {
-                    fail(self, format!("does not support unary `{}`", if *op == UnOp::Neg { "-" } else { "~" }), *rs);
-                    Some(self.types.error)
-                }
-            }
-            OpenReq::Index { args, span: rs, .. } => {
-                let idx = args.first().map(|&a| self.subst_opens(a, map)).unwrap_or(self.types.int);
-                let t = self.index_result_ty(recv, idx, *rs);
-                Some(t)
-            }
-            OpenReq::Iter { span: rs, .. } => match self.elem_type(recv) {
-                Some(t) => Some(t),
-                None => {
-                    fail(self, "is not iterable".into(), *rs);
-                    Some(self.types.error)
+            OpenReq::BinOp { op, span: rs, .. } => match self.trial_binary(*op, recv, inputs[0]) {
+                Ok(t) => t,
+                Err(typed) => {
+                    let msg = format!(
+                        "does not support `{}` with `{}`{}",
+                        op.symbol(),
+                        self.show(inputs[0]),
+                        generic_op_hint(*op, typed)
+                    );
+                    fail(self, msg, *rs);
+                    err
                 }
             },
-            OpenReq::Call { args, span: rs, .. } => match self.types.get(self.types.shallow_resolve(recv)).clone() {
-                Ty::Fn(ps, r) if ps.len() == args.len() => Some(r),
+            OpenReq::BinOpRhs { op, span: rs, .. } => match self.trial_binary(*op, inputs[0], recv) {
+                Ok(t) => t,
+                Err(typed) => {
+                    let msg = format!(
+                        "cannot be the right side of `{}` `{}`{}",
+                        self.show(inputs[0]),
+                        op.symbol(),
+                        generic_op_hint(*op, typed)
+                    );
+                    fail(self, msg, *rs);
+                    err
+                }
+            },
+            OpenReq::Unary { op, span: rs, .. } => {
+                if self.numeric_kind(recv).is_some() {
+                    recv
+                } else {
+                    fail(self, format!("does not support unary `{}`", if *op == UnOp::Neg { "-" } else { "~" }), *rs);
+                    err
+                }
+            }
+            OpenReq::Index { span: rs, .. } => {
+                if inputs.len() != 1 {
+                    fail(self, "cannot be indexed with these arguments".into(), *rs);
+                    return err;
+                }
+                match self.trial_index(recv, inputs[0], *rs) {
+                    Some(t) => t,
+                    None => {
+                        fail(self, format!("cannot be indexed with `{}`", self.show(inputs[0])), *rs);
+                        err
+                    }
+                }
+            }
+            OpenReq::SetIndex { op, span: rs, .. } => {
+                let (index, value) = (inputs[0], inputs[1]);
+                if matches!(self.types.get(recv), Ty::Frozen(_)) {
+                    fail(self, "is frozen, but is assigned an element".into(), *rs);
+                    return err;
+                }
+                let Some(m) = self.lookup_method(recv, "[]=", false) else {
+                    fail(self, "does not support index assignment".into(), *rs);
+                    return err;
+                };
+                if !self.runtime_dispatchable(recv, "[]=", &m.dispatch) {
+                    let msg = "has `[]=` only as an extension or interface default method".to_string();
+                    fail(self, msg, *rs);
+                    return err;
+                }
+                let (ps, _) = self.instantiate_sig(&m);
+                if ps.len() != 2 || !self.assignable(index, ps[0].ty) {
+                    fail(self, format!("cannot be indexed with `{}`", self.show(index)), *rs);
+                    return err;
+                }
+                let stored = match op {
+                    None => Some(value),
+                    Some(BinOp::Or | BinOp::And) => {
+                        let b = self.types.bool;
+                        self.assignable(value, b).then_some(b)
+                    }
+                    Some(BinOp::Coalesce) => match self.trial_index(recv, index, *rs) {
+                        Some(c) => {
+                            let inner = self.types.strip_nil(c).unwrap_or(c);
+                            self.assignable(value, inner).then_some(inner)
+                        }
+                        None => None,
+                    },
+                    Some(o) => match self.trial_index(recv, index, *rs) {
+                        Some(c) => self.trial_binary(*o, c, value).ok(),
+                        None => None,
+                    },
+                };
+                match stored {
+                    Some(t) if self.assignable(t, ps[1].ty) => self.types.nil,
+                    _ => {
+                        fail(self, format!("cannot store `{}` as an element", self.show(value)), *rs);
+                        err
+                    }
+                }
+            }
+            OpenReq::Iter { span: rs, .. } => match self.elem_type(recv) {
+                Some(t) => t,
+                None => {
+                    fail(self, "is not iterable".into(), *rs);
+                    err
+                }
+            },
+            OpenReq::Call { span: rs, .. } => match self.types.get(recv).clone() {
+                Ty::Fn(ps, r) if ps.len() == inputs.len() => {
+                    for (k, &a) in inputs.iter().enumerate() {
+                        if !self.assignable(a, ps[k]) {
+                            let msg = format!(
+                                "is a function whose parameter {} is `{}`, not `{}`",
+                                k + 1,
+                                self.show(ps[k]),
+                                self.show(a)
+                            );
+                            fail(self, msg, *rs);
+                            return err;
+                        }
+                    }
+                    r
+                }
+                Ty::Fn(ps, _) => {
+                    let msg = format!("is a function of {} argument(s), called with {}", ps.len(), inputs.len());
+                    fail(self, msg, *rs);
+                    err
+                }
                 _ => {
-                    fail(self, "is not callable with these arguments".into(), *rs);
-                    Some(self.types.error)
+                    fail(self, "is not callable".into(), *rs);
+                    err
                 }
             },
         }
+    }
+
+    /// The result of `l op r` if typed code accepts it and the generic evaluation in an
+    /// implicit-generic body can perform it (no diagnostics are emitted). `Err(true)` means typed
+    /// code accepts it but the generic evaluation cannot.
+    fn trial_binary(&mut self, op: BinOp, l: TyId, r: TyId) -> Result<TyId, bool> {
+        let dummy = Expr { id: u32::MAX, kind: ExprKind::Error, span: Span::default() };
+        let before = self.suppressed_errors;
+        self.suppress_diags += 1;
+        let t = self.binary_types(&dummy, op, &dummy, &dummy, l, r);
+        self.suppress_diags -= 1;
+        let res = self.bins.remove(&u32::MAX);
+        self.coerce.remove(&u32::MAX);
+        let failed = self.suppressed_errors != before || self.types.is_error(t);
+        if failed {
+            return Err(false);
+        }
+        // The body evaluates the operator generically: bitwise operators on integers only,
+        // comparisons through `<=>`, and other operators by method name on the value's class.
+        let reachable = match (op, &res) {
+            (BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr, r) => {
+                matches!(r, Some(BinRes::Bitwise))
+            }
+            (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge, Some(BinRes::Method(..))) => {
+                // Typed code may use a `<` method; the generic comparison needs `<=>`.
+                self.trial_binary(BinOp::Cmp, l, r).is_ok()
+            }
+            (_, Some(BinRes::Method(d, swapped))) => {
+                let name = if op == BinOp::In { "contains" } else { op.symbol() };
+                self.runtime_dispatchable(if *swapped { r } else { l }, name, d)
+            }
+            _ => true,
+        };
+        if reachable {
+            Ok(t)
+        } else {
+            Err(true)
+        }
+    }
+
+    /// The element type of `recv[index]` if typed code would accept it.
+    fn trial_index(&mut self, recv: TyId, index: TyId, span: Span) -> Option<TyId> {
+        let before = self.suppressed_errors;
+        self.suppress_diags += 1;
+        let t = self.index_result_ty(recv, index, span);
+        self.suppress_diags -= 1;
+        (self.suppressed_errors == before && !self.types.is_error(t)).then_some(t)
+    }
+
+    /// Whether the method that typed code resolves for `recv.name` (dispatched as `d`) is also
+    /// the one found by name on the value's class at runtime. An implicit-generic body is compiled
+    /// once and calls methods by name, so it reaches a class's own methods and getters, and an
+    /// extension of a class or enum when it is the only extension method of that name for it;
+    /// interface default methods and extensions of other types are resolved statically only.
+    fn runtime_dispatchable(&self, recv: TyId, name: &str, d: &Dispatch) -> bool {
+        let f = match d {
+            Dispatch::Virtual(..) | Dispatch::Dynamic(_, None) => return true,
+            Dispatch::Dynamic(_, Some(_)) => return false,
+            Dispatch::Static(f) => *f,
+        };
+        if self.fns[f as usize].is_default {
+            return false;
+        }
+        if !self.is_ext_fn(f) {
+            return true;
+        }
+        let mut t = self.types.shallow_resolve(recv);
+        if let Ty::Frozen(i) = self.types.get(t) {
+            t = self.types.shallow_resolve(*i);
+        }
+        let same_target = |target: TyId| match (self.types.get(t), self.types.get(target)) {
+            (Ty::Class(a, _), Ty::Class(b, _)) => a == b || self.upcast_class(*a, *b),
+            (Ty::Enum(a, _), Ty::Enum(b, _)) => a == b,
+            _ => false,
+        };
+        let owners: Vec<FnId> = self
+            .exts
+            .iter()
+            .filter(|x| !x.is_class_methods && same_target(x.target))
+            .filter_map(|x| x.methods.get(name).copied())
+            .collect();
+        owners == [f]
+    }
+
+    /// Whether class `sub` is `sup` or inherits from it.
+    fn upcast_class(&self, sub: ClassId, sup: ClassId) -> bool {
+        let mut cur = Some(sub);
+        while let Some(c) = cur {
+            if c == sup {
+                return true;
+            }
+            cur = self.classes.get(&c).and_then(|ci| ci.superclass).and_then(|t| match self.types.get(t) {
+                Ty::Class(sc, _) => Some(*sc),
+                _ => None,
+            });
+        }
+        false
     }
 
     /// Element type of an iterable type (for `for` and implicit generics).
@@ -2504,6 +2985,17 @@ impl Checker {
                 self.check_args_loose(args, block);
                 return self.types.error;
             }
+            Ty::Frozen(inner) if matches!(self.types.get(self.types.shallow_resolve(inner)), Ty::Open(_)) => {
+                let Ty::Open(o) = self.types.get(self.types.shallow_resolve(inner)).clone() else { unreachable!() };
+                let pname = self.opens[o as usize].param_name.clone();
+                let msg = format!(
+                    "cannot use `{}` on a frozen value derived from untyped parameter `{pname}`; annotate its type",
+                    name.name
+                );
+                self.err("E0369", msg, name.span);
+                self.check_args_loose(args, block);
+                return self.types.error;
+            }
             Ty::Open(o) => {
                 let tys: Vec<TyId> = args.iter().map(|a| self.check_expr(&a.value, None)).collect();
                 let mut tys = tys;
@@ -2512,13 +3004,17 @@ impl Checker {
                 }
                 let named = args.iter().map(|a| a.name.as_ref().map(|n| n.name.clone())).collect();
                 let ret = self.new_open(o);
-                self.opens[o as usize].reqs.push(OpenReq::Method {
-                    name: name.name.clone(),
-                    args: tys,
-                    named,
-                    ret,
-                    span: e.span,
-                });
+                self.push_req(
+                    o,
+                    OpenReq::Method {
+                        name: name.name.clone(),
+                        args: tys,
+                        named,
+                        block: block.is_some(),
+                        ret,
+                        span: e.span,
+                    },
+                );
                 let slots = (0..args.len()).map(ArgSlot::Arg).chain(block.map(|_| ArgSlot::Block)).collect();
                 self.calls.insert(
                     e.id,
@@ -2600,6 +3096,9 @@ impl Checker {
         }
         let (slots, ret) = self.check_args(e, &m, args, block, expected, parallel);
         self.note_self_call(&m, recv);
+        if matches!(m.dispatch, Dispatch::Dynamic(..)) && matches!(f.owner, Owner::Iface(_)) {
+            self.dyn_targets.insert(e.id, m.fid);
+        }
         self.calls.insert(e.id, CallRes::Fn { dispatch: m.dispatch.clone(), recv: true, args: slots, safe: false });
         ret
     }
@@ -2835,7 +3334,7 @@ impl Checker {
         if let Ty::Open(o) = self.types.get(rtr).clone() {
             let it = self.check_expr(&args[0], None);
             let ret = self.new_open(o);
-            self.opens[o as usize].reqs.push(OpenReq::Index { args: vec![it], ret, span: e.span });
+            self.push_req(o, OpenReq::Index { args: vec![it], ret, span: e.span });
             self.calls.insert(e.id, CallRes::IndexGet);
             return ret;
         }
@@ -3210,7 +3709,7 @@ impl Checker {
             }
             Ty::Open(o) => {
                 let elem = self.new_open(o);
-                self.opens[o as usize].reqs.push(OpenReq::Iter { elem, span: iter.span });
+                self.push_req(o, OpenReq::Iter { elem, span: iter.span });
                 (ForKind::Each(Dispatch::Dynamic("each".into(), None)), elem)
             }
             Ty::Dyn => (ForKind::Each(Dispatch::Dynamic("each".into(), None)), self.types.dyn_),
@@ -3313,4 +3812,20 @@ pub fn expr_to_type_expr(e: &Expr) -> Option<TypeExpr> {
         _ => return None,
     };
     Some(TypeExpr { kind, span: e.span })
+}
+
+/// Why an operator typed code accepts is not available through an untyped parameter.
+fn generic_op_hint(op: BinOp, typed: bool) -> &'static str {
+    if !typed {
+        return "";
+    }
+    match op {
+        BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+            " (through an untyped parameter, bitwise operators apply to `Int` only)"
+        }
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+            " (through an untyped parameter, comparisons use the type's own `<=>`)"
+        }
+        _ => " (the operator is an extension or interface default method, which an untyped parameter cannot reach)",
+    }
 }

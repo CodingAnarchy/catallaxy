@@ -54,6 +54,35 @@ jobs:
       - name: Clippy
         run: cargo clippy --release --locked -- -D warnings
 
+  vscode:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build catx
+        working-directory: .
+        run: cargo build --release --locked -p catallaxy --bin catx
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+      - name: Grammar (every example and conformance program, scopes, snapshots)
+        run: npm run test:grammar
+      - name: Language server over stdio
+        run: npm run test:lsp
+      - name: The extension in VS Code
+        run: xvfb-run -a npm run test:vscode
+      - name: Package
+        run: npm run package
+
   miri:
     # parking_lot_core's Linux futex call is rejected by current Miri; macOS is fine.
     runs-on: macos-latest

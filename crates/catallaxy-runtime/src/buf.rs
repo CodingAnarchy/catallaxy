@@ -31,6 +31,12 @@ impl WordBuf {
 
     /// A new buffer of `cap` slots, each holding `fill`.
     pub fn alloc(cap: usize, fill: u64) -> *mut WordBuf {
+        Self::alloc_from(cap, std::iter::empty(), fill)
+    }
+
+    /// A new buffer of `cap` slots holding the words of `prefix` (at most `cap` of them) and
+    /// then `fill`, written in one pass.
+    pub fn alloc_from(cap: usize, prefix: impl IntoIterator<Item = u64>, fill: u64) -> *mut WordBuf {
         if cap == 0 {
             return Self::empty();
         }
@@ -41,7 +47,45 @@ impl WordBuf {
             }
             std::ptr::addr_of_mut!((*p).cap).write(cap);
             let slots = Self::slots_ptr(p);
-            for i in 0..cap {
+            let mut n = 0;
+            for w in prefix.into_iter().take(cap) {
+                slots.add(n).write(AtomicU64::new(w));
+                n += 1;
+            }
+            for i in n..cap {
+                slots.add(i).write(AtomicU64::new(fill));
+            }
+            crate::note_external(cap * 8);
+            p
+        }
+    }
+
+    /// A buffer holding `items` (with the vector's capacity, spare slots holding `fill`) that
+    /// takes over the vector's allocation instead of copying it: the allocation is grown by one
+    /// word for the capacity header and the items are moved up within it, so building a large
+    /// container from a vector does not need memory for two copies.
+    pub fn from_vec(items: Vec<u64>, fill: u64) -> *mut WordBuf {
+        let mut items = std::mem::ManuallyDrop::new(items);
+        let (ptr, len, cap) = (items.as_mut_ptr(), items.len(), items.capacity());
+        if cap == 0 {
+            return Self::empty();
+        }
+        unsafe {
+            // `Vec<u64>` allocated `cap` words with the global allocator; `layout(cap)` has
+            // the same alignment and one more word, so `realloc` may grow it in place.
+            let old = Layout::array::<u64>(cap).expect("container too large");
+            let new = Self::layout(cap);
+            let p = std::alloc::realloc(ptr as *mut u8, old, new.size()) as *mut WordBuf;
+            if p.is_null() {
+                // The vector's allocation is still valid; free it before reporting.
+                std::alloc::dealloc(ptr as *mut u8, old);
+                std::alloc::handle_alloc_error(new);
+            }
+            let words = p as *mut u64;
+            std::ptr::copy(words, words.add(1), len);
+            std::ptr::addr_of_mut!((*p).cap).write(cap);
+            let slots = Self::slots_ptr(p);
+            for i in len..cap {
                 slots.add(i).write(AtomicU64::new(fill));
             }
             crate::note_external(cap * 8);
