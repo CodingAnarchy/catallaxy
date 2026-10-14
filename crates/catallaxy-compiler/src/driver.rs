@@ -196,6 +196,7 @@ fn compile_entry(path: &Path, src: Option<String>, loader: &dyn SourceLoader, op
     }
 
     run_phases(&mut ck, &module_ids);
+    diags.extend(crate::lint::run(&ck, &sm));
     diags.append(&mut ck.diags);
     let mut program = None;
     if !opts.check_only && !diags.iter().any(|d| d.is_error()) {
@@ -205,6 +206,7 @@ fn compile_entry(path: &Path, src: Option<String>, loader: &dyn SourceLoader, op
             program = Some(p);
         }
     }
+    crate::lint::apply_allows(&mut diags, &sm);
     dedup(&mut diags);
     Compilation { sm, ck, diags, program, module_files }
 }

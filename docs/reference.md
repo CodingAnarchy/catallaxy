@@ -603,6 +603,21 @@ named files are edited, not the modules they import. A file that was formatted b
 again afterwards. It prints each fix it applies; `--dry-run` prints them without writing. The exit
 status is 1 if errors remain, 2 if a file could not be read or written.
 
+Warnings never make `catx check` fail. A comment `# allow(CODE, ...)` on the warning's line, or on
+the line above it, silences those warnings there (`s += x # allow(W0004)`). The warnings are:
+
+- `W0001`: `!` on a value that is never nil (fix: remove it). `W0002`: the left side of `??` is never
+  nil. `W0003`: `?.` on a value that is never nil.
+- `W0004`: a `String` local declared outside a loop grows by `s += x` or `s = s + x` inside it (a
+  `for`, `while` or `loop` body, or the block of `each*`, `times`, `upto`, `downto`, `map`,
+  `flat_map`, `filter`, `filter_map`, `reject` or `select`). Each append copies the whole string, so
+  the loop is quadratic; a `StringBuilder` appends in place. Loops with a literal range of at most 16
+  elements (`for i in 0..3`, `(1..4).each`, `4.times`, `1.upto(8)`) are not reported. When the
+  rewrite is mechanical (the loop is a statement on its own lines, it touches the local only by
+  appending, it cannot `return` or `?` out, and no closure elsewhere captures the local), the fix
+  adds `s_sb = StringBuilder.new()` and `s_sb.push(s)` before the loop (or replaces a `s = ""` just
+  before it), turns each append into `s_sb.push(x)`, and adds `s = s_sb.to_s` after the loop.
+
 `check --json` prints `{"diagnostics": [...]}` where each diagnostic has `code`, `severity`, `message`,
 `file`, `span` (`start`/`end` as `{line, col, offset}`, 1-based lines and columns), `notes`, and `fixes`
 (each with a `message`, `applicable` (false for a suggestion a person must check), and a list of
