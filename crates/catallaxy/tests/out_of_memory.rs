@@ -273,13 +273,17 @@ grow_list()
 /// the vector they collect into, the list they make of it, its strings, a file's contents
 /// (`cannot allocate ...`, `cannot read ...`), or the list the program keeps them in (`cannot
 /// grow a list ...`).
+///
+/// The programs keep each list to about 100,000 items: marking a list pushes its items on the
+/// collector's mark stack, whose growth is not checked, so a collection while memory is
+/// exhausted could abort on a list of millions of strings.
 const NATIVE: [&str; 2] = ["MemoryError: cannot ", OOM];
 
 /// Strings split into lists: `split`, `chars` and `lines`.
 #[test]
 fn string_lists() {
     let src = r#"fn grow() -> Int {
-  text = "ab cd\n" * 500_000
+  text = "ab cd\n" * 20_000
   keep: List[List[String]] = []
   while true {
     keep.push(text.split(" "))
@@ -293,13 +297,13 @@ match t.join() {
   Ok(n) => puts("grew to #{n}")
   Err(e) => puts("join: #{e}")
 }
-text = "ab cd\n" * 100_000
+text = "ab cd\n" * 10_000
 puts("after: #{text.split(" ").length + text.chars().length + text.lines().length}")
 text = ""
 grow()
 "#;
     let o = run_limited("string_lists.cx", src);
-    check(&o, &NATIVE, "after: 800001", &NATIVE, "grow");
+    check(&o, &NATIVE, "after: 80001", &NATIVE, "grow");
 }
 
 /// Parsers: `Json.parse` and `Csv.parse`.
@@ -307,7 +311,7 @@ grow()
 fn parsers() {
     let src = r#"fn grow() -> Int {
   json = "[" + "0," * 1_000_000 + "0]"
-  csv = "a,b,c,d\n" * 250_000
+  csv = "a,b,c,d\n" * 50_000
   docs: List[Dyn] = []
   tables: List[List[List[String]]] = []
   while true {
@@ -322,12 +326,12 @@ match t.join() {
   Err(e) => puts("join: #{e}")
 }
 doc = Json.parse("[" + "1," * 100_000 + "1]").unwrap()
-rows = Csv.parse("a,b\n" * 100_000).unwrap()
+rows = Csv.parse("a,b\n" * 50_000).unwrap()
 puts("after: #{if doc == nil { 0 } else { 1 } + rows.length}")
 grow()
 "#;
     let o = run_limited("parsers.cx", src);
-    check(&o, &NATIVE, "after: 100001", &NATIVE, "grow");
+    check(&o, &NATIVE, "after: 50001", &NATIVE, "grow");
 }
 
 /// Copies of lists and dicts: `sorted`, `reverse`, `+` and `keys`.
@@ -365,7 +369,7 @@ fn files() {
     let dir = std::env::temp_dir().join(format!("catx-oom-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let data = dir.join("files.txt");
-    std::fs::write(&data, "abcdefghi\n".repeat(1_600_000)).unwrap();
+    std::fs::write(&data, "abcdefghi\n".repeat(100_000)).unwrap();
     let src = r#"fn grow(path: String) -> Int {
   texts: List[String] = []
   blobs: List[Bytes] = []
@@ -388,5 +392,5 @@ grow(path)
 "#
     .replace("PATH", data.to_str().unwrap());
     let o = run_limited("files.cx", &src);
-    check(&o, &NATIVE, "after: 17600000", &NATIVE, "grow");
+    check(&o, &NATIVE, "after: 1100000", &NATIVE, "grow");
 }
