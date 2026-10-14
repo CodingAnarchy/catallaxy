@@ -10,6 +10,7 @@ pub mod diag;
 pub mod driver;
 pub mod fmt;
 pub mod lexer;
+pub mod lint;
 pub mod parser;
 pub mod query;
 pub mod symbols;
