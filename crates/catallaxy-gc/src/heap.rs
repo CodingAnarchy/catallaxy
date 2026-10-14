@@ -121,6 +121,9 @@ impl Page {
     ///
     /// # Safety
     /// The page must be private to the calling thread `tid`.
+    // Out of line: inlined into the minor collection, its loop's speed swung by 40% with
+    // unrelated code changes (`bench/gen.cx`, issue #120). One call per page costs nothing.
+    #[inline(never)]
     unsafe fn sweep_young(&self, tid: u16, only_new: bool) -> (*mut u8, usize, usize, usize) {
         let size = self.slot_size();
         let mut head: *mut u8 = ptr::null_mut();
@@ -1072,15 +1075,27 @@ impl LocalHeap {
         if !tenured.is_empty() {
             POOL.large.lock().append(&mut tenured);
         }
-        for &o in &self.remset {
-            (*o).clear_remembered();
-        }
-        self.remset.clear();
+        self.forget_remembered();
         self.young_bytes = 0;
         self.minor_wanted = false;
         // Survivors are old now: they count toward the next major collection.
         stats::note_allocated(promoted);
         (freed, promoted)
+    }
+
+    /// Empties the remembered set, clearing the objects' remembered bits.
+    #[inline(never)]
+    fn forget_remembered(&mut self) {
+        for &o in &self.remset {
+            // SAFETY: remembered objects are old, so no collection has freed them yet (a major
+            // collection empties the set before it sweeps).
+            let h = unsafe { &*o };
+            // An object handed to another thread since may be in that thread's set now.
+            if !h.owned_by_other(self.owner) {
+                h.clear_remembered();
+            }
+        }
+        self.remset.clear();
     }
 
     /// The remembered set, for marking.
@@ -1103,10 +1118,7 @@ impl LocalHeap {
             }
         }
         POOL.large.lock().append(&mut self.young_large);
-        for &o in &self.remset {
-            unsafe { (*o).clear_remembered() };
-        }
-        self.remset.clear();
+        self.forget_remembered();
         self.young_bytes = 0;
         self.minor_wanted = false;
         for class in 0..NUM_CLASSES {
