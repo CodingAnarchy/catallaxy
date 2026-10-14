@@ -474,18 +474,32 @@ Annotate the parameter to use any of these.
   - Building strings (`+`, interpolation, `*`, padding, `StringBuilder`) and growing a list (`push`) or a
     dict or set (`d[k] = v`, `add`) panics where the allocator refuses the memory, after a collection and
     one retry. List methods that rebuild the list (`insert`, `unshift` and the like) panic without the retry.
+  - Standard library methods that build a list, dict or string from their arguments panic where the
+    allocator refuses its buffer or one of its strings: splitting strings (`split`, `chars`, `lines`,
+    `bytes`, `Regex.split`, `Regex.find_all`), copying collections (`sorted`, `reverse`, `dup`,
+    `slice`, `x[a...b]`, `+`, `concat`, `keys`, `values`, `entries`, `Set.from`), parsing
+    (`Json.parse`, `Csv.parse`), reading whole files and input (`File.read`, `File.read_lines`,
+    `File.read_bytes`, `Stdin.read_all`, `Stdin.read_lines`, `Stdin.read_bytes`) and `Bytes`
+    conversions. (`map`, `select`, `flat_map` and the other `Enumerable` methods are written in
+    Catallaxy and grow their result with `push` or `concat`.) Most do not collect and retry first, because the values they have built so far are
+    not yet reachable from the program; those that allocate their result before anything else
+    (`chars`, `bytes`, `List.filled`, `List.with_capacity`) do. Once the system has refused memory,
+    these methods also refuse heap objects that need a new heap segment until the next collection
+    (the collection runs first where it can).
   - Starting a thread or fiber whose stacks cannot be allocated panics in `spawn` or `Fiber.start`
     (neither returns a `Result`). For a thread, the OS may refuse it instead, for lack of memory or a
     thread limit: that panic starts `ThreadError:`.
-- What is not covered: other allocations inside the runtime, such as the temporary vectors natives
-  build their results in (`map`, `split`, `keys` and the like), get one retry with the headroom released
+- What is not covered: other allocations inside the runtime get one retry with the headroom released
   and then a `MemoryError` at the next safepoint. If that retry fails too, the process aborts
-  (`memory allocation of N bytes failed`). The same happens when the reserve is used up before a
+  (`memory allocation of N bytes failed`). These include the scratch buffer of a stable sort (which
+  `sorted` checks can be had just before), the text `Json.stringify` and `Csv.format` build, the keys
+  of a parsed JSON object, and the collector's mark stack, which needs 8 bytes for each object in
+  the longest list it marks (a list of 100,000 strings: 800 KB). The same happens when the reserve is used up before a
   safepoint is reached. The retry comes from the global allocator `catallaxy_gc::Allocator`, which
   `catx` and the C API libraries use; a Rust program embedding the runtime gets it only if it opts in
-  (section 11). On Linux with memory overcommit, and under memory pressure on macOS, a program that grows gradually is usually killed by the
-  OS before any allocation fails; set `CATX_MAX_HEAP` below the machine's memory to turn that into a
-  `MemoryError`.
+  (section 11). On Linux with memory overcommit, and under memory pressure on macOS, a program that
+  grows gradually is usually killed by the OS before any allocation fails; set `CATX_MAX_HEAP` below
+  the machine's memory to turn that into a `MemoryError`.
 
 ## 8. Concurrency
 
@@ -694,6 +708,12 @@ Rules for native code: values held across a call back into the VM (`native::call
 runs Catallaxy code) must be rooted in a `HandleScope`; handles borrow the scope, so they cannot
 escape it. Allocation alone never collects. Missing optional arguments arrive as the empty marker
 (`Value::is_empty_marker`). A process runs one program.
+
+`native::new_list` and `Mutator::alloc_str` abort if the allocator refuses the memory. A native
+that may build large results can raise a `MemoryError` instead: `vm.m.try_alloc_list(items)` and
+`vm.m.try_alloc_str_nogc(s)` never collect, so they are safe while the native holds values that
+nothing roots; `vm.m.try_alloc_str(s)` collects and retries once, so everything the native holds
+must be rooted.
 
 `native::new_handle(vm, data)` wraps Rust data (`Send + Sync`) in a `NativeHandle`, and
 `native::handle::<T>(v)` gets it back. A handle is frozen, so Catallaxy code may keep it in a

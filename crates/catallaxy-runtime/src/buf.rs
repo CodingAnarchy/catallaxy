@@ -96,21 +96,31 @@ impl WordBuf {
     /// word for the capacity header and the items are moved up within it, so building a large
     /// container from a vector does not need memory for two copies.
     pub fn from_vec(items: Vec<u64>, fill: u64) -> *mut WordBuf {
+        Self::try_from_vec(items, fill).unwrap_or_else(|layout| std::alloc::handle_alloc_error(layout))
+    }
+
+    /// As [`WordBuf::from_vec`], but if the allocator refuses, frees the vector and returns
+    /// the layout it refused instead of aborting.
+    pub fn try_from_vec(items: Vec<u64>, fill: u64) -> Result<*mut WordBuf, Layout> {
         let mut items = std::mem::ManuallyDrop::new(items);
         let (ptr, len, cap) = (items.as_mut_ptr(), items.len(), items.capacity());
         if cap == 0 {
-            return Self::empty();
+            return Ok(Self::empty());
         }
         unsafe {
             // `Vec<u64>` allocated `cap` words with the global allocator; `layout(cap)` has
             // the same alignment and one more word, so `realloc` may grow it in place.
             let old = Layout::array::<u64>(cap).expect("container too large");
-            let new = Self::layout(cap);
+            // A vector's allocation is at most `isize::MAX` bytes; one more word may not fit.
+            let Some(new) = cap.checked_add(1).and_then(|n| Layout::array::<u64>(n).ok()) else {
+                std::alloc::dealloc(ptr as *mut u8, old);
+                return Err(old);
+            };
             let p = std::alloc::realloc(ptr as *mut u8, old, new.size()) as *mut WordBuf;
             if p.is_null() {
                 // The vector's allocation is still valid; free it before reporting.
                 std::alloc::dealloc(ptr as *mut u8, old);
-                std::alloc::handle_alloc_error(new);
+                return Err(new);
             }
             let words = p as *mut u64;
             std::ptr::copy(words, words.add(1), len);
@@ -120,7 +130,7 @@ impl WordBuf {
                 slots.add(i).write(AtomicU64::new(fill));
             }
             crate::note_external(cap * 8);
-            p
+            Ok(p)
         }
     }
 

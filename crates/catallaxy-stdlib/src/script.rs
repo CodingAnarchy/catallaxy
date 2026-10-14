@@ -10,7 +10,7 @@ use std::sync::Arc;
 use catallaxy_runtime::class::{class_by_id, class_of};
 use catallaxy_runtime::dict::DictTable;
 use catallaxy_runtime::object::*;
-use catallaxy_runtime::{intern, ownership, panic, ObjKind, RtResult, Value};
+use catallaxy_runtime::{intern, ownership, panic, try_push, try_vec, ObjKind, RtResult, Value};
 use catallaxy_vm::{program, slow, NativeFn, Vm};
 use parking_lot::Mutex;
 
@@ -37,13 +37,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "Regex.split" => |vm, a| {
             let re = regex_of(a[0])?;
-            let items: Vec<Value> = re.split(s(a[1])?).map(|p| vm.m.alloc_str(p)).collect();
-            Ok(new_list(vm, items))
+            vm.m.collect_if_refused();
+            new_str_list(vm, re.split(s(a[1])?))
         },
         "Regex.capture_names" => |vm, a| {
             let re = regex_of(a[0])?;
-            let items: Vec<Value> = re.capture_names().flatten().map(|n| vm.m.alloc_str(n)).collect();
-            Ok(new_list(vm, items))
+            new_str_list(vm, re.capture_names().flatten())
         },
 
         "Process.run" => process_run,
@@ -122,8 +121,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             });
             Ok(match r {
                 Ok(names) => {
-                    let items: Vec<Value> = names.iter().map(|n| vm.m.alloc_str(n)).collect();
-                    let l = new_list(vm, items);
+                    let l = new_str_list(vm, names.iter().map(|n| n.as_str()))?;
                     ok(vm, l)
                 }
                 Err(e) => err(vm, &format!("{p}: {e}")),
@@ -247,15 +245,23 @@ fn make_match(vm: &mut Vm, re: &regex::Regex, caps: &regex::Captures, pos: &mut 
     let whole = caps.get(0).expect("group 0");
     let start = pos.at(whole.start());
     let end = pos.at(whole.end());
-    let groups: Vec<Value> = caps.iter().map(|g| g.map_or(Value::NIL, |g| vm.m.alloc_str(g.as_str()))).collect();
+    // Nothing roots the values built here (nor the matches built before this one), so nothing
+    // here may collect.
+    let mut groups = try_vec(caps.len())?;
+    for g in caps.iter() {
+        groups.push(match g {
+            Some(g) => vm.m.try_alloc_str_nogc(g.as_str())?,
+            None => Value::NIL,
+        });
+    }
     let text = groups[0];
-    let groups = new_list(vm, groups);
+    let groups = new_list(vm, groups)?;
     let named = vm.m.alloc_dict(DictTable::new());
     for name in re.capture_names().flatten() {
         if let Some(g) = caps.name(name) {
             let k = new_str(vm, name);
-            let v = new_str(vm, g.as_str());
-            slow::dict_set(vm, named, k, v)?;
+            let v = vm.m.try_alloc_str_nogc(g.as_str())?;
+            slow::dict_set_unrooted(vm, named, k, v)?;
         }
     }
     instance(
@@ -285,11 +291,13 @@ fn regex_find_all(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let re = regex_of(a[0])?;
     let text = s(a[1])?;
     let mut pos = CharPos { text, byte: 0, chars: 0 };
+    vm.m.collect_if_refused();
     let mut out = Vec::new();
     for c in re.captures_iter(text) {
-        out.push(make_match(vm, re, &c, &mut pos)?);
+        let m = make_match(vm, re, &c, &mut pos)?;
+        try_push(&mut out, m)?;
     }
-    Ok(new_list(vm, out))
+    new_list(vm, out)
 }
 
 // ---- Process ---------------------------------------------------------------------------------

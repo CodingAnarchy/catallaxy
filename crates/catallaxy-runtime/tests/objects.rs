@@ -65,6 +65,55 @@ fn lists_built_from_vecs_and_slices() {
     h.finish();
 }
 
+/// The `try_` builders that natives use (a refusal itself is covered by `out_of_memory.rs`,
+/// under a real address-space limit) build the same containers as the infallible ones.
+#[test]
+fn fallible_builders() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let mut strs: Vec<Value> = Vec::new();
+    for i in 0..12 {
+        strs.push(h.m.try_alloc_str_nogc(&format!("v{i}")).unwrap());
+    }
+    let mut items = catallaxy_runtime::try_vec(20).unwrap();
+    items.extend_from_slice(&strs);
+    catallaxy_runtime::try_push(&mut items, strs[0]).unwrap();
+    let a = h.m.try_alloc_list(items).unwrap();
+    let ha = h.m.root(a);
+    let b = h.m.try_alloc_list(strs[..2].to_vec()).unwrap();
+    let hb = h.m.root(b);
+    let c = h.m.try_alloc_list_from_slice(&strs[3..11], 10).unwrap();
+    let hc = h.m.root(c);
+    let t = DictTable::try_with_capacity(4).unwrap();
+    for (i, &s) in strs.iter().take(6).enumerate() {
+        unsafe { t.try_insert_new(i as u64, Value::small_int(i as i64), s, Access::Local) }.unwrap();
+    }
+    let t2 = t.try_clone().unwrap();
+    let d = h.m.alloc_dict(t2);
+    let hd = h.m.root(d);
+    drop(t);
+    h.gc();
+    h.gc();
+    let names = |v: Value| -> Vec<String> {
+        let items = unsafe { as_list(v) }.try_to_vec().unwrap();
+        items.iter().map(|&s| str_of(s).unwrap().to_string()).collect()
+    };
+    let mut all: Vec<String> = (0..12).map(|i| format!("v{i}")).collect();
+    all.push("v0".into());
+    assert_eq!(names(h.m.get(ha)), all);
+    assert_eq!(unsafe { as_list(h.m.get(ha)) }.capacity(), 20);
+    assert_eq!(names(h.m.get(hb)), ["v0", "v1"]);
+    assert_eq!(names(h.m.get(hc)), all[3..11]);
+    assert_eq!(unsafe { as_list(h.m.get(hc)) }.capacity(), 10);
+    let d = h.m.get(hd);
+    let entries: Vec<String> = ownership::read_dict(h.m, d, |t| {
+        t.iter().map(|e| format!("{}={}", ops::int_as_i64(e.key).unwrap(), str_of(e.value).unwrap())).collect()
+    })
+    .unwrap();
+    assert_eq!(entries, ["0=v0", "1=v1", "2=v2", "3=v3", "4=v4", "5=v5"]);
+    h.finish();
+}
+
 #[test]
 fn containers_survive_collection() {
     let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

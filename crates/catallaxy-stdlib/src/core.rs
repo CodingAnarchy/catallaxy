@@ -22,13 +22,13 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "__dyn_index" => |vm, a| catallaxy_vm::slow::dyn_index_get(vm, a[0], a[1]),
         "read_line" | "Stdin.read_line" => read_line,
         "Stdin.read_all" => |vm, _| {
-            let text = String::from_utf8_lossy(&read_stdin_to_end(vm)).into_owned();
-            Ok(new_str(vm, &text))
+            let bytes = read_stdin_to_end(vm)?;
+            vm.m.try_alloc_str(&String::from_utf8_lossy(&bytes))
         },
         "Stdin.read_lines" => |vm, _| {
-            let text = String::from_utf8_lossy(&read_stdin_to_end(vm)).into_owned();
-            let items = text.lines().map(|l| vm.m.alloc_str(l)).collect();
-            Ok(new_list(vm, items))
+            let bytes = read_stdin_to_end(vm)?;
+            vm.m.collect_if_refused();
+            new_str_list(vm, String::from_utf8_lossy(&bytes).lines())
         },
         "args" => args_fn,
         "exit" => exit_fn,
@@ -123,16 +123,23 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         }
         "String.split" => str_split,
         "String.lines" => |vm, a| {
-            let parts: Vec<String> = s(a[0])?.lines().map(|l| l.to_string()).collect();
-            Ok(str_list(vm, parts))
+            vm.m.collect_if_refused();
+            new_str_list(vm, s(a[0])?.lines())
         },
         "String.chars" => |vm, a| {
-            let parts: Vec<String> = s(a[0])?.chars().map(|c| c.to_string()).collect();
-            Ok(str_list(vm, parts))
+            let o = str_obj(a[0])?;
+            let x = o.as_str();
+            let mut items = vm.m.try_vec_collecting(o.char_count())?;
+            for (i, c) in x.char_indices() {
+                items.push(vm.m.try_alloc_str_nogc(&x[i..i + c.len_utf8()])?);
+            }
+            new_list(vm, items)
         },
         "String.bytes" => |vm, a| {
-            let items = s(a[0])?.bytes().map(|b| Value::small_int(b as i64)).collect();
-            Ok(new_list(vm, items))
+            let x = s(a[0])?;
+            let mut items = vm.m.try_vec_collecting(x.len())?;
+            items.extend(x.bytes().map(|b| Value::small_int(b as i64)));
+            new_list(vm, items)
         },
         "String.starts_with" => |_, a| Ok(Value::bool(s(a[0])?.starts_with(s(a[1])?))),
         "String.ends_with" => |_, a| Ok(Value::bool(s(a[0])?.ends_with(s(a[1])?))),
@@ -205,7 +212,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "String.center" => |vm, a| pad(vm, a, 0),
         "String.ljust" => |vm, a| pad(vm, a, 1),
         "String.format" => |vm, a| {
-            let args = crate::coll::list_read(vm, a[1])?.to_vec();
+            let args = crate::coll::list_read(vm, a[1])?.try_to_vec()?;
             let r = catallaxy_runtime::fmtspec::format_template(vm, s(a[0])?, &args)?;
             vm.m.try_alloc_str(&r)
         },
@@ -267,11 +274,6 @@ fn str_map(vm: &mut Vm, a: &[Value], f: impl Fn(&str) -> String) -> RtResult<Val
 fn str_all(a: &[Value], f: impl Fn(char) -> bool) -> RtResult<Value> {
     let x = s(a[0])?;
     Ok(Value::bool(!x.is_empty() && x.chars().all(f)))
-}
-
-fn str_list(vm: &mut Vm, parts: Vec<String>) -> Value {
-    let items: Vec<Value> = parts.iter().map(|p| vm.m.alloc_str(p)).collect();
-    new_list(vm, items)
 }
 
 /// Substring by character positions [start, end), clamped; negative positions count from the end.
@@ -342,12 +344,12 @@ fn str_split(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
         Some(v) => s(v)?,
         None => "",
     };
-    let parts: Vec<String> = if sep.is_empty() {
-        x.split_whitespace().map(|p| p.to_string()).collect()
+    vm.m.collect_if_refused();
+    if sep.is_empty() {
+        new_str_list(vm, x.split_whitespace())
     } else {
-        x.split(sep).map(|p| p.to_string()).collect()
-    };
-    Ok(str_list(vm, parts))
+        new_str_list(vm, x.split(sep))
+    }
 }
 
 fn hash(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
@@ -495,14 +497,23 @@ fn compare_values(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 /// The rest of standard input (as far as it could be read). Shares the buffer `read_line` uses.
-pub(crate) fn read_stdin_to_end(vm: &mut Vm) -> Vec<u8> {
+/// The rest of standard input (as much as could be read), or a `MemoryError` panic if the
+/// buffer could not grow.
+pub(crate) fn read_stdin_to_end(vm: &mut Vm) -> RtResult<Vec<u8>> {
     crate::flush();
-    crate::fiber::blocking_io(vm, || {
+    let (buf, r) = crate::fiber::blocking_io(vm, || {
         use std::io::Read as _;
         let mut buf = Vec::new();
-        let _ = std::io::stdin().lock().read_to_end(&mut buf);
-        buf
-    })
+        let r = std::io::stdin().lock().read_to_end(&mut buf);
+        (buf, r)
+    });
+    match r {
+        Err(e) if e.kind() == std::io::ErrorKind::OutOfMemory => {
+            drop(buf);
+            catallaxy_runtime::refused("cannot read standard input into memory")
+        }
+        _ => Ok(buf),
+    }
 }
 
 fn read_line(vm: &mut Vm, _: &[Value]) -> RtResult<Value> {
@@ -530,8 +541,8 @@ fn read_line(vm: &mut Vm, _: &[Value]) -> RtResult<Value> {
 }
 
 fn args_fn(vm: &mut Vm, _: &[Value]) -> RtResult<Value> {
-    let args = ARGS.get().cloned().unwrap_or_default();
-    Ok(str_list(vm, args))
+    let args = ARGS.get().map_or(&[][..], |a| a.as_slice());
+    new_str_list(vm, args.iter().map(|a| a.as_str()))
 }
 
 fn exit_fn(_: &mut Vm, a: &[Value]) -> RtResult<Value> {

@@ -5,7 +5,7 @@ use catallaxy_runtime::class::{class_id_of, class_of, heap_class, ids, ObjKind};
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ops::{self, Interop};
 use catallaxy_runtime::ownership::{self, Access};
-use catallaxy_runtime::{intern, panic, RtResult, Trap, Value};
+use catallaxy_runtime::{check_alloc, intern, panic, try_string, try_vec, RtResult, Trap, Value};
 
 use crate::bytecode::{Op, RtType};
 use crate::interp::Vm;
@@ -211,13 +211,24 @@ pub fn dict_get(vm: &mut Vm, d: Value, k: Value) -> RtResult<Option<Value>> {
 }
 
 pub fn dict_set(vm: &mut Vm, d: Value, k: Value, v: Value) -> RtResult<()> {
+    dict_set_with(vm, d, k, v, true)
+}
+
+/// As [`dict_set`], for a native building a dict from values nothing roots (the dict itself,
+/// or values it holds elsewhere): if the table cannot grow, raises the `MemoryError` without
+/// collecting first. `k` must not run user code (`hash`, `==`), which may collect anyway.
+pub fn dict_set_unrooted(vm: &mut Vm, d: Value, k: Value, v: Value) -> RtResult<()> {
+    dict_set_with(vm, d, k, v, false)
+}
+
+fn dict_set_with(vm: &mut Vm, d: Value, k: Value, v: Value, may_collect: bool) -> RtResult<()> {
     let h = unsafe { &*d.as_ptr() };
     if ownership::check_write(&vm.m, h)? == Access::Shared {
         ownership::publish_into_shared(&vm.m, k)?;
         ownership::publish_into_shared(&vm.m, v)?;
     }
     let hash = ops::hash_value(vm, k)?;
-    let mut collected = false;
+    let mut collected = !may_collect;
     loop {
         // A lookup may run user `==`, which can mutate the table; act only if the version
         // is unchanged since before it.
@@ -290,14 +301,14 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
     if is_range(i) {
         match kind_of(x) {
             ObjKind::List => {
-                let items = ownership::read_list(&vm.m, x)?.to_vec();
+                let items = ownership::read_list(&vm.m, x)?.try_to_vec()?;
                 let (a, b) = range_bounds(i, items.len())?;
-                return Ok(vm.m.alloc_list_from_slice(&items[a..b], b - a));
+                return vm.m.try_alloc_list_from_slice(&items[a..b], b - a);
             }
             ObjKind::Str => {
                 let s = unsafe { as_str_obj(x) };
                 let (a, b) = range_bounds(i, s.char_count())?;
-                return Ok(vm.m.alloc_str(s.char_slice(a, b)));
+                return vm.m.try_alloc_str(s.char_slice(a, b));
             }
             _ => {}
         }
@@ -392,22 +403,26 @@ pub fn generic_arith(vm: &mut Vm, op: Op, x: Value, y: Value) -> RtResult<Value>
         return Ok(Value::from_f64(r));
     }
     if op == Op::Add {
-        if let (Some(a), Some(b)) = (str_of(x), str_of(y)) {
-            let s = format!("{a}{b}");
-            return Ok(vm.m.alloc_str(&s));
+        if str_of(x).is_some() && str_of(y).is_some() {
+            let parts = unsafe { [as_str_obj(x), as_str_obj(y)] };
+            return vm.m.try_alloc_concat(2, |i| parts[i]);
         }
         if kind_of(x) == ObjKind::List && kind_of(y) == ObjKind::List {
-            let mut items = ownership::read_list(&vm.m, x)?.to_vec();
-            let more = ownership::read_list(&vm.m, y)?.to_vec();
-            items.extend(more);
-            return Ok(vm.m.alloc_list(items));
+            let (a, b) = (ownership::read_list(&vm.m, x)?, ownership::read_list(&vm.m, y)?);
+            let mut items = try_vec(a.len().saturating_add(b.len()))?;
+            items.extend(a.try_to_vec()?);
+            items.extend(b.try_to_vec()?);
+            return vm.m.try_alloc_list(items);
         }
     }
     if op == Op::Mul {
         if let (Some(s), true) = (str_of(x), yi) {
             let n = ops::int_as_i64(y).unwrap_or(0).max(0) as usize;
-            let r = s.repeat(n);
-            return Ok(vm.m.alloc_str(&r));
+            let mut r = try_string(check_alloc(s.len(), n)?)?;
+            for _ in 0..n {
+                r.push_str(s);
+            }
+            return vm.m.try_alloc_str(&r);
         }
     }
     let name = match op {
