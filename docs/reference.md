@@ -459,18 +459,32 @@ Annotate the parameter to use any of these.
   - Building strings (`+`, interpolation, `*`, padding, `StringBuilder`) and growing a list (`push`) or a
     dict or set (`d[k] = v`, `add`) panics where the allocator refuses the memory, after a collection and
     one retry. List methods that rebuild the list (`insert`, `unshift` and the like) panic without the retry.
+  - Standard library methods that build a list, dict or string from their arguments panic where the
+    allocator refuses its buffer or one of its strings: splitting strings (`split`, `chars`, `lines`,
+    `bytes`, `Regex.split`, `Regex.find_all`), copying collections (`sorted`, `reverse`, `dup`,
+    `slice`, `x[a...b]`, `+`, `concat`, `keys`, `values`, `entries`, `Set.from`), parsing
+    (`Json.parse`, `Csv.parse`), reading whole files and input (`File.read`, `File.read_lines`,
+    `File.read_bytes`, `Stdin.read_all`, `Stdin.read_lines`, `Stdin.read_bytes`) and `Bytes`
+    conversions. (`map`, `select`, `flat_map` and the other `Enumerable` methods are written in
+    Catallaxy and grow their result with `push` or `concat`.) Most do not collect and retry first, because the values they have built so far are
+    not yet reachable from the program; those that allocate their result before anything else
+    (`chars`, `bytes`, `List.filled`, `List.with_capacity`) do. Once the system has refused memory,
+    these methods also refuse heap objects that need a new heap segment until the next collection
+    (the collection runs first where it can).
   - Starting a thread or fiber whose stacks cannot be allocated panics in `spawn` or `Fiber.start`
     (neither returns a `Result`). For a thread, the OS may refuse it instead, for lack of memory or a
     thread limit: that panic starts `ThreadError:`.
-- What is not covered: other allocations inside the runtime, such as the temporary vectors natives
-  build their results in (`map`, `split`, `keys` and the like), get one retry with the headroom released
+- What is not covered: other allocations inside the runtime get one retry with the headroom released
   and then a `MemoryError` at the next safepoint. If that retry fails too, the process aborts
-  (`memory allocation of N bytes failed`). The same happens when the reserve is used up before a
-  safepoint is reached. A program embedding the runtime through the C API uses its own allocator and
-  gets no retry for these. On Linux with memory
-  overcommit, and under memory pressure on macOS, a program that grows gradually is usually killed by the
-  OS before any allocation fails; set `CATX_MAX_HEAP` below the machine's memory to turn that into a
-  `MemoryError`.
+  (`memory allocation of N bytes failed`). These include the scratch buffer of a stable sort (which
+  `sorted` checks can be had just before), the text `Json.stringify` and `Csv.format` build, the keys
+  of a parsed JSON object, and the collector's mark stack, which grows with the longest list being
+  marked (a list of millions of strings). The same happens when the reserve is used up before a
+  safepoint is reached. The retry comes from the global allocator `catallaxy_gc::Allocator`, which
+  `catx` and the C API libraries use; a Rust program embedding the runtime gets it only if it opts in
+  (section 11). On Linux with memory overcommit, and under memory pressure on macOS, a program that
+  grows gradually is usually killed by the OS before any allocation fails; set `CATX_MAX_HEAP` below
+  the machine's memory to turn that into a `MemoryError`.
 
 ## 8. Concurrency
 
@@ -586,18 +600,27 @@ unsaved edits. It provides:
   classes, enums, variants, interfaces and constants. An interface member renames together with the
   same-named methods of every type whose values are used as that interface (passed, assigned,
   returned, put in a list or dict, or checked against a generic bound), so those types keep
-  conforming; renaming such a method renames the member too. They cover the document, every module
-  it imports, and the other open documents and their imports; names from the prelude cannot be
-  renamed, nor can a member that a built-in type implements;
+  conforming; renaming such a method renames the member too. They cover the workspace (below);
+  names from the prelude cannot be renamed, nor can a member that a built-in type implements;
 - signature help for function, method and constructor calls, showing default values and marking
   the trailing-block parameter, with the active parameter following commas and named arguments;
 - inlay hints with the inferred types of unannotated variables, `for`/`let`/`if let` bindings and
   block parameters, and the inferred requirement of each untyped parameter of an implicit-generic
   function (`fn shout(x)` shows `x: { fn upcase(self) -> _ }`);
 - document symbols (an outline of items, members and top-level variables) and workspace symbols
-  (over the open documents and the modules they import);
+  (over the workspace);
 - code actions: every fix attached to a diagnostic is offered as a quick fix, and the first
   applicable one (see `catx fix`) is marked preferred.
+
+The workspace of references, rename and workspace symbols is every `.cx` file under the workspace
+folders the client names (`workspaceFolders`, else `rootUri`; folders added or removed later count)
+plus every open document, each with the modules it imports, whether or not the file is open.
+Directories named `target` or `node_modules` and hidden directories (`.git` and the like) are
+skipped. An open document's text takes precedence over the file on disk. Each file's compilation is
+cached and reused while the files it loaded are unchanged, so after the first request only edited
+files and the files that import them are checked again. At most 2000 files are taken from the
+workspace folders (set `CATX_LSP_MAX_FILES` to change the limit); a larger workspace is cut, and the
+server says so in its log.
 
 `catx fix [--dry-run] paths...` applies the checker's fixes. For each file (directories are walked as
 for `catx fmt`, skipping `reject/`) it applies the first applicable fix of every diagnostic, checks
@@ -665,11 +688,28 @@ runs Catallaxy code) must be rooted in a `HandleScope`; handles borrow the scope
 escape it. Allocation alone never collects. Missing optional arguments arrive as the empty marker
 (`Value::is_empty_marker`). A process runs one program.
 
+`native::new_list` and `Mutator::alloc_str` abort if the allocator refuses the memory. A native
+that may build large results can raise a `MemoryError` instead: `vm.m.try_alloc_list(items)` and
+`vm.m.try_alloc_str_nogc(s)` never collect, so they are safe while the native holds values that
+nothing roots; `vm.m.try_alloc_str(s)` collects and retries once, so everything the native holds
+must be rooted.
+
 `native::new_handle(vm, data)` wraps Rust data (`Send + Sync`) in a `NativeHandle`, and
 `native::handle::<T>(v)` gets it back. A handle is frozen, so Catallaxy code may keep it in a
 `frozen class` and pass it between threads: the data must be immutable or synchronize itself
 (the standard library's `Regex` holds its compiled regex this way). It is dropped when the
 collector frees the handle.
+
+The `catallaxy` crate does not choose a global allocator. To get the out-of-memory handling `catx`
+has (section 7: a refused allocation inside the runtime releases the headroom and is retried once,
+and a `MemoryError` follows at the next safepoint instead of an abort), add one line to the program:
+
+```rust
+#[global_allocator]
+static ALLOC: catallaxy::Allocator = catallaxy::Allocator;
+```
+
+It forwards to the system allocator and does extra work only when a request is refused.
 
 ### C ABI
 
@@ -687,5 +727,12 @@ cx_status native(cx_vm *vm, const cx_value *args, size_t nargs, cx_value *out, v
 and is declared in Catallaxy with `native fn` exactly like a Rust one. The rooting rule is the same
 as for Rust natives, but unchecked: a value held across `cx_call` must be rooted. Up to 256 C
 natives can be registered per process. `crates/catallaxy-capi/examples/ext.c` is a complete
-example.
+example, and `crates/catallaxy-capi/examples/dlopen.c` loads the shared library at run time.
+
+The libraries' own Rust code allocates through `catallaxy::Allocator` (the crate's default
+`global-allocator` feature), so they handle running out of memory as `catx` does; the host's
+`malloc` is not affected. `cx_allocator_active()` returns 1 when this is in effect. Each shared
+library has its own copy of the Rust standard library and allocator, so it can be loaded with
+`dlopen` next to other Rust libraries. A Rust program that links `catallaxy-capi` as a Rust crate
+and has its own `#[global_allocator]` turns the feature off with `default-features = false`.
 

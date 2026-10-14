@@ -5,6 +5,13 @@
 //! Values cross the boundary as their raw 64-bit words (`cx_value`), and a native receives the
 //! calling VM as an opaque `cx_vm *`. Native functions registered from C are dispatched through a
 //! fixed table of trampolines, because the VM's native-function type carries no user data.
+//!
+//! With the default `global-allocator` feature, the libraries' Rust code allocates through
+//! [`catallaxy_gc::Allocator`]: a refused request releases the runtime's headroom and is retried
+//! once, and a `MemoryError` follows at the next safepoint instead of an abort. The C host's own
+//! `malloc` is not affected. A Rust program that depends on this crate (as an rlib) and has its
+//! own `#[global_allocator]` must turn the feature off (`default-features = false`), since a
+//! program has only one. `cx_allocator_active` reports whether it is in effect.
 
 #![allow(non_camel_case_types)]
 #![allow(clippy::missing_safety_doc)] // the C header documents the contracts
@@ -17,6 +24,10 @@ use std::sync::OnceLock;
 use catallaxy::{Engine, NativeFn, RtResult, Trap, Value, Vm};
 use catallaxy_runtime::object::{kind_of, str_of};
 use catallaxy_runtime::{ops, ownership, ObjKind};
+
+#[cfg(feature = "global-allocator")]
+#[global_allocator]
+static ALLOC: catallaxy_gc::Allocator = catallaxy_gc::Allocator;
 
 /// Opaque handle for the VM running a native call.
 pub enum cx_vm {}
@@ -112,6 +123,12 @@ pub unsafe extern "C" fn cx_register(name: *const c_char, f: Option<cx_native>, 
     let _ = SLOTS[slot].set(Slot { f, user: user as usize });
     Engine::new().register(name, TRAMPOLINES[slot]);
     0
+}
+
+/// 1 if the library's Rust code allocates through `catallaxy_gc::Allocator`, else 0.
+#[no_mangle]
+pub extern "C" fn cx_allocator_active() -> c_int {
+    catallaxy_gc::Allocator::is_global() as c_int
 }
 
 #[no_mangle]

@@ -70,6 +70,7 @@ name = "catallaxy-capi"
 version = "0.3.0"
 dependencies = [
  "catallaxy",
+ "catallaxy-gc",
  "catallaxy-runtime",
  "catallaxy-stdlib",
  "catallaxy-vm",
