@@ -7,11 +7,21 @@
 //! allocation. Pages are swept lazily: after a collection every page is "unswept", and a thread sweeps
 //! a page right before allocating from it. Segments are mapped from the OS directly, and a major
 //! collection returns wholly empty ones beyond a reserve for the next allocation budget.
+//!
+//! Running out of memory: allocation cannot fail or collect, so the pool keeps an emergency
+//! reserve of mapped segments. When the OS refuses a new segment, a reserve segment takes its
+//! place, the headroom block goes back to the OS (see [`release_headroom`]) and a major
+//! collection is requested. That collection refills the reserve, first from segments it emptied,
+//! then from the OS; if it cannot, it leaves a pending `MemoryError` that the next thread to
+//! reach a safepoint raises (see `limits::take_pending_error`). Only an allocation that finds the
+//! reserve used up aborts. A large object the allocator refuses is retried after handing reserve
+//! segments back to the OS, the same way, if it is small enough; callers that can raise an error
+//! where they allocate use [`LocalHeap::try_alloc_uninit`] instead.
 
 use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
 use std::cell::UnsafeCell;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicUsize, Ordering};
 
 use parking_lot::Mutex;
 
@@ -148,21 +158,136 @@ impl Page {
 
 struct Segment {
     base: *mut u8,
+    /// The segment's page descriptors, as allocated (null in a reserve segment). Pages are
+    /// shared as `&'static Page`; these pointers are kept to free them.
+    pages: [*mut Page; PAGES_PER_SEGMENT],
 }
 unsafe impl Send for Segment {}
 
+impl Segment {
+    fn unused(base: *mut u8) -> Segment {
+        Segment { base, pages: [ptr::null_mut(); PAGES_PER_SEGMENT] }
+    }
+}
+
+/// Segments kept mapped for when the OS refuses more (see the module docs): 4 MB, untouched.
+const RESERVE_SEGMENTS: usize = 16;
+
+/// The headroom block: memory mapped (never touched) at startup and handed back to the OS when
+/// an allocation is refused, so that the runtime's own small allocations while it reports the
+/// error (the message, the trace, unwinding, a collection) still succeed. 2 MB covers the C
+/// allocator growing its heap (glibc falls back to 1 MB mappings).
+const HEADROOM: usize = 2 << 20;
+static HEADROOM_BLOCK: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
+
+/// Hands the headroom block back to the OS, if it is still held, and returns whether it was.
+/// Called where an allocation is refused, before reporting or retrying it; the next major
+/// collection maps it again, and if it cannot, the heap is out of memory. Takes no locks and
+/// does not allocate, so the global allocator can call it.
+pub fn release_headroom() -> bool {
+    let p = HEADROOM_BLOCK.swap(ptr::null_mut(), Ordering::AcqRel);
+    if p.is_null() {
+        return false;
+    }
+    // SAFETY: the block came from `os::map` and was never used.
+    unsafe { os::unmap(p, HEADROOM) };
+    // Collect soon: that restores the block, or finds the heap out of memory.
+    stats::force_collection();
+    true
+}
+
+/// Whether the headroom block is held.
+pub(crate) fn headroom_held() -> bool {
+    !HEADROOM_BLOCK.load(Ordering::Acquire).is_null()
+}
+
+/// Maps the headroom block if it is not held (at startup, and in collections). Returns whether
+/// it is held now.
+pub(crate) fn restore_headroom() -> bool {
+    if headroom_held() {
+        return true;
+    }
+    let p = os::map(HEADROOM);
+    if p.is_null() {
+        return false;
+    }
+    if HEADROOM_BLOCK.compare_exchange(ptr::null_mut(), p, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        // SAFETY: just mapped, never used.
+        unsafe { os::unmap(p, HEADROOM) };
+    }
+    true
+}
+
+/// The global allocator for programs that embed the runtime (`catx` uses it): the system
+/// allocator, except that a refused request releases the headroom block and is retried once.
+/// The refusal also schedules a collection, which raises a `MemoryError` at a safepoint if
+/// memory does not come back (see the module docs). So allocations the runtime does not check
+/// itself, in the standard library's collections, get one more chance before the process aborts.
+pub struct Allocator;
+
+// SAFETY: every call is forwarded to the system allocator with the same arguments.
+unsafe impl std::alloc::GlobalAlloc for Allocator {
+    #[inline]
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let p = std::alloc::System.alloc(layout);
+        if p.is_null() && release_headroom() {
+            return std::alloc::System.alloc(layout);
+        }
+        p
+    }
+
+    #[inline]
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        let p = std::alloc::System.alloc_zeroed(layout);
+        if p.is_null() && release_headroom() {
+            return std::alloc::System.alloc_zeroed(layout);
+        }
+        p
+    }
+
+    #[inline]
+    unsafe fn dealloc(&self, p: *mut u8, layout: Layout) {
+        std::alloc::System.dealloc(p, layout)
+    }
+
+    #[inline]
+    unsafe fn realloc(&self, p: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let q = std::alloc::System.realloc(p, layout, new_size);
+        if q.is_null() && release_headroom() {
+            return std::alloc::System.realloc(p, layout, new_size);
+        }
+        q
+    }
+}
+
+/// Makes segment mapping fail on the calling thread, for tests of the reserve.
+#[cfg(test)]
+pub(crate) mod fail {
+    use std::cell::Cell;
+    thread_local! {
+        pub(crate) static MAPS: Cell<bool> = const { Cell::new(false) };
+    }
+}
+
+/// Maps a segment, or returns null if the OS refuses.
+fn map_segment() -> *mut u8 {
+    #[cfg(test)]
+    if fail::MAPS.with(|f| f.get()) {
+        return ptr::null_mut();
+    }
+    os::map(SEGMENT_SIZE)
+}
+
 /// Segment memory comes straight from the OS, so that a segment can be handed back whole.
 mod os {
-    use super::SEGMENT_SIZE;
-
-    /// Maps a zeroed, read-write segment, or returns null.
+    /// Maps `size` zeroed, read-write bytes (a multiple of 4096), or returns null.
     #[cfg(all(unix, not(miri)))]
-    pub(super) fn map_segment() -> *mut u8 {
+    pub(super) fn map(size: usize) -> *mut u8 {
         // SAFETY: an anonymous private mapping has no preconditions.
         let p = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
-                SEGMENT_SIZE,
+                size,
                 libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_PRIVATE | libc::MAP_ANON,
                 -1,
@@ -177,10 +302,10 @@ mod os {
     }
 
     /// # Safety
-    /// `p` must come from [`map_segment`] and nothing may use it afterwards.
+    /// `p` must come from [`map`] with this `size` and nothing may use it afterwards.
     #[cfg(all(unix, not(miri)))]
-    pub(super) unsafe fn unmap_segment(p: *mut u8) {
-        libc::munmap(p as *mut libc::c_void, SEGMENT_SIZE);
+    pub(super) unsafe fn unmap(p: *mut u8, size: usize) {
+        libc::munmap(p as *mut libc::c_void, size);
     }
 
     #[cfg(all(windows, not(miri)))]
@@ -197,49 +322,48 @@ mod os {
     }
 
     #[cfg(all(windows, not(miri)))]
-    pub(super) fn map_segment() -> *mut u8 {
+    pub(super) fn map(size: usize) -> *mut u8 {
         // SAFETY: reserving and committing fresh pages has no preconditions; they read as zero.
         unsafe {
-            win::VirtualAlloc(
-                std::ptr::null_mut(),
-                SEGMENT_SIZE,
-                win::MEM_RESERVE | win::MEM_COMMIT,
-                win::PAGE_READWRITE,
-            )
+            win::VirtualAlloc(std::ptr::null_mut(), size, win::MEM_RESERVE | win::MEM_COMMIT, win::PAGE_READWRITE)
         }
     }
 
     /// # Safety
-    /// `p` must come from [`map_segment`] and nothing may use it afterwards.
+    /// `p` must come from [`map`] and nothing may use it afterwards.
     #[cfg(all(windows, not(miri)))]
-    pub(super) unsafe fn unmap_segment(p: *mut u8) {
+    pub(super) unsafe fn unmap(p: *mut u8, _size: usize) {
         win::VirtualFree(p, 0, win::MEM_RELEASE);
     }
 
     // Elsewhere (and under Miri, which models the global allocator but not every mapping
     // call), segments come from the global allocator.
     #[cfg(any(miri, not(any(unix, windows))))]
-    fn layout() -> std::alloc::Layout {
-        std::alloc::Layout::from_size_align(SEGMENT_SIZE, 4096).unwrap()
+    fn layout(size: usize) -> std::alloc::Layout {
+        std::alloc::Layout::from_size_align(size, 4096).unwrap()
     }
 
     #[cfg(any(miri, not(any(unix, windows))))]
-    pub(super) fn map_segment() -> *mut u8 {
+    pub(super) fn map(size: usize) -> *mut u8 {
         // SAFETY: the layout has nonzero size.
-        unsafe { std::alloc::alloc_zeroed(layout()) }
+        unsafe { std::alloc::alloc_zeroed(layout(size)) }
     }
 
     /// # Safety
-    /// `p` must come from [`map_segment`] and nothing may use it afterwards.
+    /// `p` must come from [`map`] with this `size` and nothing may use it afterwards.
     #[cfg(any(miri, not(any(unix, windows))))]
-    pub(super) unsafe fn unmap_segment(p: *mut u8) {
-        std::alloc::dealloc(p, layout());
+    pub(super) unsafe fn unmap(p: *mut u8, size: usize) {
+        std::alloc::dealloc(p, layout(size));
     }
 }
 
 /// Global page pools.
 pub(crate) struct PagePool {
     segments: Mutex<Vec<Segment>>,
+    /// The emergency reserve: mapped segments outside the heap.
+    reserve: Mutex<Vec<Segment>>,
+    /// Set when the reserve has been drawn on; the next major collection refills it.
+    reserve_short: AtomicBool,
     empty: Mutex<Vec<&'static Page>>,
     unswept: Vec<Mutex<Vec<&'static Page>>>,
     full: Vec<Mutex<Vec<&'static Page>>>,
@@ -253,36 +377,156 @@ pub(crate) struct LargeObj {
 }
 unsafe impl Send for LargeObj {}
 
-pub(crate) static POOL: std::sync::LazyLock<PagePool> = std::sync::LazyLock::new(|| PagePool {
-    segments: Mutex::new(Vec::new()),
-    empty: Mutex::new(Vec::new()),
-    unswept: (0..NUM_CLASSES).map(|_| Mutex::new(Vec::new())).collect(),
-    full: (0..NUM_CLASSES).map(|_| Mutex::new(Vec::new())).collect(),
-    large: Mutex::new(Vec::new()),
-    live_color: AtomicU8::new(1),
+pub(crate) static POOL: std::sync::LazyLock<PagePool> = std::sync::LazyLock::new(|| {
+    restore_headroom();
+    PagePool::new()
 });
 
 static TOTAL_PAGES: AtomicUsize = AtomicUsize::new(0);
 
 impl PagePool {
+    fn new() -> PagePool {
+        let pool = PagePool {
+            segments: Mutex::new(Vec::new()),
+            reserve: Mutex::new(Vec::new()),
+            reserve_short: AtomicBool::new(true),
+            empty: Mutex::new(Vec::new()),
+            unswept: (0..NUM_CLASSES).map(|_| Mutex::new(Vec::new())).collect(),
+            full: (0..NUM_CLASSES).map(|_| Mutex::new(Vec::new())).collect(),
+            large: Mutex::new(Vec::new()),
+            live_color: AtomicU8::new(1),
+        };
+        pool.refill_reserve();
+        pool
+    }
+
     fn new_segment(&self) {
-        let base = os::map_segment();
+        // Once the OS has refused memory, segments come from the reserve until a collection has
+        // looked again: mapping more would take the room the headroom block just made.
+        let refused = self.reserve_short() || !headroom_held();
+        let mut base = if refused { ptr::null_mut() } else { map_segment() };
         if base.is_null() {
-            std::alloc::handle_alloc_error(Layout::from_size_align(SEGMENT_SIZE, 4096).unwrap());
+            base = self.draw_reserve();
         }
-        self.segments.lock().push(Segment { base });
-        let mut empty = self.empty.lock();
-        for i in (0..PAGES_PER_SEGMENT).rev() {
-            let page: &'static Page = Box::leak(Box::new(Page {
+        let pages: [*mut Page; PAGES_PER_SEGMENT] = std::array::from_fn(|i| {
+            Box::into_raw(Box::new(Page {
                 base: unsafe { base.add(i * PAGE_SIZE) },
                 seg: base,
                 slot_size: UnsafeCell::new(0),
                 class: UnsafeCell::new(0),
                 state: AtomicU8::new(PageState::Empty as u8),
-            }));
-            empty.push(page);
+            }))
+        });
+        self.segments.lock().push(Segment { base, pages });
+        let mut empty = self.empty.lock();
+        for &page in pages.iter().rev() {
+            // SAFETY: freed only by `detach_segments`, once no list holds the page.
+            empty.push(unsafe { &*page });
         }
         TOTAL_PAGES.fetch_add(PAGES_PER_SEGMENT, Ordering::Relaxed);
+    }
+
+    /// The OS refused a segment: takes one from the reserve, releases the headroom block and asks
+    /// for a collection, which refills the reserve or leaves a pending `MemoryError`. Aborts if
+    /// the reserve is used up.
+    #[cold]
+    fn draw_reserve(&self) -> *mut u8 {
+        let mut reserve = self.reserve.lock();
+        let Some(seg) = reserve.pop() else {
+            drop(reserve);
+            std::alloc::handle_alloc_error(Layout::from_size_align(SEGMENT_SIZE, 4096).unwrap());
+        };
+        drop(reserve);
+        release_headroom();
+        self.reserve_short.store(true, Ordering::Release);
+        crate::collector::request_gc();
+        seg.base
+    }
+
+    /// The allocator refused a large object of `bytes`: if the reserve can spare that much and
+    /// still keep a few segments, returns enough of it to the OS for a retry to have a chance,
+    /// asks for a collection (as [`PagePool::draw_reserve`] does) and returns true.
+    #[cold]
+    fn release_reserve_for(&self, bytes: usize) -> bool {
+        let need = bytes.div_ceil(SEGMENT_SIZE) + 1;
+        let mut reserve = self.reserve.lock();
+        if reserve.len() < need + 2 {
+            return false;
+        }
+        for _ in 0..need {
+            let seg = reserve.pop().expect("reserve segment");
+            // SAFETY: reserve segments are mapped and unused.
+            unsafe { os::unmap(seg.base, SEGMENT_SIZE) };
+        }
+        drop(reserve);
+        release_headroom();
+        self.reserve_short.store(true, Ordering::Release);
+        crate::collector::request_gc();
+        true
+    }
+
+    /// Whether the reserve has been drawn on since it was last full.
+    pub(crate) fn reserve_short(&self) -> bool {
+        self.reserve_short.load(Ordering::Acquire)
+    }
+
+    /// Restores the reserve if it has been drawn on, from wholly empty segments first and then
+    /// from the OS. Returns false if it could not (the heap is out of memory). Called by the
+    /// collector with the world stopped and every page swept, and at startup.
+    pub(crate) fn refill_reserve(&self) -> bool {
+        if !self.reserve_short.load(Ordering::Acquire) {
+            return true;
+        }
+        let mut reserve = self.reserve.lock();
+        let want = RESERVE_SEGMENTS.saturating_sub(reserve.len());
+        if want > 0 {
+            let mut empty = self.empty.lock();
+            let taken: std::collections::HashSet<*mut u8> = empty_counts(&empty)
+                .into_iter()
+                .filter(|&(_, n)| n == PAGES_PER_SEGMENT)
+                .map(|(seg, _)| seg)
+                .take(want)
+                .collect();
+            if !taken.is_empty() {
+                self.detach_segments(&mut empty, &taken);
+                reserve.extend(taken.into_iter().map(Segment::unused));
+            }
+        }
+        let had = reserve.len();
+        while reserve.len() < RESERVE_SEGMENTS {
+            let base = map_segment();
+            if base.is_null() {
+                // Out of memory: what was just mapped goes back to the OS, as headroom for
+                // raising the error.
+                for seg in reserve.drain(had..) {
+                    // SAFETY: just mapped, never used.
+                    unsafe { os::unmap(seg.base, SEGMENT_SIZE) };
+                }
+                return false;
+            }
+            reserve.push(Segment::unused(base));
+        }
+        self.reserve_short.store(false, Ordering::Release);
+        true
+    }
+
+    /// Removes the segments in `doomed`, all of whose pages are in `empty`, from the heap:
+    /// forgets their pages and drops them from the segment list. Their memory stays mapped.
+    fn detach_segments(&self, empty: &mut Vec<&'static Page>, doomed: &std::collections::HashSet<*mut u8>) {
+        empty.retain(|p| !doomed.contains(&p.seg));
+        let mut segments = self.segments.lock();
+        let (gone, kept): (Vec<Segment>, Vec<Segment>) =
+            std::mem::take(&mut *segments).into_iter().partition(|s| doomed.contains(&s.base));
+        *segments = kept;
+        drop(segments);
+        for seg in gone {
+            for p in seg.pages {
+                // SAFETY: allocated by `new_segment`; an empty page is referenced only by the
+                // empty list, which no longer holds it, and no mutator runs.
+                drop(unsafe { Box::from_raw(p) });
+            }
+        }
+        TOTAL_PAGES.fetch_sub(doomed.len() * PAGES_PER_SEGMENT, Ordering::Relaxed);
     }
 
     fn take_empty(&self, class: usize) -> &'static Page {
@@ -344,22 +588,13 @@ impl PagePool {
         }
         // Empty pages per segment, in order of first appearance: the bottom of the stack holds
         // the pages unused the longest, so their segments go first.
-        let mut order: Vec<*mut u8> = Vec::new();
-        let mut counts: std::collections::HashMap<*mut u8, usize> = std::collections::HashMap::new();
-        for p in empty.iter() {
-            let n = counts.entry(p.seg).or_insert(0);
-            if *n == 0 {
-                order.push(p.seg);
-            }
-            *n += 1;
-        }
         let mut excess = empty_bytes - keep;
         let mut doomed: std::collections::HashSet<*mut u8> = std::collections::HashSet::new();
-        for seg in order {
+        for (seg, n) in empty_counts(&empty) {
             if excess < SEGMENT_SIZE {
                 break;
             }
-            if counts[&seg] == PAGES_PER_SEGMENT {
+            if n == PAGES_PER_SEGMENT {
                 doomed.insert(seg);
                 excess -= SEGMENT_SIZE;
             }
@@ -367,25 +602,12 @@ impl PagePool {
         if doomed.is_empty() {
             return 0;
         }
-        empty.retain(|&p| {
-            if !doomed.contains(&p.seg) {
-                return true;
-            }
-            // SAFETY: the page was leaked by `new_segment`; an empty page is referenced only by
-            // this list, and no mutator runs.
-            drop(unsafe { Box::from_raw(p as *const Page as *mut Page) });
-            false
-        });
+        self.detach_segments(&mut empty, &doomed);
         drop(empty);
-        self.segments.lock().retain(|s| {
-            if !doomed.contains(&s.base) {
-                return true;
-            }
+        for &seg in &doomed {
             // SAFETY: every page of the segment was empty and has just been forgotten.
-            unsafe { os::unmap_segment(s.base) };
-            false
-        });
-        TOTAL_PAGES.fetch_sub(doomed.len() * PAGES_PER_SEGMENT, Ordering::Relaxed);
+            unsafe { os::unmap(seg, SEGMENT_SIZE) };
+        }
         doomed.len() * SEGMENT_SIZE
     }
 
@@ -585,6 +807,32 @@ impl LocalHeap {
         self.alloc(size, vtable)
     }
 
+    /// As [`LocalHeap::alloc_uninit`], but returns null instead of aborting when the allocator
+    /// refuses a large object, for callers that can raise a `MemoryError` where they allocate
+    /// (the reserve is left for those that cannot). Small objects come from pages as usual.
+    ///
+    /// # Safety
+    /// As for [`LocalHeap::alloc_uninit`].
+    #[inline]
+    pub unsafe fn try_alloc_uninit(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
+        if size <= MAX_SMALL {
+            return self.alloc(size, vtable);
+        }
+        self.try_alloc_large(size, vtable)
+    }
+
+    #[cold]
+    unsafe fn try_alloc_large(&mut self, size: usize, vtable: *const crate::GcVTable) -> *mut Header {
+        let Ok(layout) = Layout::from_size_align((size + 15) & !15, 16) else {
+            return ptr::null_mut();
+        };
+        let p = alloc(layout);
+        if p.is_null() {
+            return ptr::null_mut();
+        }
+        self.init_large(p, layout, vtable)
+    }
+
     #[cold]
     fn refill(&mut self, class: usize) -> *mut u8 {
         let slot_size = SIZE_CLASSES[class];
@@ -659,8 +907,33 @@ impl LocalHeap {
             }
         };
         if p.is_null() {
-            std::alloc::handle_alloc_error(layout);
+            return self.alloc_large_refused(layout, vtable, zeroed);
         }
+        self.init_large(p, layout, vtable)
+    }
+
+    /// The allocator refused a large object: retries after handing reserve segments back to the
+    /// OS (see the module docs), or aborts.
+    #[cold]
+    #[inline(never)]
+    fn alloc_large_refused(&mut self, layout: Layout, vtable: *const crate::GcVTable, zeroed: bool) -> *mut Header {
+        if POOL.release_reserve_for(layout.size()) {
+            // SAFETY: the layout has nonzero size.
+            let p = unsafe {
+                if zeroed {
+                    alloc_zeroed(layout)
+                } else {
+                    alloc(layout)
+                }
+            };
+            if !p.is_null() {
+                return self.init_large(p, layout, vtable);
+            }
+        }
+        std::alloc::handle_alloc_error(layout)
+    }
+
+    fn init_large(&mut self, p: *mut u8, layout: Layout, vtable: *const crate::GcVTable) -> *mut Header {
         let h = p as *mut Header;
         unsafe { Header::init(h, vtable, self.owner, POOL.live_color.load(Ordering::Relaxed), self.young_alloc) };
         if self.young_alloc {
@@ -818,6 +1091,21 @@ impl Drop for LocalHeap {
     }
 }
 
+/// The segments holding pages in `empty`, in order of first appearance, with how many of their
+/// pages are there.
+fn empty_counts(empty: &[&'static Page]) -> Vec<(*mut u8, usize)> {
+    let mut order: Vec<(*mut u8, usize)> = Vec::new();
+    let mut index: std::collections::HashMap<*mut u8, usize> = std::collections::HashMap::new();
+    for p in empty {
+        let i = *index.entry(p.seg).or_insert_with(|| {
+            order.push((p.seg, 0));
+            order.len() - 1
+        });
+        order[i].1 += 1;
+    }
+    order
+}
+
 /// Length of a free list threaded through word 1 of free slots.
 unsafe fn count_list(mut p: *mut u8) -> usize {
     let mut n = 0;
@@ -830,4 +1118,70 @@ unsafe fn count_list(mut p: *mut u8) -> usize {
 
 pub fn total_heap_bytes() -> usize {
     TOTAL_PAGES.load(Ordering::Relaxed) * PAGE_SIZE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reserve_len(pool: &PagePool) -> usize {
+        pool.reserve.lock().len()
+    }
+
+    #[test]
+    fn the_reserve_stands_in_for_refused_segments() {
+        // A pool of its own (the global one serves other tests), on this thread, whose segment
+        // mappings are made to fail.
+        let pool = PagePool::new();
+        assert!(!pool.reserve_short());
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS);
+        fail::MAPS.with(|f| f.set(true));
+        // No empty pages and the OS refuses a segment: a reserve segment serves.
+        let page = pool.take_empty(0);
+        // SAFETY: the page is ours and mapped.
+        unsafe { ptr::write_bytes(page.base, 0xA5, PAGE_SIZE) };
+        assert!(pool.reserve_short());
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS - 1);
+        assert_eq!(pool.segments.lock().len(), 1);
+        // The segment's other pages serve the next requests; after them, a second refusal
+        // before any collection draws one more segment.
+        let page2 = pool.take_empty(0);
+        let rest: Vec<&'static Page> = (2..PAGES_PER_SEGMENT).map(|_| pool.take_empty(0)).collect();
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS - 1);
+        let page3 = pool.take_empty(0);
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS - 1 - 1);
+        assert_eq!(pool.segments.lock().len(), 2);
+        // The segment is in use and the OS still refuses: the reserve cannot be refilled.
+        assert!(!pool.refill_reserve());
+        assert!(pool.reserve_short());
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS - 1 - 1);
+        // Once its pages are empty again the first segment returns to the reserve, which is
+        // still short.
+        for p in [page, page2].into_iter().chain(rest) {
+            p.state.store(PageState::Empty as u8, Ordering::Relaxed);
+            pool.empty.lock().push(p);
+        }
+        assert!(!pool.refill_reserve());
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS - 1);
+        assert_eq!(pool.segments.lock().len(), 1);
+        let _ = page3;
+        // The OS gives memory again: the reserve is whole.
+        fail::MAPS.with(|f| f.set(false));
+        assert!(pool.refill_reserve());
+        assert!(!pool.reserve_short());
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS);
+    }
+
+    #[test]
+    fn the_reserve_makes_room_for_large_objects_it_can_cover() {
+        let pool = PagePool::new();
+        assert!(pool.release_reserve_for(SEGMENT_SIZE + 1));
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS - 3);
+        assert!(pool.reserve_short());
+        // Too large for what is left: the reserve is kept.
+        assert!(!pool.release_reserve_for(RESERVE_SEGMENTS * SEGMENT_SIZE));
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS - 3);
+        assert!(pool.refill_reserve());
+        assert_eq!(reserve_len(&pool), RESERVE_SEGMENTS);
+    }
 }

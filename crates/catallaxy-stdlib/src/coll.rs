@@ -247,22 +247,34 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "StringBuilder.new" => |vm, _| Ok(vm.m.alloc_string_builder(String::new())),
         "StringBuilder.push" => |vm, a| {
             let x = s(a[1])?.to_string();
-            sb_write(vm, a[0], |b| b.push_str(&x))
+            sb_push(vm, a[0], &x)
         },
         "StringBuilder.push_value" => |vm, a| {
             let x = to_s(vm, a[1])?;
-            sb_write(vm, a[0], |b| b.push_str(&x))
+            sb_push(vm, a[0], &x)
         },
         "StringBuilder.push_char" => |vm, a| {
             let c = int(a[1])?;
             match u32::try_from(c).ok().and_then(char::from_u32) {
-                Some(ch) => sb_write(vm, a[0], |b| b.push(ch)),
+                Some(ch) => sb_push(vm, a[0], ch.encode_utf8(&mut [0; 4])),
                 None => panic(format!("RangeError: {c} is not a valid character code")),
             }
         },
         "StringBuilder.to_s" => |vm, a| {
-            let text = ownership::with_read(&vm.m, a[0], || unsafe { (*as_sb(a[0]).buf.get()).clone() })?;
-            Ok(new_str(vm, &text))
+            // A snapshot (a shared builder may change once its lock is released), then the
+            // string, each raising a MemoryError if refused.
+            let text = ownership::with_read(&vm.m, a[0], || {
+                let b = unsafe { &*as_sb(a[0]).buf.get() };
+                let mut t = String::new();
+                t.try_reserve_exact(b.len()).map(|_| {
+                    t.push_str(b);
+                    t
+                })
+            })?;
+            match text {
+                Ok(t) => vm.m.try_alloc_str(&t),
+                Err(_) => sb_refused(),
+            }
         },
         "StringBuilder.length" => |vm, a| {
             let n = ownership::with_read(&vm.m, a[0], || unsafe { (*as_sb(a[0]).buf.get()).chars().count() })?;
@@ -319,6 +331,28 @@ fn dict_delete(vm: &mut Vm, d: Value, k: Value) -> RtResult<Value> {
             return Ok(v);
         }
     }
+}
+
+/// Appends `x` to a builder. If its buffer cannot grow, collects (garbage may hold the memory)
+/// and tries once more, then raises a `MemoryError`.
+fn sb_push(vm: &Vm, b: Value, x: &str) -> RtResult<Value> {
+    for retry in [false, true] {
+        let grown = ownership::with_write(&vm.m, b, |_| {
+            let buf = unsafe { &mut *as_sb(b).buf.get() };
+            buf.try_reserve(x.len()).map(|_| buf.push_str(x))
+        })?;
+        if grown.is_ok() {
+            return Ok(Value::NIL);
+        }
+        if !retry {
+            catallaxy_gc::collect_to_free(&vm.m.rec);
+        }
+    }
+    sb_refused()
+}
+
+fn sb_refused() -> RtResult<Value> {
+    catallaxy_runtime::refused("cannot grow a StringBuilder")
 }
 
 fn sb_write(vm: &Vm, b: Value, f: impl FnOnce(&mut String)) -> RtResult<Value> {

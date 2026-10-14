@@ -111,16 +111,6 @@ impl RootSource for VmRoots {
     }
 }
 
-/// The panic raised when a collection finds more live data than `CATX_MAX_HEAP` allows.
-#[cold]
-fn heap_limit_error() -> Trap {
-    Trap::Panic(format!(
-        "MemoryError: {:.1} MB live after collection, over the CATX_MAX_HEAP limit of {:.1} MB",
-        catallaxy_gc::stats::live_bytes() as f64 / 1e6,
-        catallaxy_gc::limits::max_heap().unwrap_or(0) as f64 / 1e6
-    ))
-}
-
 #[inline(always)]
 fn ops_mark(t: &mut Tracer, v: Value) {
     if v.is_ptr() {
@@ -128,15 +118,21 @@ fn ops_mark(t: &mut Tracer, v: Value) {
     }
 }
 
+/// A register stack of `n` values, or null if the allocator refuses.
 fn alloc_stack(n: usize) -> *mut Value {
     let layout = std::alloc::Layout::array::<Value>(n).unwrap();
     // Zeroed memory is lazily committed by the OS; zero bits decode as the float 0.0, which the
     // collector ignores.
-    let p = unsafe { std::alloc::alloc_zeroed(layout) } as *mut Value;
-    if p.is_null() {
-        std::alloc::handle_alloc_error(layout);
-    }
-    p
+    unsafe { std::alloc::alloc_zeroed(layout) as *mut Value }
+}
+
+/// The `MemoryError` for a register stack of `n` values the allocator refused.
+#[cold]
+fn stack_refused<T>(n: usize) -> RtResult<T> {
+    catallaxy_runtime::refused(format!(
+        "cannot allocate a {} KB register stack",
+        n * std::mem::size_of::<Value>() / 1024
+    ))
 }
 
 pub const MAIN_STACK: usize = 4 << 20;
@@ -145,7 +141,19 @@ pub const THREAD_STACK: usize = 1 << 20;
 impl Vm {
     /// Creates a VM for a thread registered with the collector. The thread record must be in the
     /// native state; the VM's roots are installed before this returns.
+    /// Aborts if the register stack cannot be allocated; see [`Vm::try_new`].
     pub fn new(rec: Arc<ThreadRecord>, stack_size: usize) -> Box<Vm> {
+        Vm::try_new(rec, stack_size)
+            .unwrap_or_else(|_| std::alloc::handle_alloc_error(std::alloc::Layout::array::<Value>(stack_size).unwrap()))
+    }
+
+    /// As [`Vm::new`], but a register stack the allocator refuses is a `MemoryError` panic.
+    /// The thread record is left registered either way.
+    pub fn try_new(rec: Arc<ThreadRecord>, stack_size: usize) -> RtResult<Box<Vm>> {
+        let stack = alloc_stack(stack_size);
+        if stack.is_null() {
+            return stack_refused(stack_size);
+        }
         let m = Mutator::new(rec);
         let rs = Box::into_raw(Box::new(RootState {
             frames: Vec::with_capacity(256),
@@ -156,7 +164,7 @@ impl Vm {
         }));
         let vm = Box::new(Vm {
             m,
-            stack: alloc_stack(stack_size),
+            stack,
             stack_cap: stack_size,
             rs,
             next_serial: 1,
@@ -169,13 +177,18 @@ impl Vm {
         let heap_ptr = vm.m.heap_ptr();
         unsafe { catallaxy_gc::install(&vm.m.rec, roots_ptr, heap_ptr) };
         // The root source box is leaked deliberately; it is tiny and lives as long as the thread.
-        vm
+        Ok(vm)
     }
 
     /// Creates a VM for a fiber of this VM's thread: it shares the thread's heap and collector
     /// record, and its roots are scanned as part of the thread's. Release it with
     /// [`Vm::release_fiber`] on the same thread.
-    pub fn new_fiber(&mut self, stack_size: usize) -> Box<Vm> {
+    /// A register stack the allocator refuses is a `MemoryError` panic.
+    pub fn new_fiber(&mut self, stack_size: usize) -> RtResult<Box<Vm>> {
+        let stack = alloc_stack(stack_size);
+        if stack.is_null() {
+            return stack_refused(stack_size);
+        }
         let rs = Box::into_raw(Box::new(RootState {
             frames: Vec::with_capacity(16),
             held_locks: Vec::new(),
@@ -185,7 +198,7 @@ impl Vm {
         }));
         let vm = Box::new(Vm {
             m: Mutator::sharing(&self.m),
-            stack: alloc_stack(stack_size),
+            stack,
             stack_cap: stack_size,
             rs,
             next_serial: 1,
@@ -196,7 +209,7 @@ impl Vm {
         let roots = VmRoots { stack: vm.stack, rs: vm.rs, handles: vm.m.handles_ptr() };
         // SAFETY: the root state belongs to this thread, which is running (not being scanned).
         unsafe { (*self.root_rs).children.push(roots) };
-        vm
+        Ok(vm)
     }
 
     /// Unregisters a fiber VM from its thread's roots and frees it. It takes the box
@@ -238,12 +251,19 @@ impl Vm {
         vm
     }
 
-    /// Unregisters the thread. The VM must not be used afterwards.
+    /// Unregisters the thread and frees its register stack. The VM must not be used afterwards.
     pub fn shutdown(&mut self) {
         catallaxy_gc::enter_native(&self.m.rec);
         // Unregister first so no collection can touch the heap while it is being released.
         catallaxy_gc::unregister_thread(&self.m.rec);
         self.m.release_pages();
+        if !self.stack.is_null() {
+            // SAFETY: allocated by `alloc_stack` with this capacity; no collection scans it now.
+            unsafe {
+                std::alloc::dealloc(self.stack as *mut u8, std::alloc::Layout::array::<Value>(self.stack_cap).unwrap())
+            };
+            self.stack = std::ptr::null_mut();
+        }
     }
 
     #[inline(always)]
@@ -517,12 +537,13 @@ impl Vm {
             }};
         }
         // A safepoint's slow path (the frame's pc is saved): takes part in a pending collection,
-        // then panics with a MemoryError if the heap is over `CATX_MAX_HEAP`.
+        // then panics with a MemoryError if the heap is over `CATX_MAX_HEAP` or the system
+        // refused to grow it (see `catallaxy_gc::limits::take_pending_error`).
         macro_rules! poll_slow {
             () => {{
                 catallaxy_gc::safepoint_slow(&self.m.rec);
-                if catallaxy_gc::limits::take_over_limit() {
-                    return Err(heap_limit_error());
+                if let Some(msg) = catallaxy_gc::limits::take_pending_error() {
+                    return Err(Trap::Panic(msg));
                 }
             }};
         }
@@ -895,11 +916,12 @@ impl Vm {
                             return Err(Trap::Panic("internal error: Concat of a non-string".into()));
                         }
                     }
-                    // Allocation never collects, so the parts stay valid while they are copied.
-                    let v = self.m.alloc_concat(n, |i| {
+                    // The parts stay in their registers, so they stay valid while they are
+                    // copied, even if the allocator refuses and a collection runs.
+                    let v = tri!(self.m.try_alloc_concat(n, |i| {
                         let x = r!(b + i);
                         unsafe { as_str_obj(x) }
-                    });
+                    }));
                     set!(a, v);
                 }
                 Op::ToS => {

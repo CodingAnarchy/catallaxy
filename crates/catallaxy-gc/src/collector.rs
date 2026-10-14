@@ -406,6 +406,19 @@ pub fn collect_now(rec: &ThreadRecord) {
     safepoint_slow(rec);
 }
 
+/// Set to make the next major collection sweep every page itself instead of leaving that to
+/// allocation, so that garbage (and memory its finalizers free) is released by the time it ends.
+static SWEEP_ALL: AtomicBool = AtomicBool::new(false);
+
+/// As [`collect_now`], for when the allocator refused memory: the collection also sweeps every
+/// page, running finalizers, so that buffers held by garbage are freed before the caller retries.
+/// (A collection already in progress when this is called may not sweep; one retry is the
+/// caller's best effort either way.)
+pub fn collect_to_free(rec: &ThreadRecord) {
+    SWEEP_ALL.store(true, Ordering::SeqCst);
+    collect_now(rec);
+}
+
 /// `CATX_GC_TRACE=1` prints the phases of every major collection.
 fn trace_enabled() -> bool {
     static T: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -532,6 +545,22 @@ fn collect(me: &ThreadRecord) {
     POOL.sweep_large(color);
     POOL.mark_all_unswept();
     stats::after_collection(GLOBAL.mark.marked_bytes.load(Ordering::SeqCst), threads.len());
+    // If the OS refused memory (an allocation drew on the emergency reserve, or released the
+    // headroom block), sweep now, so that the memory this collection freed is known, then refill
+    // the reserve and map the headroom again (`collect_to_free` asks for the sweep too). If that
+    // fails the heap is out of memory: the next thread at a safepoint raises a MemoryError, and
+    // the next collection comes soon. A collection that finds memory again withdraws an error no
+    // thread has raised yet.
+    let sweep_all = SWEEP_ALL.swap(false, Ordering::SeqCst);
+    let refused = POOL.reserve_short() || !crate::heap::headroom_held();
+    if sweep_all || refused {
+        POOL.finish_sweeping();
+    }
+    let out_of_memory = refused && !(POOL.refill_reserve() && crate::heap::restore_headroom());
+    crate::limits::note_out_of_memory(out_of_memory);
+    if out_of_memory {
+        stats::collect_soon();
+    }
     // Every page is swept now (step 2), so wholly empty segments are known; keep enough empty
     // pages for the allocation budget until the next collection and return the rest.
     let released = POOL.release_empty_segments(stats::threshold() + crate::heap::nursery_reserve(threads.len()));
