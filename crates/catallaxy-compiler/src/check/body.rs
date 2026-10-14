@@ -172,6 +172,7 @@ impl Checker {
         for g in 0..self.globals.len() {
             self.ensure_global(g as GlobalId);
         }
+        self.check_local_keys();
     }
 
     pub fn check_fn_body(&mut self, fid: FnId) {
@@ -359,6 +360,29 @@ impl Checker {
             self.locals[l as usize].ty = r;
         }
         self.ctxs.pop();
+    }
+
+    /// E0373 for user variables (and parameters) holding a `Dict`/`Set` with mutable keys,
+    /// once every body (closures included) has been checked and their types are known.
+    fn check_local_keys(&mut self) {
+        let mut fids: Vec<FnId> = self.fn_locals.keys().copied().collect();
+        fids.sort_unstable();
+        for fid in fids {
+            let f = &self.fns[fid as usize];
+            // Generated constructors repeat the fields, which are checked themselves.
+            if self.mods[f.module as usize].is_prelude || matches!(f.synth, Synth::Constructor(_)) {
+                continue;
+            }
+            for l in self.fn_locals[&fid].clone() {
+                let info = &self.locals[l as usize];
+                if info.name == "self" || info.name.starts_with('$') {
+                    continue;
+                }
+                let (what, ty, span) = (format!("`{}`", info.name), info.ty, info.span);
+                let ty = self.types.resolve(ty);
+                self.check_mutable_key(&what, ty, span);
+            }
+        }
     }
 
     /// Checks a constant's or module variable's initializer (once).

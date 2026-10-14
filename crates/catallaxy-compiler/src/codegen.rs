@@ -279,7 +279,11 @@ impl<'a> Codegen<'a> {
             Owner::Iface(i) => format!("{}.{}", self.ck.ifaces[i as usize].name, f.name),
             Owner::Extend(_) => f.name.clone(),
             Owner::None => match f.synth {
-                Synth::Main(m) => format!("<main {}>", self.ck.mods[m as usize].name),
+                // The entry module's top level is `<main>`; an imported module's is `<module m>`.
+                Synth::Main(m) => match self.ck.mods[m as usize].name.strip_prefix("<entry>") {
+                    Some(_) => "<main>".to_string(),
+                    None => format!("<module {}>", self.ck.mods[m as usize].name),
+                },
                 _ => f.name.clone(),
             },
         }
@@ -1221,6 +1225,16 @@ impl<'a> Codegen<'a> {
                         let r = self.expr_reg(st, recv);
                         let i = self.expr_reg(st, &args[0]);
                         self.emit(st, encode(Op::ListGet, dst, r, i));
+                    }
+                    _ if matches!(ck.types.get(ck.types.shallow_resolve(ck.ty_of(recv.id))), Ty::Dyn) => {
+                        // Out of range on a `Dyn` list is nil, as a missing object key is.
+                        let base = self.alloc_n(st, 2);
+                        self.expr_to(st, recv, base);
+                        self.expr_to(st, &args[0], base + 1);
+                        let n = self.internal_native("__dyn_index");
+                        self.emit(st, encode(Op::CallNative, base, 2, 0));
+                        self.emit(st, n);
+                        self.emit(st, encode(Op::Move, dst, base, 0));
                     }
                     _ => {
                         let r = self.expr_reg(st, recv);
