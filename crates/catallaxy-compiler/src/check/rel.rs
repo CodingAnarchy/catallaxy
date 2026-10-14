@@ -55,7 +55,16 @@ impl Checker {
             Ty::Union(ts) => {
                 let nil = self.types.nil;
                 if ts.contains(&nil) {
-                    let rest: Vec<String> = ts.iter().filter(|&&x| x != nil).map(|&x| self.show_atom(x)).collect();
+                    // An optional whose other member is not inferred yet (a variable first
+                    // assigned `nil`) is, so far, just `Nil`: never show the placeholder `_?`.
+                    let rest: Vec<String> = ts
+                        .iter()
+                        .filter(|&&x| x != nil && !matches!(self.types.get(self.types.shallow_resolve(x)), Ty::Var(_)))
+                        .map(|&x| self.show_atom(x))
+                        .collect();
+                    if rest.is_empty() {
+                        return "Nil".into();
+                    }
                     if rest.len() == 1 {
                         return format!("{}?", rest[0]);
                     }

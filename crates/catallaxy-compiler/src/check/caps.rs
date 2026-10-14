@@ -84,3 +84,52 @@ impl Checker {
         self.cap_of(t) >= Cap::Shareable
     }
 }
+
+impl Checker {
+    /// A key type hashed by contents that can change after insertion: an owned `List`, `Dict`
+    /// or `Set` (directly, in a tuple, or in a union). Frozen collections and other types
+    /// (`Hashable` classes, identity-hashed instances) are fine.
+    fn is_mutable_key(&self, t: TyId, depth: u32) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        let t = self.types.shallow_resolve(t);
+        match self.types.get(t) {
+            Ty::Class(builtin::LIST | builtin::DICT | builtin::SET, _) => true,
+            Ty::Tuple(ts) | Ty::Union(ts) => ts.iter().any(|&x| self.is_mutable_key(x, depth + 1)),
+            _ => false,
+        }
+    }
+
+    /// The first `Dict` or `Set` type inside `t` whose keys are mutable: (container, key).
+    pub fn mutable_key_in(&self, t: TyId, depth: u32) -> Option<(TyId, TyId)> {
+        if depth > 16 {
+            return None;
+        }
+        let t = self.types.shallow_resolve(t);
+        match self.types.get(t) {
+            Ty::Class(c, args) => {
+                if matches!(*c, builtin::DICT | builtin::SET) && !args.is_empty() && self.is_mutable_key(args[0], 0) {
+                    return Some((t, args[0]));
+                }
+                args.iter().find_map(|&a| self.mutable_key_in(a, depth + 1))
+            }
+            Ty::Tuple(ts) | Ty::Union(ts) => ts.iter().find_map(|&a| self.mutable_key_in(a, depth + 1)),
+            Ty::Frozen(_) => None,
+            _ => None,
+        }
+    }
+
+    /// E0373 for a variable or field `name` of type `t` holding a `Dict`/`Set` with mutable keys.
+    pub fn check_mutable_key(&mut self, what: &str, t: TyId, span: Span) {
+        let Some((container, key)) = self.mutable_key_in(t, 0) else { return };
+        let msg = format!("{what} has type `{}`, whose keys are mutable `{}` values", self.show(t), self.show(key));
+        let note = format!(
+            "changing a key after it is inserted makes its entry unreachable; use frozen keys (`{}` with \
+             `frozen {}` keys, built with `freeze(k)`) or tuples",
+            self.show(container),
+            self.show(key)
+        );
+        self.emit(Diag::error("E0373", msg, span).note(note));
+    }
+}

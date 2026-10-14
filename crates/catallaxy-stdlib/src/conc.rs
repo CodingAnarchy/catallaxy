@@ -110,6 +110,20 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
 
 // ---- threads ---------------------------------------------------------------------------------
 
+/// Threads that panicked: (thread, id, message with trace). Reported at exit unless joined.
+static UNJOINED_PANICS: Mutex<Vec<(Arc<ThreadInner>, u16, String)>> = Mutex::new(Vec::new());
+
+/// Warns about threads that panicked and were never joined (their `Err` was never seen).
+pub fn report_unjoined_panics() {
+    let list = std::mem::take(&mut *UNJOINED_PANICS.lock());
+    for (inner, tid, report) in list {
+        if matches!(*inner.outcome.lock(), ThreadOutcome::Panicked(_)) {
+            flush();
+            eprintln!("warning: thread {tid} panicked and was never joined: {report}");
+        }
+    }
+}
+
 fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let closure = a[0];
     // Registration takes the collector's thread-list lock, which a collection holds while it
@@ -146,9 +160,10 @@ fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
                     for line in trace.iter().take(8) {
                         full.push_str(&format!("\n    at {line}"));
                     }
-                    flush();
-                    eprintln!("warning: thread {} panicked: {}", child.tid(), msg);
-                    ThreadOutcome::Panicked(full)
+                    // `join` hands the message to the program; a thread nobody joins is
+                    // reported (with its trace) when the program ends.
+                    UNJOINED_PANICS.lock().push((inner2.clone(), child.tid(), full));
+                    ThreadOutcome::Panicked(msg)
                 }
                 Err(Trap::Exit(code)) => {
                     flush();
@@ -401,7 +416,8 @@ struct Job {
     results: Vec<AtomicU64>,
     identity: Value,
     remaining: AtomicUsize,
-    error: Mutex<Option<String>>,
+    /// The first failure: its message and the failing block's frames (innermost first).
+    error: Mutex<Option<(String, Vec<String>)>>,
     done: (Mutex<bool>, Condvar),
 }
 
@@ -499,8 +515,12 @@ fn run_task(vm: &mut Vm, task: Task) {
     let job = &task.job;
     let failed = job.error.lock().is_some();
     if !failed {
+        let depth = vm.frame_depth();
         let r = run_range(vm, job, task.start, task.end, task.chunk);
         if let Err(e) = r {
+            // Keep the block's own frames: the caller adds its frames when it re-raises.
+            let mut trace = vm.panic_trace.take().unwrap_or_default();
+            trace.truncate(trace.len().saturating_sub(depth));
             let msg = match e {
                 Trap::Panic(m) => m,
                 Trap::Exit(c) => format!("exit({c}) inside a parallel block"),
@@ -508,7 +528,7 @@ fn run_task(vm: &mut Vm, task: Task) {
             };
             let mut g = job.error.lock();
             if g.is_none() {
-                *g = Some(msg);
+                *g = Some((msg, trace));
             }
         }
     }
@@ -643,7 +663,10 @@ fn run_job(vm: &mut Vm, kind: ParKind, f: Value, items: Vec<Value>, identity: Va
         }
     }
     pool.jobs.lock().retain(|j| !Arc::ptr_eq(j, &job));
-    if let Some(msg) = job.error.lock().take() {
+    if let Some((msg, mut trace)) = job.error.lock().take() {
+        // The trace reads the same whichever thread ran the failing element.
+        trace.extend(vm.backtrace());
+        vm.panic_trace = Some(trace);
         return Err(Trap::Panic(msg));
     }
     let tid = vm.tid();

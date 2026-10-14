@@ -19,6 +19,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "assert_eq" => assert_eq,
         "inspect" => inspect,
         "compare_values" => compare_values,
+        "__dyn_index" => |vm, a| catallaxy_vm::slow::dyn_index_get(vm, a[0], a[1]),
         "read_line" | "Stdin.read_line" => read_line,
         "Stdin.read_all" => |vm, _| {
             let text = String::from_utf8_lossy(&read_stdin_to_end(vm)).into_owned();
