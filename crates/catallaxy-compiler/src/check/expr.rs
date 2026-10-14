@@ -45,7 +45,8 @@ impl Checker {
         let tr = self.types.shallow_resolve(t);
         if let Some(inner) = self.types.strip_nil(tr) {
             if self.trial(|c| c.assignable(inner, ty)) {
-                d = d.note("the value may be nil").fix("assert it is not nil", e.span.after(), "!").suggest(
+                let note = self.loop_dropped_note(e).unwrap_or_else(|| "the value may be nil".to_string());
+                d = d.note(note).fix("assert it is not nil", e.span.after(), "!").suggest(
                     "provide a default",
                     e.span.after(),
                     " ?? <default>",
@@ -129,6 +130,154 @@ impl Checker {
         }
         let roots: Vec<LocalId> = locals.iter().filter_map(|n| self.lookup_local_quiet(n)).collect();
         self.clear_paths(|p, _| roots.contains(&p.0) || p.1.iter().any(|f| fields.contains(f)));
+    }
+
+    /// Before a loop: a narrowing of a local holds in the body only if it holds on every path into
+    /// it, that is before the first iteration and after each one (at the end of the body or a
+    /// `next`). The body is checked once, so it is scanned first. A local narrowed here that the
+    /// loop (its condition included) assigns keeps its narrowing only if every such assignment
+    /// visibly keeps the value within it; otherwise the narrowing is dropped for the loop. A kept
+    /// narrowing is recorded in `loop_facts`, so each assignment is checked against it, and holds
+    /// again after the loop. Returns the mark to pass to `loop_exit`.
+    fn loop_enter(&mut self, cond: Option<&Expr>, body: &Block) -> (usize, usize) {
+        let mark = (self.loop_facts.len(), self.loop_dropped.len());
+        let mut assigns: Vec<(&str, Option<BinOp>, &Expr, bool)> = Vec::new();
+        let mut stack: Vec<(&Expr, bool)> = body.stmts.iter().chain(cond).map(|x| (x, false)).collect();
+        while let Some((x, deferred)) = stack.pop() {
+            if let ExprKind::Assign { target, op, value, ty: None } = &x.kind {
+                if let ExprKind::Ident(n) = &target.kind {
+                    assigns.push((n.as_str(), *op, value, deferred));
+                }
+            }
+            // Code that may run later, or on another thread, can assign at any time.
+            let deferred = deferred || matches!(x.kind, ExprKind::Closure { .. } | ExprKind::Spawn { .. });
+            stack.extend(crate::query::children(x).into_iter().map(|c| (c, deferred)));
+        }
+        let mut seen: Vec<LocalId> = Vec::new();
+        for &(name, ..) in &assigns {
+            let Some(l) = self.lookup_local_quiet(name) else { continue };
+            if seen.contains(&l) {
+                continue;
+            }
+            seen.push(l);
+            let declared = self.locals[l as usize].ty;
+            let narrowed = self.local_ty(l);
+            // Only narrowings to a subtype (not, say, the frozen view after `freeze`).
+            if narrowed == declared || !self.trial(|c| c.assignable(narrowed, declared)) {
+                continue;
+            }
+            let mine: Vec<_> = assigns.iter().filter(|a| self.lookup_local_quiet(a.0) == Some(l)).copied().collect();
+            let keeps = mine
+                .into_iter()
+                .all(|(_, op, value, deferred)| !deferred && self.assign_keeps(op, value, declared, narrowed));
+            if keeps {
+                self.loop_facts.push((l, narrowed, self.ctxs.len()));
+            } else {
+                self.clear_narrowing(l);
+                self.loop_dropped.push(l);
+            }
+        }
+        mark
+    }
+
+    /// After a loop: the narrowings `loop_enter` kept held on every iteration, so they hold after it.
+    fn loop_exit(&mut self, mark: (usize, usize)) {
+        let kept = self.loop_facts.split_off(mark.0);
+        self.loop_dropped.truncate(mark.1);
+        for (l, t, _) in kept {
+            self.narrow(l, t);
+        }
+    }
+
+    /// Whether `x op= value` (or `x = value`) visibly leaves `x`, declared `declared`, within
+    /// `narrowed`, before `value` is checked. Unknown values do not.
+    fn assign_keeps(&mut self, op: Option<BinOp>, value: &Expr, declared: TyId, narrowed: TyId) -> bool {
+        let non_nil = self.types.strip_nil(self.types.shallow_resolve(declared)) == Some(narrowed);
+        let guess = match op {
+            // `x ??= v` is never nil afterwards.
+            Some(BinOp::Coalesce) => return non_nil,
+            Some(BinOp::And | BinOp::Or) => Some(self.types.bool),
+            Some(_) => return non_nil,
+            None => match self.guess_value(value) {
+                ValueGuess::Ty(t) => Some(t),
+                ValueGuess::NonNil => return non_nil,
+                ValueGuess::Unknown => None,
+            },
+        };
+        guess.is_some_and(|t| self.trial(|c| c.assignable(t, narrowed)))
+    }
+
+    /// What an expression evaluates to, judged from its form alone (it is not checked yet).
+    fn guess_value(&mut self, e: &Expr) -> ValueGuess {
+        match &e.kind {
+            ExprKind::Int(_) => ValueGuess::Ty(self.types.int),
+            ExprKind::Float(_) => ValueGuess::Ty(self.types.float),
+            ExprKind::Str(_) => ValueGuess::Ty(self.types.string),
+            ExprKind::Bool(_) | ExprKind::Is { .. } | ExprKind::Unary(UnOp::Not, _) => ValueGuess::Ty(self.types.bool),
+            ExprKind::Nil => ValueGuess::Ty(self.types.nil),
+            ExprKind::Binary(BinOp::Coalesce, _, d) => match self.guess_value(d) {
+                ValueGuess::Ty(t) if !self.types.is_nilable(t) => ValueGuess::NonNil,
+                ValueGuess::NonNil => ValueGuess::NonNil,
+                _ => ValueGuess::Unknown,
+            },
+            // Operators (an operator method's result type is checked at the assignment), literals
+            // of collections, `!` and constructors are never nil.
+            ExprKind::Binary(..)
+            | ExprKind::Unary(..)
+            | ExprKind::List(_)
+            | ExprKind::Dict(_)
+            | ExprKind::Tuple(_)
+            | ExprKind::Range { .. }
+            | ExprKind::Unwrap(_) => ValueGuess::NonNil,
+            ExprKind::Member { name, .. } if name.name == "new" => ValueGuess::NonNil,
+            // A function with a declared, non-generic result.
+            ExprKind::Call { callee, .. } => match self.resolve_path(callee) {
+                Some(PathRes::Fn(f)) => {
+                    let f = &self.fns[f as usize];
+                    if f.ret_annotated && f.type_params.is_empty() {
+                        ValueGuess::Ty(f.ret)
+                    } else {
+                        ValueGuess::Unknown
+                    }
+                }
+                _ => ValueGuess::Unknown,
+            },
+            _ => ValueGuess::Unknown,
+        }
+    }
+
+    /// A note for a nil error on `e`, when `e` is a local whose narrowing an enclosing loop dropped.
+    fn loop_dropped_note(&self, e: &Expr) -> Option<String> {
+        let ExprKind::Ident(n) = &e.kind else { return None };
+        let l = self.lookup_local_quiet(n)?;
+        self.loop_dropped.contains(&l).then(|| {
+            format!(
+                "`{n}` is not nil before this loop, but the loop assigns it a value that may be nil, so it may be nil here on a later iteration; check it inside the loop"
+            )
+        })
+    }
+
+    /// For an assignment to local `l` of a value of type `vt` inside loops: each narrowing of `l`
+    /// that a loop kept (`loop_enter`) must still hold, since the next iteration relies on it.
+    fn check_loop_facts(&mut self, l: LocalId, vt: TyId, value: &Expr) {
+        let facts: Vec<TyId> = self.loop_facts.iter().filter(|f| f.0 == l).map(|f| f.1).collect();
+        for n in facts {
+            if self.trial(|c| c.assignable(vt, n)) {
+                continue;
+            }
+            let name = self.locals[l as usize].name.clone();
+            let msg = format!(
+                "cannot assign `{}` to `{name}` here: the enclosing loop treats `{name}` as `{}`",
+                self.show(vt),
+                self.show(n)
+            );
+            let note = format!(
+                "`{name}` was narrowed to `{}` before the loop, and every assignment to it in the loop must keep it so, because the next iteration relies on it; check it again inside the loop instead",
+                self.show(n)
+            );
+            self.emit(Diag::error("E0324", msg, value.span).note(note));
+            return;
+        }
     }
 
     /// Whether evaluating `e` (just checked) runs code that could assign fields: a function,
@@ -241,6 +390,7 @@ impl Checker {
             }
             ExprKind::While { cond, body } => {
                 self.loop_invalidate(body);
+                let mark = self.loop_enter(Some(cond), body);
                 let (tn, _) = self.check_cond(cond);
                 self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: false });
                 self.push_scope();
@@ -250,13 +400,16 @@ impl Checker {
                 self.check_block(body, None);
                 self.pop_scope();
                 self.ctx().loops.pop();
+                self.loop_exit(mark);
                 self.types.nil
             }
             ExprKind::Loop { body } => {
                 self.loop_invalidate(body);
+                let mark = self.loop_enter(None, body);
                 self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: false });
                 self.check_block(body, None);
                 let lp = self.ctx().loops.pop().unwrap();
+                self.loop_exit(mark);
                 if lp.breaks.is_empty() {
                     self.types.never
                 } else {
@@ -1034,7 +1187,11 @@ impl Checker {
         let lt_r = self.types.shallow_resolve(lt);
         if self.types.is_nilable(lt_r) && !matches!(self.types.get(lt_r), Ty::Class(builtin::NIL, _)) {
             let msg = format!("left side of `{name}` may be nil (type `{}`)", self.show(lt));
-            self.emit(Diag::error("E0310", msg, l.span).fix("assert it is not nil", l.span.after(), "!"));
+            let mut d = Diag::error("E0310", msg, l.span).fix("assert it is not nil", l.span.after(), "!");
+            if let Some(n) = self.loop_dropped_note(l) {
+                d = d.note(n);
+            }
+            self.emit(d);
             return self.types.error;
         }
         match self.lookup_method(lt, name, false) {
@@ -1566,7 +1723,11 @@ impl Checker {
                     let declared = self.locals[l as usize].ty;
                     let vt = match op {
                         None => self.check_expr(value, Some(declared)),
-                        Some(o) => self.compound_rhs(e, o, target, value, declared),
+                        // The read half sees the narrowed type, as a plain read would.
+                        Some(o) => {
+                            let cur = self.local_ty(l);
+                            self.compound_rhs(e, o, target, value, cur)
+                        }
                     };
                     if op.is_none() {
                         self.check_block_value(value, vt);
@@ -1589,6 +1750,13 @@ impl Checker {
                             }
                             self.emit(d);
                         }
+                    }
+                    if !self.loop_facts.is_empty() {
+                        let stored = match self.coerce.get(&value.id) {
+                            Some(Coercion::IntToFloat) => self.types.float,
+                            None => vt,
+                        };
+                        self.check_loop_facts(l, stored, value);
                     }
                     self.locals[l as usize].assigns += 1;
                     for c in self.ctxs.iter_mut() {
@@ -3097,7 +3265,9 @@ impl Checker {
                          bind it instead: `if let {var} = {path} {{ ... }}` (or use `?.`, `??` or `!`)"
                     )
                 }
-                None => "check `!= nil`, use `if let`, `?.`, `??` or `!`".to_string(),
+                None => self
+                    .loop_dropped_note(recv)
+                    .unwrap_or_else(|| "check `!= nil`, use `if let`, `?.`, `??` or `!`".to_string()),
             };
             self.emit(
                 Diag::error("E0310", msg, recv.span)
@@ -3529,7 +3699,11 @@ impl Checker {
         }
         if self.types.is_nilable(rtr) && rtr != self.types.nil {
             let msg = format!("value of type `{}` may be nil", self.show(rt));
-            self.emit(Diag::error("E0310", msg, recv.span).fix("assert it is not nil", recv.span.after(), "!"));
+            let mut d = Diag::error("E0310", msg, recv.span).fix("assert it is not nil", recv.span.after(), "!");
+            if let Some(n) = self.loop_dropped_note(recv) {
+                d = d.note(n);
+            }
+            self.emit(d);
             self.check_expr(&args[0], None);
             return self.types.error;
         }
@@ -3882,6 +4056,7 @@ impl Checker {
     fn check_for(&mut self, e: &Expr, pattern: &ast::Pattern, iter: &Expr, body: &Block) -> TyId {
         let it = self.check_expr(iter, None);
         self.loop_invalidate(body);
+        let mark = self.loop_enter(None, body);
         let itr = self.types.shallow_resolve(it);
         let (kind, elem) = match self.types.get(itr).clone() {
             Ty::Class(builtin::LIST, a) => (ForKind::List, a[0]),
@@ -3953,6 +4128,7 @@ impl Checker {
             self.pop_scope();
             self.ctx().loops.pop();
         }
+        self.loop_exit(mark);
         self.types.nil
     }
 
@@ -4026,4 +4202,11 @@ fn generic_op_hint(op: BinOp, typed: bool) -> &'static str {
         }
         _ => " (the operator is an extension or interface default method, which an untyped parameter cannot reach)",
     }
+}
+
+/// What `Checker::guess_value` can tell about a value before it is checked.
+enum ValueGuess {
+    Ty(TyId),
+    NonNil,
+    Unknown,
 }

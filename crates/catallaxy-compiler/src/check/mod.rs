@@ -141,6 +141,13 @@ pub struct Checker {
     pub satisfies_stack: Vec<(TyId, TyId)>,
     /// Bumped whenever a call drops unstable field-path narrowings.
     pub path_epoch: u32,
+    /// Narrowings of locals that hold throughout the loops being checked (innermost last):
+    /// every assignment to the local in the loop must keep its value within the narrowed type.
+    /// (local, narrowed type, number of contexts at the loop).
+    pub loop_facts: Vec<(LocalId, TyId, usize)>,
+    /// Locals whose narrowing a loop being checked dropped, because it assigns them a value that
+    /// may not fit it (for diagnostics).
+    pub loop_dropped: Vec<LocalId>,
     /// Every method name of every type (built on first use, for loop pre-scans).
     pub method_names: FxHashSet<String>,
     /// When set, `Open` requirements are recorded against this function.
@@ -239,6 +246,8 @@ impl Checker {
             satisfies_cache: FxHashMap::default(),
             satisfies_stack: Vec::new(),
             path_epoch: 0,
+            loop_facts: Vec::new(),
+            loop_dropped: Vec::new(),
             method_names: FxHashSet::default(),
             open_owner: None,
             well_known: WellKnown::default(),
