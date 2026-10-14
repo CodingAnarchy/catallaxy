@@ -34,6 +34,17 @@ struct Outcome {
 }
 
 fn run_limited(name: &str, src: &str) -> Outcome {
+    for i in 0..25 {
+        let o = run_limited1(name, src);
+        if o.code != Some(101) {
+            eprintln!("STRESS {name} run {i}: {:?}\n{}\n{}", o.code, o.stdout, o.stderr);
+            return o;
+        }
+    }
+    run_limited1(name, src)
+}
+
+fn run_limited1(name: &str, src: &str) -> Outcome {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let dir = std::env::temp_dir().join(format!("catx-oom-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
