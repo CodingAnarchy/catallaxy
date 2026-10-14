@@ -1,0 +1,9 @@
+# expect: E0332
+# An argument left to its default must have a default on every member.
+class C {
+  fn put(self, n: Int, times: Int = 1) -> Int { n * times }
+}
+class D {
+  fn put(self, n: Int, times: Int) -> Int { n * times }
+}
+fn f(c: C | D) -> Int { c.put(2) }

@@ -1,0 +1,10 @@
+# expect: E0300
+# A method call on a union value is checked against every member's signature.
+class C {
+  fn put(self, x: Int) -> Int { x }
+}
+class D {
+  fn put(self, x: String) -> String { x }
+}
+fn f(c: C | D) { print(c.put(1)) }
+f(D.new())
