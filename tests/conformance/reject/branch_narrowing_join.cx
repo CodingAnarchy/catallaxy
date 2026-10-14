@@ -1,0 +1,13 @@
+# expect: E0310
+# After an `if`, a narrowing holds only if every branch that falls through keeps it: here the
+# `else` branch of the guard clause sets `x` to nil.
+fn g(c: Bool) -> Int {
+  x: Int? = 1
+  if x == nil {
+    return 0
+  } else if c {
+    x = nil
+  }
+  x + 1
+}
+puts(g(true))

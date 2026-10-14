@@ -1418,46 +1418,46 @@ impl Checker {
     // ---- control flow ------------------------------------------------------------------------
 
     fn check_if(&mut self, cond: &Expr, then: &Block, else_: Option<&Expr>, expected: Option<TyId>) -> TyId {
-        let (mut tn, mut fne) = self.check_cond(cond);
-        let epoch0 = self.path_epoch;
-        self.push_scope();
-        for (l, t) in tn.iter().cloned() {
-            self.narrow(l, t);
+        let (tn, fne) = self.check_cond(cond);
+        // Each branch starts from the narrowings here. After the `if`, what every branch that
+        // falls through ends with holds (`joined_narrowing`); this also makes guard clauses
+        // (`if x == nil { return }`) narrow the rest of the block.
+        let start = self.save_narrowing();
+        let mut ends = Vec::new();
+        let (tt, end) = self.check_branch(tn, |c| {
+            c.capture_block_end = true;
+            c.check_block(then, expected)
+        });
+        if !self.is_never(tt) {
+            ends.push(end);
         }
-        let tt = self.check_block(then, expected);
-        self.pop_scope();
-        let epoch1 = self.path_epoch;
+        self.restore_narrowing(start.clone());
         let et = match else_ {
             Some(x) => {
-                self.push_scope();
-                for (l, t) in fne.iter().cloned() {
-                    self.narrow(l, t);
+                let (t, end) = self.check_branch(fne, |c| c.check_branch_expr(x, expected));
+                if !self.is_never(t) {
+                    ends.push(end);
                 }
-                let t = self.check_expr(x, expected);
-                self.pop_scope();
                 Some(t)
             }
-            None => None,
+            None => {
+                let mut end = Self::flat_narrowing(&start);
+                for (k, t) in fne {
+                    match k {
+                        NKey::Local(l) => {
+                            end.0.insert(l, t);
+                        }
+                        NKey::Path(p, stable) => {
+                            end.1.insert(p, (t, stable));
+                        }
+                    }
+                }
+                ends.push(end);
+                None
+            }
         };
-        // Guard clauses: `if x == nil { return }` narrows the rest of the block, unless a call
-        // in the other branch may have changed what the condition found.
-        let then_diverges = self.is_never(tt);
-        let else_diverges = et.is_some_and(|t| self.is_never(t));
-        if epoch1 != epoch0 {
-            self.retain_past_calls(&mut tn);
-        }
-        if self.path_epoch != epoch1 {
-            self.retain_past_calls(&mut fne);
-        }
-        if then_diverges && !else_diverges {
-            for (l, t) in fne {
-                self.narrow(l, t);
-            }
-        } else if else_diverges && !then_diverges {
-            for (l, t) in tn {
-                self.narrow(l, t);
-            }
-        }
+        let joined = self.joined_narrowing(&start, &ends);
+        self.restore_narrowing(joined);
         match et {
             None => {
                 if self.is_never(tt) || self.types.shallow_resolve(tt) == self.types.nil {
@@ -1486,25 +1486,46 @@ impl Checker {
         expected: Option<TyId>,
     ) -> TyId {
         let vt = self.check_expr(value, None);
-        self.push_scope();
-        // A plain binding unwraps an optional.
-        let bind_ty = match &pattern.kind {
-            ast::PatternKind::Bind(_) => match self.types.strip_nil(vt) {
-                Some(inner) => inner,
-                None => {
-                    if !self.is_dynamic(vt) {
-                        let msg = format!("`if let` needs an optional value, found `{}`", self.show(vt));
-                        self.err("E0317", msg, value.span);
+        let start = self.save_narrowing();
+        let mut ends = Vec::new();
+        let (tt, end) = self.check_branch(Vec::new(), |c| {
+            // A plain binding unwraps an optional.
+            let bind_ty = match &pattern.kind {
+                ast::PatternKind::Bind(_) => match c.types.strip_nil(vt) {
+                    Some(inner) => inner,
+                    None => {
+                        if !c.is_dynamic(vt) {
+                            let msg = format!("`if let` needs an optional value, found `{}`", c.show(vt));
+                            c.err("E0317", msg, value.span);
+                        }
+                        vt
                     }
-                    vt
+                },
+                _ => vt,
+            };
+            c.check_pattern(pattern, bind_ty, false);
+            c.capture_block_end = true;
+            c.check_block(then, expected)
+        });
+        if !self.is_never(tt) {
+            ends.push(end);
+        }
+        self.restore_narrowing(start.clone());
+        let et = match else_ {
+            Some(x) => {
+                let (t, end) = self.check_branch(Vec::new(), |c| c.check_branch_expr(x, expected));
+                if !self.is_never(t) {
+                    ends.push(end);
                 }
-            },
-            _ => vt,
+                Some(t)
+            }
+            None => {
+                ends.push(Self::flat_narrowing(&start));
+                None
+            }
         };
-        self.check_pattern(pattern, bind_ty, false);
-        let tt = self.check_block(then, expected);
-        self.pop_scope();
-        let et = else_.map(|x| self.check_expr(x, expected));
+        let joined = self.joined_narrowing(&start, &ends);
+        self.restore_narrowing(joined);
         match et {
             None => {
                 if self.is_never(tt) || self.types.shallow_resolve(tt) == self.types.nil {

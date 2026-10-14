@@ -143,6 +143,107 @@ impl Checker {
         self.clear_paths(|p, _| p.0 == id);
     }
 
+    /// The narrowings of the current context, to start each branch of an `if` or `match` from.
+    pub fn save_narrowing(&self) -> NarrowState {
+        let c = self.ctxs.last().expect("no function context");
+        (c.narrow.clone(), c.path_narrow.clone())
+    }
+
+    pub fn restore_narrowing(&mut self, s: NarrowState) {
+        let c = self.ctx();
+        (c.narrow, c.path_narrow) = s;
+    }
+
+    /// The narrowing in effect for each local and field path of `s` (the innermost layer wins).
+    pub fn flat_narrowing(s: &NarrowState) -> FlatNarrow {
+        let mut f = FlatNarrow::default();
+        for layer in &s.0 {
+            f.0.extend(layer.iter().map(|(&k, &v)| (k, v)));
+        }
+        for layer in &s.1 {
+            f.1.extend(layer.iter().map(|(k, &v)| (k.clone(), v)));
+        }
+        f
+    }
+
+    /// Checks a branch with `check` in its own scope, after `narrowings`, and returns its type
+    /// and the narrowings in effect at its end. When the branch body is a block, `check` sets
+    /// `capture_block_end` just before checking it, so that the block's own narrowings (from
+    /// assignments in it) count too.
+    pub fn check_branch(
+        &mut self,
+        narrowings: Vec<(NKey, TyId)>,
+        check: impl FnOnce(&mut Self) -> TyId,
+    ) -> (TyId, FlatNarrow) {
+        self.push_scope();
+        for (k, t) in narrowings {
+            self.narrow(k, t);
+        }
+        self.block_end = None;
+        let t = check(self);
+        self.capture_block_end = false;
+        let end = match self.block_end.take() {
+            Some(end) => end,
+            None => Self::flat_narrowing(&self.save_narrowing()),
+        };
+        self.pop_scope();
+        (t, end)
+    }
+
+    /// Checks `x`, a branch body, capturing the narrowings at its end if it is a block.
+    pub fn check_branch_expr(&mut self, x: &Expr, expected: Option<TyId>) -> TyId {
+        self.capture_block_end = matches!(x.kind, ExprKind::Block(_));
+        let t = self.check_stmt(x, expected);
+        self.capture_block_end = false;
+        t
+    }
+
+    /// The narrowings after branches that all started from `start`, given the narrowings at the
+    /// end of each branch that falls through: a local or field path stays narrowed only if every
+    /// such branch ends with it narrowed, to the join of their types. A narrowing of `start` that
+    /// changes is moved to its innermost layer, which ends with the enclosing scope.
+    pub fn joined_narrowing(&mut self, start: &NarrowState, ends: &[FlatNarrow]) -> NarrowState {
+        let mut out = start.clone();
+        let Some((first, rest)) = ends.split_first() else { return out };
+        let mut locals: FxHashMap<LocalId, TyId> = FxHashMap::default();
+        for (&l, &t) in &first.0 {
+            let ts: Option<Vec<TyId>> =
+                std::iter::once(Some(t)).chain(rest.iter().map(|e| e.0.get(&l).copied())).collect();
+            if let Some(ts) = ts {
+                let t = if ts.iter().all(|&u| u == t) { t } else { self.join(&ts) };
+                locals.insert(l, t);
+            }
+        }
+        let mut paths: FxHashMap<FieldPath, (TyId, bool)> = FxHashMap::default();
+        for (p, &v) in &first.1 {
+            let vs: Option<Vec<(TyId, bool)>> =
+                std::iter::once(Some(v)).chain(rest.iter().map(|e| e.1.get(p).copied())).collect();
+            if let Some(vs) = vs {
+                let ts: Vec<TyId> = vs.iter().map(|v| v.0).collect();
+                let t = if ts.iter().all(|&u| u == v.0) { v.0 } else { self.join(&ts) };
+                paths.insert(p.clone(), (t, vs.iter().all(|v| v.1)));
+            }
+        }
+        for layer in &mut out.0 {
+            layer.retain(|l, t| locals.get(l) == Some(t));
+        }
+        for layer in &mut out.1 {
+            layer.retain(|p, v| paths.get(p) == Some(v));
+        }
+        let now = Self::flat_narrowing(&out);
+        for (l, t) in locals {
+            if now.0.get(&l) != Some(&t) {
+                out.0.last_mut().unwrap().insert(l, t);
+            }
+        }
+        for (p, v) in paths {
+            if now.1.get(&p) != Some(&v) {
+                out.1.last_mut().unwrap().insert(p, v);
+            }
+        }
+        out
+    }
+
     /// The narrowed type of a field path in the current context, if any.
     pub fn path_ty(&self, p: &FieldPath) -> Option<TyId> {
         let c = self.ctxs.last()?;
@@ -224,9 +325,15 @@ impl Checker {
                     Diag::error("E0230", format!("recursive function `{name}` needs a return type annotation"), span)
                         .suggest("annotate the return type", span.after(), " -> T"),
                 );
+                // The result is unknown from here on: an error, which fits any use (`unify` with
+                // an error does not bind, so bind it here). Uses of the result can then no longer
+                // pin it to a type that the body's returns contradict.
                 let err = self.types.error;
-                let r = self.fns[fid as usize].ret;
-                self.unify(r, err);
+                let r = self.types.shallow_resolve(self.fns[fid as usize].ret);
+                if let Ty::Var(v) = self.types.get(r) {
+                    let v = *v;
+                    self.bind_var(v, err);
+                }
             }
             return;
         }
@@ -326,17 +433,15 @@ impl Checker {
             let mut all = self.ctx().returns.clone();
             all.push(body_ty);
             let joined = self.join(&all);
-            if !self.unify(f.ret, joined) {
-                // Fall back to a union with what was already inferred (recursive uses).
-                let cur = self.types.resolve(f.ret);
-                let msg = format!(
-                    "cannot infer a single return type for `{}`: `{}` vs `{}`",
-                    f.name,
-                    self.show(cur),
-                    self.show(joined)
-                );
-                self.err("E0302", msg, span);
-            }
+            // The result is still a free variable here: only a use of it while the body is being
+            // checked could have bound it, and such a (recursive) use is E0230, which binds it to
+            // an error that unifies with anything.
+            let unified = self.unify(f.ret, joined);
+            debug_assert!(
+                unified || self.diags.iter().any(|d| d.is_error()) || self.suppressed_errors > 0,
+                "the inferred result of `{}` was bound before its body was checked",
+                f.name
+            );
         }
         // Finalize local types: unbound variables (e.g. an unused `[]`) default to Never.
         let never = self.types.never;
@@ -544,6 +649,7 @@ impl Checker {
     // ---- blocks and statements ---------------------------------------------------------------
 
     pub fn check_block(&mut self, b: &Block, expected: Option<TyId>) -> TyId {
+        let capture = std::mem::take(&mut self.capture_block_end);
         self.push_scope();
         let n = b.stmts.len();
         let mut ty = self.types.nil;
@@ -557,6 +663,9 @@ impl Checker {
             if last {
                 ty = if is_valueless_stmt(s) { self.types.nil } else { t };
             }
+        }
+        if capture {
+            self.block_end = Some(Self::flat_narrowing(&self.save_narrowing()));
         }
         self.pop_scope();
         if diverged && !self.is_never(ty) {

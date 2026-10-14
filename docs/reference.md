@@ -225,6 +225,14 @@ Narrowing: after `if x != nil`, `if x is T`, `if let`, and in `match` arms on a 
 variable has the narrowed type for the rest of that branch. `x ??= v` and `x = v` with a non-nil `v` also
 narrow `x` to non-nil.
 
+Each branch of an `if` / `else if` chain, an `if let` or a `match` starts from the narrowings in effect
+before it, so an assignment in one branch does not affect the others. After it, a variable (or field
+path) is narrowed only if it is narrowed at the end of every branch that falls through (a missing `else`
+falls through with the condition false), to the union of those types; a branch that leaves with
+`return`, `break`, `continue` or `panic(...)` does not count. So `if x == nil { return }` and
+`if x == nil { x = 0 }` both leave `x` non-nil, and `if c { x = nil }` leaves it possibly nil. A `match`
+guard that fails has already run when the next arm is tried.
+
 A loop body runs again after itself, so a narrowing from before a loop holds in the loop (condition
 included) only if every assignment to the variable in the loop visibly keeps it: `x -= 1`, `x = x * 2`,
 `x ??= 0`, a literal, `T.new(...)`, `v!` or a call of a function whose declared result fits. Otherwise,
@@ -625,7 +633,12 @@ plus every open document, each with the modules it imports, whether or not the f
 Directories named `target` or `node_modules` and hidden directories (`.git` and the like) are
 skipped. An open document's text takes precedence over the file on disk. Each file's compilation is
 cached and reused while the files it loaded are unchanged, so after the first request only edited
-files and the files that import them are checked again. At most 2000 files are taken from the
+files and the files that import them are checked again. The cache is filled in the background after
+the server starts and whenever workspace folders are added, on half the cores and pausing while
+requests and diagnostics run, so the first request usually finds it ready; a request that comes
+earlier waits only for the files being compiled at that moment and compiles the rest itself. The
+client is shown its progress (`window/workDoneProgress`) and the time taken goes to the server's
+log. At most 2000 files are taken from the
 workspace folders (set `CATX_LSP_MAX_FILES` to change the limit); a larger workspace is cut, and the
 server says so in its log.
 
