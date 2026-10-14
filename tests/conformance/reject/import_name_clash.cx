@@ -1,0 +1,3 @@
+# expect: E0206
+import lib.secret.{shown}
+import lib.secret as shown

@@ -398,6 +398,15 @@ pub fn definition(ck: &Checker, m: ModId, offset: u32) -> Option<Span> {
             NameRes::Variant(x, v) => ck.enums[*x as usize].variants[*v as usize].span,
             NameRes::Module(_) => return None,
         },
+        // `module.Type` used as a path.
+        ExprKind::Member { name, .. } if contains(name.span, offset) && ck.names.contains_key(&e.id) => {
+            match ck.names.get(&e.id)? {
+                NameRes::Class(c) => ck.classes.get(c)?.span,
+                NameRes::Enum(x) => ck.enums[*x as usize].span,
+                NameRes::Iface(x) => ck.ifaces[*x as usize].span,
+                _ => return None,
+            }
+        }
         ExprKind::Member { recv, name, .. } if contains(name.span, offset) => match ck.calls.get(&e.id)? {
             CallRes::Field { index, .. } => {
                 let t = ck.types.shallow_resolve(*ck.expr_ty.get(&recv.id)?);

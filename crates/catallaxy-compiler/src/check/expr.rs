@@ -1678,6 +1678,18 @@ impl Checker {
                             let msg = format!("`{}` is private to module `{}`", name.name, self.mods[m as usize].name);
                             self.err("E0202", msg, name.span);
                         }
+                        // Record `module.Type` for tooling, like a bare type name above.
+                        let res = match si {
+                            ScopeItem::Class(c) => Some(NameRes::Class(c)),
+                            ScopeItem::Enum(en) => Some(NameRes::Enum(en)),
+                            ScopeItem::Iface(i) => Some(NameRes::Iface(i)),
+                            _ => None,
+                        };
+                        if let Some(r) = res {
+                            if e.id < u32::MAX - 2 {
+                                self.names.insert(e.id, r);
+                            }
+                        }
                         Some(match si {
                             ScopeItem::Class(c) => PathRes::Class(c, None),
                             ScopeItem::Enum(en) => PathRes::Enum(en, None),

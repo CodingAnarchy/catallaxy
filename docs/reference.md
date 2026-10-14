@@ -32,11 +32,14 @@ program's main body; top-level statements in an imported module run once, when i
 import geometry                 # binds module `geometry`; use geometry.area(...)
 import geometry.{Point, area}   # binds selected public items directly
 import lib.shapes               # lib/shapes.cx, bound as `shapes`
+import shapes.geometry as geo   # shapes/geometry.cx, bound as `geo`
 ```
 
 Module paths are resolved relative to the importing file's directory (`a.b` → `a/b.cx`), then the
 entry file's directory. A module that cannot be found is error E0204. Only `pub` items are visible to
-importers. Cyclic imports are an error.
+importers. Cyclic imports are an error. A module is bound to the last segment of its path unless
+renamed with `as`; two imports may not bind the same name to different modules or items (E0206), so
+`import a.util` and `import b.util` need an `as` on one of them.
 
 The standard library (`docs/stdlib.md`) needs no import: `Json`, `File`, `Regex`, `Time` and the rest
 are in scope in every module, and there are no `std.*` modules to import. `Time.now()` (seconds,

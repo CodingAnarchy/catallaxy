@@ -391,6 +391,54 @@ fn lsp_references_and_rename() {
     lsp.finish();
 }
 
+const ALIAS_MAIN: &str = "import alias_geo as g
+p: g.Point = g.Point.new(1)
+puts(g.origin().sum + p.sum)
+";
+
+#[test]
+fn lsp_import_alias() {
+    let (mut lsp, _) = Lsp::init();
+    let geo = lsp.open("alias_geo.cx", GEO);
+    let main = lsp.open("alias_main.cx", ALIAS_MAIN);
+    let t = ALIAS_MAIN;
+    let at = |p: Value| json!({"textDocument": {"uri": main}, "position": p});
+
+    // Go to definition through the alias.
+    let d = lsp.request(2, "textDocument/definition", at(pos(t, 2, "origin", 0)));
+    assert_eq!(d["result"]["uri"], json!(geo), "{d}");
+    assert_eq!(d["result"]["range"]["start"], pos(GEO, 5, "origin", 0), "{d}");
+    let d = lsp.request(6, "textDocument/definition", at(pos(t, 1, "Point", 1)));
+    assert_eq!(d["result"]["uri"], json!(geo), "{d}");
+    assert_eq!(d["result"]["range"]["start"]["line"], 0, "{d}");
+
+    // References and rename of the class cover the uses through the alias.
+    let mut p = at(pos(t, 1, "Point", 0));
+    p["context"] = json!({"includeDeclaration": true});
+    let r = ref_spots(&lsp.request(3, "textDocument/references", p));
+    let mut want = vec![
+        spot(&geo, pos(GEO, 0, "Point", 0)),
+        spot(&geo, pos(GEO, 5, "Point", 0)),
+        spot(&geo, pos(GEO, 5, "Point", 1)),
+        spot(&main, pos(t, 1, "Point", 0)),
+        spot(&main, pos(t, 1, "Point", 1)),
+    ];
+    want.sort();
+    assert_eq!(r, want);
+    let mut p = at(pos(t, 1, "Point", 1));
+    p["newName"] = json!("Pt");
+    assert_eq!(edit_spots(&lsp.request(4, "textDocument/rename", p), "Pt"), want);
+
+    // Completion after the alias lists the module's items.
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": main, "version": 2}, "contentChanges": [{"text": format!("{t}g.\n")}]
+    }}));
+    let c = lsp.request(5, "textDocument/completion", at(json!({"line": 3, "character": 2})));
+    let labels: Vec<&str> = c["result"].as_array().unwrap().iter().filter_map(|i| i["label"].as_str()).collect();
+    assert!(labels.contains(&"origin") && labels.contains(&"Point"), "{labels:?}");
+    lsp.finish();
+}
+
 const IFACE: &str = "interface Shape {
   fn area(self) -> Float
   fn twice(self) -> Float { self.area() * 2.0 }

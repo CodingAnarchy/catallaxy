@@ -223,6 +223,13 @@ impl Builder<'_> {
 
     fn member_sym(&self, e: &Expr, recv: &Expr) -> Option<Symbol> {
         let ck = self.ck;
+        // `module.Type` used as a path (`m.Point.new(...)`).
+        match ck.names.get(&e.id) {
+            Some(NameRes::Class(c)) => return Some(Symbol::Class(*c)),
+            Some(NameRes::Enum(x)) => return Some(Symbol::Enum(*x)),
+            Some(NameRes::Iface(x)) => return Some(Symbol::Iface(*x)),
+            _ => {}
+        }
         match ck.calls.get(&e.id)? {
             CallRes::Field { index, .. } => field_sym(ck, class_of(ck, *ck.expr_ty.get(&recv.id)?)?, *index as usize),
             CallRes::Global(g) => Some(Symbol::Global(*g)),
