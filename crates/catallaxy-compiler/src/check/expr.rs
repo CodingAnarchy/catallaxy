@@ -2792,6 +2792,25 @@ impl Checker {
                             return ret;
                         }
                     }
+                    // `E.values()`: every variant, when none has a payload (an enum's own static
+                    // `values` takes precedence, above).
+                    if name.name == "values" && args.is_empty() && block.is_none() {
+                        let ei = &self.enums[en as usize];
+                        if let Some(v) = ei.variants.iter().find(|v| !v.fields.is_empty()) {
+                            let msg = format!(
+                                "`{}.values()` needs payload-less variants, but `{}` has a payload",
+                                ei.name, v.name
+                            );
+                            self.err("E0367", msg, name.span);
+                            return self.types.error;
+                        }
+                        let classes: Vec<ClassId> = ei.variants.iter().map(|v| v.class_id).collect();
+                        let n = ei.params.len();
+                        let ta = targs.unwrap_or_else(|| (0..n).map(|_| self.types.fresh_var()).collect());
+                        let et = self.types.intern(Ty::Enum(en, ta));
+                        self.calls.insert(e.id, CallRes::EnumValues(classes));
+                        return self.types.intern(Ty::Class(builtin::LIST, vec![et]));
+                    }
                     let msg = format!("enum `{}` has no variant `{}`", self.enums[en as usize].name, name.name);
                     let mut d = Diag::error("E0343", msg, name.span);
                     let names: Vec<String> = self.enums[en as usize].variants.iter().map(|v| v.name.clone()).collect();

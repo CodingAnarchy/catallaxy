@@ -628,6 +628,13 @@ pub fn path_completions(ck: &Checker, res: NameRes) -> Vec<Completion> {
                     });
                 }
             }
+            if !ei.methods.contains_key("values") && ei.variants.iter().all(|v| v.fields.is_empty()) {
+                out.push(Completion {
+                    label: "values".into(),
+                    kind: CompletionKind::Function,
+                    detail: Some(format!("fn {}.values() -> List[{}]", ei.name, ei.name)),
+                });
+            }
         }
         NameRes::Module(m) => {
             for (n, &it) in &ck.mods[m as usize].items {
