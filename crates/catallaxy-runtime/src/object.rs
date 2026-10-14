@@ -425,12 +425,24 @@ impl ListObj {
     /// # Safety
     /// See above.
     pub unsafe fn push(&self, v: Value, access: Access) {
+        if let Err(layout) = self.try_push(v, access) {
+            std::alloc::handle_alloc_error(layout);
+        }
+    }
+
+    /// As [`ListObj::push`], but if the allocator refuses to grow the list, returns the
+    /// refused layout and leaves the list as it was.
+    ///
+    /// # Safety
+    /// See above.
+    pub unsafe fn try_push(&self, v: Value, access: Access) -> Result<(), std::alloc::Layout> {
         let n = self.len.load(Ordering::Relaxed);
         if n == self.capacity() {
-            self.grow(n + 1, access);
+            self.grow(n + 1, access)?;
         }
         self.slots()[n].store(v.0, Ordering::Release);
         self.len.store(n + 1, Ordering::Release);
+        Ok(())
     }
 
     /// # Safety
@@ -452,13 +464,24 @@ impl ListObj {
     /// # Safety
     /// See above.
     pub unsafe fn replace(&self, items: &[Value], access: Access) {
+        if let Err(layout) = self.try_replace(items, access) {
+            std::alloc::handle_alloc_error(layout);
+        }
+    }
+
+    /// As [`ListObj::replace`], but if the allocator refuses a larger buffer, returns the
+    /// refused layout and leaves the list as it was.
+    ///
+    /// # Safety
+    /// See above.
+    pub unsafe fn try_replace(&self, items: &[Value], access: Access) -> Result<(), std::alloc::Layout> {
         let old_len = self.len.load(Ordering::Relaxed);
         let n = items.len();
         if n > self.capacity() {
-            let buf = WordBuf::alloc_from(n.max(4), items.iter().map(|v| v.0), Value::NIL.0);
+            let buf = WordBuf::try_alloc_from(n.max(4), items.iter().map(|v| v.0), Value::NIL.0)?;
             self.swap_buf(buf, access);
             self.len.store(n, Ordering::Release);
-            return;
+            return Ok(());
         }
         let slots = self.slots();
         if n < old_len {
@@ -473,6 +496,7 @@ impl ListObj {
         if n >= old_len {
             self.len.store(n, Ordering::Release);
         }
+        Ok(())
     }
 
     /// Runs `f` on a copy of the items and writes the result back.
@@ -486,7 +510,25 @@ impl ListObj {
         r
     }
 
-    unsafe fn grow(&self, need: usize, access: Access) {
+    /// As [`ListObj::modify`], but if the allocator refuses a larger buffer for the result,
+    /// returns the refused layout and leaves the list as it was.
+    ///
+    /// # Safety
+    /// See above.
+    pub unsafe fn try_modify<R>(
+        &self,
+        access: Access,
+        f: impl FnOnce(&mut Vec<Value>) -> R,
+    ) -> Result<R, std::alloc::Layout> {
+        let mut items = self.to_vec();
+        let r = f(&mut items);
+        self.try_replace(&items, access)?;
+        Ok(r)
+    }
+
+    /// Moves the items to a buffer with room for `need`, or returns the layout the allocator
+    /// refused, leaving the list as it was.
+    unsafe fn grow(&self, need: usize, access: Access) -> Result<(), std::alloc::Layout> {
         let n = self.len.load(Ordering::Relaxed);
         let mut cap = need.max(self.capacity() * 2).max(4);
         if self.is_inline() {
@@ -495,8 +537,9 @@ impl ListObj {
             cap = cap.next_power_of_two();
         }
         let old = &self.slots()[..n];
-        let buf = WordBuf::alloc_from(cap, old.iter().map(|s| s.load(Ordering::Relaxed)), Value::NIL.0);
+        let buf = WordBuf::try_alloc_from(cap, old.iter().map(|s| s.load(Ordering::Relaxed)), Value::NIL.0)?;
         self.swap_buf(buf, access);
+        Ok(())
     }
 
     unsafe fn swap_buf(&self, buf: *mut WordBuf, access: Access) {

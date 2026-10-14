@@ -309,7 +309,10 @@ pub(crate) fn list_write<R>(
             ownership::publish_into_shared(&vm.m, x)?;
         }
     }
-    ownership::write_list(&vm.m, l, |list, access| unsafe { list.modify(access, f) })
+    match ownership::write_list(&vm.m, l, |list, access| unsafe { list.try_modify(access, f) })? {
+        Ok(r) => Ok(r),
+        Err(layout) => catallaxy_runtime::refused(format!("cannot grow a list to {} bytes", layout.size())),
+    }
 }
 
 fn dict_read<R>(vm: &Vm, d: Value, f: impl Fn(&DictTable) -> R) -> RtResult<R> {

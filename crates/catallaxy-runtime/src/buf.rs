@@ -37,17 +37,37 @@ impl WordBuf {
     /// A new buffer of `cap` slots holding the words of `prefix` (at most `cap` of them) and
     /// then `fill`, written in one pass.
     pub fn alloc_from(cap: usize, prefix: impl IntoIterator<Item = u64>, fill: u64) -> *mut WordBuf {
+        Self::try_alloc_from(cap, prefix, fill).unwrap_or_else(|layout| std::alloc::handle_alloc_error(layout))
+    }
+
+    /// As [`WordBuf::alloc`], but returns the layout the allocator refused instead of aborting.
+    pub fn try_alloc(cap: usize, fill: u64) -> Result<*mut WordBuf, Layout> {
+        Self::try_alloc_from(cap, std::iter::empty(), fill)
+    }
+
+    /// As [`WordBuf::alloc_from`], but returns the layout the allocator refused instead of
+    /// aborting.
+    pub fn try_alloc_from(
+        cap: usize,
+        prefix: impl IntoIterator<Item = u64>,
+        fill: u64,
+    ) -> Result<*mut WordBuf, Layout> {
         if cap == 0 {
-            return Self::empty();
+            return Ok(Self::empty());
         }
+        // A size past `isize::MAX` is refused like any other.
+        let layout = cap
+            .checked_add(1)
+            .and_then(|n| Layout::array::<u64>(n).ok())
+            .ok_or_else(|| Layout::from_size_align(isize::MAX as usize & !7, 8).unwrap())?;
         unsafe {
-            let p = std::alloc::alloc(Self::layout(cap)) as *mut WordBuf;
+            let p = std::alloc::alloc(layout) as *mut WordBuf;
             if p.is_null() {
-                std::alloc::handle_alloc_error(Self::layout(cap));
+                return Err(layout);
             }
             Self::init_in_place(p, cap, prefix, fill);
             crate::note_external(cap * 8);
-            p
+            Ok(p)
         }
     }
 
@@ -148,5 +168,32 @@ pub unsafe fn release(old: *mut WordBuf, access: Access) {
         WordBuf::free(old as *mut u8);
     } else {
         catallaxy_gc::retire(old as *mut u8, WordBuf::free);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refused_buffers_are_reported() {
+        // Sizes that do not fit an allocation at all.
+        for cap in [usize::MAX / 8, usize::MAX] {
+            assert!(WordBuf::try_alloc(cap, 0).is_err(), "{cap}");
+        }
+        // More than any machine has: the allocator refuses. (Miri stops at the attempt instead.)
+        // (The buffer goes through `black_box` so the optimizer cannot drop the allocation.)
+        #[cfg(not(miri))]
+        if let Ok(b) = WordBuf::try_alloc(std::hint::black_box(1 << 56), 0) {
+            std::hint::black_box(b);
+            panic!("allocated 2^59 bytes");
+        }
+        let b = WordBuf::try_alloc_from(4, [1, 2], 9).unwrap();
+        // SAFETY: just allocated, never published.
+        unsafe {
+            let words: Vec<u64> = WordBuf::slots(b).iter().map(|s| s.load(Ordering::Relaxed)).collect();
+            assert_eq!(words, [1, 2, 9, 9]);
+            WordBuf::free(b as *mut u8);
+        }
     }
 }

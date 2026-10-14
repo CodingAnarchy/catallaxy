@@ -225,3 +225,46 @@ start_all()
     ];
     check(&o, &errs, "after: 42", &errs, "start_all");
 }
+
+/// List and dict buffers grown until the allocator refuses.
+#[test]
+fn containers() {
+    let src = r#"fn grow_list() -> Int {
+  xs: List[Int] = []
+  while true { xs.push(1) }
+  xs.length
+}
+fn grow_dict() -> Int {
+  d: Dict[Int, Int] = [:]
+  i = 0
+  while true {
+    d[i] = i
+    i += 1
+  }
+  d.length
+}
+for f in [grow_list, grow_dict] {
+  t = spawn move { f() }
+  match t.join() {
+    Ok(n) => puts("grew to #{n}")
+    Err(e) => puts("join: #{e}")
+  }
+}
+xs: List[Int] = []
+for i in 0...1_000_000 { xs.push(i) }
+d: Dict[Int, Int] = [:]
+for i in 0...100_000 { d[i] = i }
+puts("after: #{xs.length + d.length}")
+xs = []
+grow_list()
+"#;
+    let o = run_limited("containers.cx", src);
+    let errs = ["MemoryError: cannot grow a list to ", OOM];
+    check(&o, &errs, "after: 1100000", &errs, "grow_list");
+    let ctx = format!("{}{}", o.stdout, o.stderr);
+    let dict = o.stdout.lines().nth(1).unwrap_or("");
+    assert!(
+        ["MemoryError: cannot grow a table to ", OOM].iter().any(|e| dict.starts_with(&format!("join: {e}"))),
+        "{ctx}"
+    );
+}

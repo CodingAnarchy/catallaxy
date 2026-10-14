@@ -19,6 +19,7 @@
 //! one shape, so a `Dyn` member access can cache `(shape, slot)` per site. Deleting a key, adding
 //! a non-string key, or growing past [`MAX_SHAPE_KEYS`] converts the table to the ordinary layout.
 
+use std::alloc::Layout;
 use std::sync::atomic::{fence, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{LazyLock, Once};
 
@@ -362,19 +363,38 @@ impl DictTable {
         self.end(s);
     }
 
-    /// Appends a new entry (the caller has established the key is absent).
+    /// Appends a new entry (the caller has established the key is absent). Aborts if the table
+    /// cannot grow; see [`DictTable::try_insert_new`].
     ///
     /// # Safety
     /// The caller has write access.
     pub unsafe fn insert_new(&self, hash: u64, key: Value, value: Value, access: Access) {
+        if let Err(layout) = self.try_insert_new(hash, key, value, access) {
+            std::alloc::handle_alloc_error(layout);
+        }
+    }
+
+    /// As [`DictTable::insert_new`], but if the allocator refuses to grow the table, returns
+    /// the refused layout and leaves the table as it was.
+    ///
+    /// # Safety
+    /// The caller has write access.
+    pub unsafe fn try_insert_new(&self, hash: u64, key: Value, value: Value, access: Access) -> Result<(), Layout> {
         let s = self.begin(access);
+        let r = self.insert_in_section(hash, key, value, access);
+        self.end(s);
+        r
+    }
+
+    /// The body of [`DictTable::try_insert_new`], inside its write section.
+    unsafe fn insert_in_section(&self, hash: u64, key: Value, value: Value, access: Access) -> Result<(), Layout> {
         if let Some(shape) = self.shape() {
             if shape.len() < MAX_SHAPE_KEYS {
                 if let Some(next) = shape.add(hash, key) {
                     let n = self.raw_len();
                     let cap = WordBuf::cap(self.entries.load(Ordering::Relaxed));
                     if n == cap {
-                        let buf = WordBuf::alloc((cap * 2).max(4), Value::NIL.0);
+                        let buf = WordBuf::try_alloc((cap * 2).max(4), Value::NIL.0)?;
                         for (d, w) in WordBuf::slots(buf).iter().zip(self.ents()) {
                             d.store(w.load(Ordering::Relaxed), Ordering::Relaxed);
                         }
@@ -384,17 +404,16 @@ impl DictTable {
                     self.shape.store(next as *const Shape as *mut Shape, Ordering::Release);
                     self.used.store(n + 1, Ordering::Relaxed);
                     self.live.fetch_add(1, Ordering::Relaxed);
-                    self.end(s);
-                    return;
+                    return Ok(());
                 }
             }
-            self.leave_shape_mode(access);
+            self.try_leave_shape_mode(access)?;
         }
         let n = self.raw_len();
         let icap = WordBuf::cap(self.indices.load(Ordering::Relaxed));
         let ecap = WordBuf::cap(self.entries.load(Ordering::Relaxed)) / W;
         if (n + 1) * 3 >= icap * 2 || n == ecap {
-            self.rebuild(self.len() + 1, access);
+            self.rebuild(self.len() + 1, access)?;
         }
         let n = self.raw_len();
         let w = &self.ents()[n * W..n * W + W];
@@ -404,7 +423,7 @@ impl DictTable {
         Self::place(WordBuf::slots(self.indices.load(Ordering::Relaxed)), hash, n);
         self.used.store(n + 1, Ordering::Relaxed);
         self.live.fetch_add(1, Ordering::Relaxed);
-        self.end(s);
+        Ok(())
     }
 
     fn place(idx: &[AtomicU64], hash: u64, at: usize) {
@@ -419,31 +438,54 @@ impl DictTable {
     }
 
     /// Rebuilds the table layout with room for `want` live entries, dropping tombstones.
-    /// Inside a write section.
-    unsafe fn rebuild(&self, want: usize, access: Access) {
-        let live: Vec<Entry> = self.iter().collect();
-        let ents = WordBuf::alloc((want.max(live.len()) * 2).max(4) * W, Value::NIL.0);
-        let idx = WordBuf::alloc(index_cap(want.max(live.len()) * 2), EMPTY_IX);
+    /// Inside a write section. If the allocator refuses, the table is unchanged.
+    unsafe fn rebuild(&self, want: usize, access: Access) -> Result<(), Layout> {
+        let live = self.len();
+        let (ents, idx) = Self::alloc_pair((want.max(live) * 2).max(4) * W, index_cap(want.max(live) * 2))?;
         let (ew, iw) = (WordBuf::slots(ents), WordBuf::slots(idx));
-        for (i, e) in live.iter().enumerate() {
+        // Straight from the old buffers into the new ones (no copy of the entries in between,
+        // which for a large table would be a large allocation of its own).
+        let mut n = 0;
+        for (i, e) in self.iter().enumerate() {
             ew[i * W].store(e.hash, Ordering::Relaxed);
             ew[i * W + 1].store(e.key.0, Ordering::Relaxed);
             ew[i * W + 2].store(e.value.0, Ordering::Relaxed);
             Self::place(iw, e.hash, i);
+            n = i + 1;
         }
         release(self.entries.swap(ents, Ordering::AcqRel), access);
         release(self.indices.swap(idx, Ordering::AcqRel), access);
-        self.used.store(live.len(), Ordering::Relaxed);
+        self.used.store(n, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// New, unpublished entry and index buffers of these capacities, or neither.
+    fn alloc_pair(ecap: usize, icap: usize) -> Result<(*mut WordBuf, *mut WordBuf), Layout> {
+        let ents = WordBuf::try_alloc(ecap, Value::NIL.0)?;
+        match WordBuf::try_alloc(icap, EMPTY_IX) {
+            Ok(idx) => Ok((ents, idx)),
+            Err(layout) => {
+                // SAFETY: just allocated and never published.
+                unsafe { WordBuf::free(ents as *mut u8) };
+                Err(layout)
+            }
+        }
     }
 
     /// Leaves shape mode, keeping entry indices (entry `i` is slot `i`). Inside a write section.
     unsafe fn leave_shape_mode(&self, access: Access) {
+        if let Err(layout) = self.try_leave_shape_mode(access) {
+            std::alloc::handle_alloc_error(layout);
+        }
+    }
+
+    /// As [`DictTable::leave_shape_mode`]; if the allocator refuses, the table is unchanged.
+    unsafe fn try_leave_shape_mode(&self, access: Access) -> Result<(), Layout> {
         if self.shape().is_none() {
-            return;
+            return Ok(());
         }
         let n = self.raw_len();
-        let ents = WordBuf::alloc((n + 1).max(4) * W, Value::NIL.0);
-        let idx = WordBuf::alloc(index_cap(n + 1), EMPTY_IX);
+        let (ents, idx) = Self::alloc_pair((n + 1).max(4) * W, index_cap(n + 1))?;
         let (ew, iw) = (WordBuf::slots(ents), WordBuf::slots(idx));
         for i in 0..n {
             let e = self.entry(i);
@@ -456,6 +498,7 @@ impl DictTable {
         let old = self.entries.swap(ents, Ordering::AcqRel);
         self.shape.store(std::ptr::null_mut(), Ordering::Release);
         release(old, access);
+        Ok(())
     }
 
     /// Removes the entry at `idx`, returning its value.

@@ -157,7 +157,16 @@ pub fn list_push(vm: &mut Vm, l: Value, v: Value) -> RtResult<()> {
     if ownership::check_write(&vm.m, h)? == Access::Shared {
         ownership::publish_into_shared(&vm.m, v)?;
     }
-    ownership::write_list(&vm.m, l, |list, access| unsafe { list.push(v, access) })
+    if ownership::write_list(&vm.m, l, |list, access| unsafe { list.try_push(v, access) })?.is_ok() {
+        return Ok(());
+    }
+    // The list could not grow. Garbage may hold the memory: collect once (the list and the
+    // value are in registers) and try again.
+    catallaxy_gc::collect_to_free(&vm.m.rec);
+    match ownership::write_list(&vm.m, l, |list, access| unsafe { list.try_push(v, access) })? {
+        Ok(()) => Ok(()),
+        Err(layout) => catallaxy_runtime::refused(format!("cannot grow a list to {} bytes", layout.size())),
+    }
 }
 
 /// `recv.name` on a `Dyn` value: a record (dict) key, a field, or a zero-argument method.
@@ -208,25 +217,36 @@ pub fn dict_set(vm: &mut Vm, d: Value, k: Value, v: Value) -> RtResult<()> {
         ownership::publish_into_shared(&vm.m, v)?;
     }
     let hash = ops::hash_value(vm, k)?;
+    let mut collected = false;
     loop {
         // A lookup may run user `==`, which can mutate the table; act only if the version
         // is unchanged since before it.
         let version = ownership::read_dict(&vm.m, d, |t| t.version())?;
         let found = ops::dict_lookup_hashed(vm, d, k, hash)?;
-        let done = ownership::write_dict(&vm.m, d, |t, access| {
+        let done = ownership::write_dict(&vm.m, d, |t, access| -> Result<bool, std::alloc::Layout> {
             if t.version() != version {
-                return false;
+                return Ok(false);
             }
             unsafe {
                 match found {
                     Some(idx) => t.set_value_at(idx, v, access),
-                    None => t.insert_new(hash, k, v, access),
+                    None => t.try_insert_new(hash, k, v, access)?,
                 }
             }
-            true
+            Ok(true)
         })?;
-        if done {
-            return Ok(());
+        match done {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            // The table could not grow. Garbage may hold the memory: collect once (everything
+            // here is rooted in registers) and try again.
+            Err(_) if !collected => {
+                collected = true;
+                catallaxy_gc::collect_to_free(&vm.m.rec);
+            }
+            Err(layout) => {
+                return catallaxy_runtime::refused(format!("cannot grow a table to {} bytes", layout.size()))
+            }
         }
     }
 }
