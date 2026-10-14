@@ -341,34 +341,138 @@ fn next_u64() -> u64 {
 
 fn json_parse(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let text = s(a[0])?;
-    match serde_json::from_str::<serde_json::Value>(text) {
-        Ok(j) => {
-            let v = from_json(vm, &j)?;
-            vm.extra_roots().push(v);
-            let r = ok(vm, v);
-            vm.extra_roots().pop();
-            Ok(r)
+    // serde_json checks the text and words the errors; `Pj` then reads the checked text
+    // again so that integers keep every digit.
+    if let Err(e) = serde_json::from_str::<serde_json::Value>(text) {
+        return Ok(err(vm, &format!("invalid JSON: {e}")));
+    }
+    let j = Pj::parse(text);
+    let v = from_json(vm, &j)?;
+    vm.extra_roots().push(v);
+    let r = ok(vm, v);
+    vm.extra_roots().pop();
+    Ok(r)
+}
+
+/// A parsed JSON value whose numbers are kept as their source text. serde_json's `Value`
+/// turns an integer wider than 64 bits into a float unless its `arbitrary_precision`
+/// feature is on, and that feature would change how the language server's untagged LSP
+/// types deserialize (see `Jv`).
+enum Pj<'a> {
+    Null,
+    Bool(bool),
+    Num(&'a str),
+    Str(String),
+    Arr(Vec<Pj<'a>>),
+    /// Sorted, keeping the last of any duplicate keys, as serde_json's default map does.
+    Obj(BTreeMap<String, Pj<'a>>),
+}
+
+impl<'a> Pj<'a> {
+    /// Parses text that serde_json has already accepted, so it does no error checking
+    /// (and nests no deeper than serde_json's recursion limit).
+    fn parse(text: &'a str) -> Pj<'a> {
+        let mut pos = 0;
+        Pj::value(text, &mut pos)
+    }
+
+    fn skip_ws(b: &[u8], pos: &mut usize) {
+        while *pos < b.len() && matches!(b[*pos], b' ' | b'\t' | b'\n' | b'\r') {
+            *pos += 1;
         }
-        Err(e) => Ok(err(vm, &format!("invalid JSON: {e}"))),
+    }
+
+    fn value(text: &'a str, pos: &mut usize) -> Pj<'a> {
+        let b = text.as_bytes();
+        Pj::skip_ws(b, pos);
+        match b[*pos] {
+            b'n' => {
+                *pos += 4;
+                Pj::Null
+            }
+            b't' => {
+                *pos += 4;
+                Pj::Bool(true)
+            }
+            b'f' => {
+                *pos += 5;
+                Pj::Bool(false)
+            }
+            b'"' => Pj::Str(Pj::string(text, pos)),
+            b'[' => {
+                *pos += 1;
+                let mut items = Vec::new();
+                loop {
+                    Pj::skip_ws(b, pos);
+                    match b[*pos] {
+                        b']' => {
+                            *pos += 1;
+                            return Pj::Arr(items);
+                        }
+                        b',' => *pos += 1,
+                        _ => items.push(Pj::value(text, pos)),
+                    }
+                }
+            }
+            b'{' => {
+                *pos += 1;
+                let mut map = BTreeMap::new();
+                loop {
+                    Pj::skip_ws(b, pos);
+                    match b[*pos] {
+                        b'}' => {
+                            *pos += 1;
+                            return Pj::Obj(map);
+                        }
+                        b',' => *pos += 1,
+                        _ => {
+                            let k = Pj::string(text, pos);
+                            Pj::skip_ws(b, pos);
+                            *pos += 1; // the `:`
+                            map.insert(k, Pj::value(text, pos));
+                        }
+                    }
+                }
+            }
+            _ => {
+                let start = *pos;
+                while *pos < b.len() && matches!(b[*pos], b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9') {
+                    *pos += 1;
+                }
+                Pj::Num(&text[start..*pos])
+            }
+        }
+    }
+
+    /// Reads the string literal at `pos` (its opening quote) and decodes its escapes.
+    fn string(text: &str, pos: &mut usize) -> String {
+        let b = text.as_bytes();
+        let start = *pos;
+        *pos += 1;
+        while b[*pos] != b'"' {
+            *pos += if b[*pos] == b'\\' { 2 } else { 1 };
+        }
+        *pos += 1;
+        serde_json::from_str(&text[start..*pos]).unwrap_or_default()
     }
 }
 
-fn from_json(vm: &mut Vm, j: &serde_json::Value) -> RtResult<Value> {
-    use serde_json::Value as J;
+fn from_json(vm: &mut Vm, j: &Pj) -> RtResult<Value> {
     Ok(match j {
-        J::Null => Value::NIL,
-        J::Bool(b) => Value::bool(*b),
-        J::Number(n) => {
-            if let Some(i) = n.as_i64() {
+        Pj::Null => Value::NIL,
+        Pj::Bool(b) => Value::bool(*b),
+        Pj::Num(t) => {
+            // A literal without a fraction or exponent is an `Int`, however wide.
+            if t.bytes().any(|c| matches!(c, b'.' | b'e' | b'E')) {
+                Value::from_f64(t.parse().unwrap_or(f64::NAN))
+            } else if let Ok(i) = t.parse::<i64>() {
                 vm.m.int(i)
-            } else if let Some(u) = n.as_u64() {
-                vm.m.int_from_big(num_bigint::BigInt::from(u))
             } else {
-                Value::from_f64(n.as_f64().unwrap_or(f64::NAN))
+                vm.m.int_from_big(t.parse().unwrap_or_default())
             }
         }
-        J::String(s) => new_str(vm, s),
-        J::Array(items) => {
+        Pj::Str(s) => new_str(vm, s),
+        Pj::Arr(items) => {
             let mut out = Vec::with_capacity(items.len());
             for x in items {
                 out.push(from_json(vm, x)?);
@@ -376,7 +480,7 @@ fn from_json(vm: &mut Vm, j: &serde_json::Value) -> RtResult<Value> {
             // No user code runs while building, so the elements need no rooting.
             new_list(vm, out)
         }
-        J::Object(map) => {
+        Pj::Obj(map) => {
             let d = vm.m.alloc_dict(DictTable::record(map.len()));
             for (k, x) in map {
                 let kv = new_str(vm, k);
