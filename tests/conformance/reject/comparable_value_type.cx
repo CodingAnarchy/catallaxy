@@ -1,0 +1,4 @@
+# expect: E0375
+# `Comparable` is a bound: `1 > "x"` has no meaning.
+fn bigger(a: Comparable, b: Comparable) -> Bool { a > b }
+puts(bigger(1, "x"))

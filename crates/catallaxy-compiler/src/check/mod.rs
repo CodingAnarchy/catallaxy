@@ -235,6 +235,12 @@ pub struct Checker {
     pub overrides: Vec<(FnId, FnId)>,
     /// How many of `overrides` have had their signatures compared (`check_overrides`).
     pub overrides_checked: usize,
+    /// Set while resolving a type-parameter bound: the interface named at its top level is a
+    /// bound, not a value type (see `self_param_use`).
+    pub in_bound_top: bool,
+    /// Interfaces with `Self` in a parameter (or other input) position: the method and the span
+    /// of that `Self`, or `None`. Computed on demand.
+    pub self_param_ifaces: FxHashMap<IfaceId, Option<(String, Span)>>,
     /// Closures checked as parallel blocks (`spawn`, `par_*`): node → is_move.
     pub spawn_nodes: FxHashMap<NodeId, bool>,
     /// Captures of `spawn move` blocks that are moved (not sendable): (block node, local).
@@ -340,6 +346,8 @@ impl Checker {
             frozen_calls: Vec::new(),
             overrides: Vec::new(),
             overrides_checked: 0,
+            in_bound_top: false,
+            self_param_ifaces: FxHashMap::default(),
             spawn_nodes: FxHashMap::default(),
             moved_captures: FxHashSet::default(),
             resolved_classes: FxHashSet::default(),
