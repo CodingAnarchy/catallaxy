@@ -1,0 +1,6 @@
+# expect: E0227
+# A call through `Base` expects a `String` but gets the override's `Int`.
+class Base { fn label(self) -> String { "base" } }
+class Derived < Base { fn label(self) -> Int { 12345 } }
+b: Base = Derived.new()
+puts(b.label.length)

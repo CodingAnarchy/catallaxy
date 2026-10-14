@@ -476,6 +476,32 @@ class Square < Shape {
 
 Match the superclass signature, or give the new method a different name.
 
+## E0227
+
+Override with an incompatible signature. A call through the superclass type is checked against the
+superclass method but runs the override, so the override must accept every argument the overridden
+method accepts and return only what it promises:
+
+- each parameter type must accept the overridden parameter's type (it may be wider);
+- the result type must fit the overridden result type (it may be narrower);
+- a parameter with a default in the overridden method needs a default in the override;
+- a parameter name may change, but not to the name of another of the overridden method's parameters
+  (named arguments are matched by the overridden method's names, then passed by position);
+- the override declares as many type parameters, and bounds no stronger than the overridden ones.
+
+```cx
+class Animal {
+  fn feed(self, food: Int) -> Int { food }
+}
+class Cat < Animal {
+  fn feed(self, food: String) -> Int { food.length }
+}
+```
+
+Use the overridden method's types (`food: Int`), or give the new method a different name. An override
+that mutates `self` is allowed; it makes the overridden method mutating too, so calling it on a frozen
+value is E0614.
+
 ## E0230
 
 Recursive function without a return type. A function that calls itself must annotate its result

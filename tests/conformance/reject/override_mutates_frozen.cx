@@ -1,0 +1,15 @@
+# expect: E0614
+# `bump` on a frozen `A` may run `B`'s override, which mutates `self`.
+class A {
+  n: Int = 0
+  fn bump(self) -> Int { 1 }
+}
+class B < A {
+  fn bump(self) -> Int {
+    self.n += 1
+    self.n
+  }
+}
+a: A = B.new()
+f = freeze(a)
+puts(f.bump())

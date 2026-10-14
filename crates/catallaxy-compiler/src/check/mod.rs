@@ -230,6 +230,11 @@ pub struct Checker {
     pub self_calls: Vec<(FnId, FnId)>,
     /// Calls of user methods on frozen receivers, validated once mutating flags are known.
     pub frozen_calls: Vec<(Span, FnId, String)>,
+    /// (overridden, override) method pairs. An override that mutates `self` makes the method it
+    /// overrides mutating too, since a call through the superclass may run it.
+    pub overrides: Vec<(FnId, FnId)>,
+    /// How many of `overrides` have had their signatures compared (`check_overrides`).
+    pub overrides_checked: usize,
     /// Closures checked as parallel blocks (`spawn`, `par_*`): node → is_move.
     pub spawn_nodes: FxHashMap<NodeId, bool>,
     /// Captures of `spawn move` blocks that are moved (not sendable): (block node, local).
@@ -333,6 +338,8 @@ impl Checker {
             control: FxHashMap::default(),
             self_calls: Vec::new(),
             frozen_calls: Vec::new(),
+            overrides: Vec::new(),
+            overrides_checked: 0,
             spawn_nodes: FxHashMap::default(),
             moved_captures: FxHashSet::default(),
             resolved_classes: FxHashSet::default(),

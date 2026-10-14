@@ -356,6 +356,7 @@ pub fn run_phases(ck: &mut Checker, module_ids: &FxHashMap<String, u32>, first: 
     }
     ck.finish_classes();
     ck.check_all_bodies();
+    ck.check_overrides();
     ck.finish_mutating();
 }
 

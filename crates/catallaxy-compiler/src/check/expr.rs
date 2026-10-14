@@ -4401,11 +4401,21 @@ impl Checker {
     /// Mutating-method inference: propagate through calls on `self`, then validate calls on
     /// frozen receivers.
     pub fn finish_mutating(&mut self) {
+        // Methods that mutate only because an override does: the override.
+        let mut via_override: FxHashMap<FnId, FnId> = FxHashMap::default();
         loop {
             let mut changed = false;
             for &(caller, callee) in &self.self_calls.clone() {
                 if self.fns[callee as usize].mutating && !self.fns[caller as usize].mutating {
                     self.fns[caller as usize].mutating = true;
+                    changed = true;
+                }
+            }
+            // A call through the superclass may run an override that mutates.
+            for &(parent, child) in &self.overrides.clone() {
+                if self.fns[child as usize].mutating && !self.fns[parent as usize].mutating {
+                    self.fns[parent as usize].mutating = true;
+                    via_override.insert(parent, *via_override.get(&child).unwrap_or(&child));
                     changed = true;
                 }
             }
@@ -4416,7 +4426,11 @@ impl Checker {
         for (span, fid, ty) in std::mem::take(&mut self.frozen_calls) {
             if self.fns[fid as usize].mutating {
                 let msg = format!("cannot call mutating method `{}` on frozen `{}`", self.fns[fid as usize].name, ty);
-                self.emit(Diag::error("E0614", msg, span).note("frozen values are deeply immutable"));
+                let mut d = Diag::error("E0614", msg, span).note("frozen values are deeply immutable");
+                if let Some(&o) = via_override.get(&fid) {
+                    d = d.note_at("the call may run this override, which mutates `self`", self.fns[o as usize].span);
+                }
+                self.emit(d);
             }
         }
     }

@@ -1,0 +1,6 @@
+# expect: E0227
+# `a.f()` through `A` leaves `x` out, but the override has no default for it.
+class A { fn f(self, x: Int = 5) -> Int { x } }
+class B < A { fn f(self, x: Int) -> Int { x } }
+a: A = B.new()
+puts(a.f())
