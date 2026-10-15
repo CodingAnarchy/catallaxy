@@ -698,6 +698,19 @@ trailing spaces as `·`, and a missing final newline noted. A program still runn
 `CATX_TEST_TIMEOUT` seconds (default 120) is killed and fails with its output so far. The exit
 status is 1 if anything failed.
 
+Options of `catx test`:
+
+- `-j N` (`--jobs N`) runs N tests at a time (default 1). Results are still reported in path
+  order, each as soon as it and the ones before it are done, so the output does not depend on N.
+- `--filter TEXT` runs only the tests whose path (with `/` separators) contains `TEXT`; given
+  more than once, a test matching any of them runs. A filter that matches nothing is an error
+  (status 2), like a path with no tests.
+- `-v` (`--verbose`) lists every test with its time (`ok   path (12 ms)`); failures always show
+  theirs (`FAIL path (12 ms)`).
+- `--json` prints one JSON document on standard output instead of the human report:
+  `{"tests": [...], "passed": N, "failed": M}`, each test with `path`, `kind` (`"run"` or
+  `"expect"`), `passed`, `time_ms` and, if it failed, `failure` (the report text).
+
 `catx fmt` rewrites files in place (`catx fmt -` filters stdin to stdout). It keeps comments and the
 program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
 `{ ... }` block across lines when its line would exceed 100 columns. `--check` lists the files that
