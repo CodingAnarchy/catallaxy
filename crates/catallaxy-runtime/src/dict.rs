@@ -27,7 +27,7 @@ use catallaxy_gc::{RootSource, Tracer};
 use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
 
-use crate::buf::{release, WordBuf};
+use crate::buf::{release, release_plain, WordBuf};
 use crate::object::{mark_value, str_of};
 use crate::ownership::Access;
 use crate::value::Value;
@@ -126,7 +126,9 @@ pub struct DictTable {
     used: AtomicUsize,
     /// Table mode: `W` words per entry. Shape mode: one value per slot.
     entries: AtomicPtr<WordBuf>,
-    /// Table mode only: entry indices, `EMPTY_IX` when free. Power-of-two capacity.
+    /// Table mode only: entry indices, `EMPTY_IX` when free. Power-of-two capacity. A plain
+    /// buffer (`WordBuf::try_alloc_plain`): indices are no references, so minor collections never
+    /// scan it and it needs no written range.
     indices: AtomicPtr<WordBuf>,
     /// Set in shape mode.
     shape: AtomicPtr<Shape>,
@@ -184,7 +186,7 @@ impl DictTable {
             let ents = n.checked_mul(W).ok_or_else(|| Layout::from_size_align(isize::MAX as usize & !7, 8).unwrap())?;
             t.entries.store(WordBuf::try_alloc(ents, Value::NIL.0)?, Ordering::Relaxed);
             // On failure, dropping `t` frees the entries.
-            t.indices.store(WordBuf::try_alloc(index_cap(n), EMPTY_IX)?, Ordering::Relaxed);
+            t.indices.store(WordBuf::try_alloc_plain(index_cap(n), EMPTY_IX)?, Ordering::Relaxed);
         }
         Ok(t)
     }
@@ -515,7 +517,7 @@ impl DictTable {
             n = i + 1;
         }
         release(self.entries.swap(ents, Ordering::AcqRel), access);
-        release(self.indices.swap(idx, Ordering::AcqRel), access);
+        release_plain(self.indices.swap(idx, Ordering::AcqRel), access);
         self.used.store(n, Ordering::Relaxed);
         Ok(())
     }
@@ -523,7 +525,7 @@ impl DictTable {
     /// New, unpublished entry and index buffers of these capacities, or neither.
     fn alloc_pair(ecap: usize, icap: usize) -> Result<(*mut WordBuf, *mut WordBuf), Layout> {
         let ents = WordBuf::try_alloc(ecap, Value::NIL.0)?;
-        match WordBuf::try_alloc(icap, EMPTY_IX) {
+        match WordBuf::try_alloc_plain(icap, EMPTY_IX) {
             Ok(idx) => Ok((ents, idx)),
             Err(layout) => {
                 // SAFETY: just allocated and never published.
@@ -555,7 +557,7 @@ impl DictTable {
             ew[i * W + 2].store(e.value.0, Ordering::Relaxed);
             Self::place(iw, e.hash, i);
         }
-        release(self.indices.swap(idx, Ordering::AcqRel), access);
+        release_plain(self.indices.swap(idx, Ordering::AcqRel), access);
         let old = self.entries.swap(ents, Ordering::AcqRel);
         self.shape.store(std::ptr::null_mut(), Ordering::Release);
         release(old, access);
@@ -591,7 +593,7 @@ impl DictTable {
         self.used.store(0, Ordering::Relaxed);
         self.live.store(0, Ordering::Relaxed);
         release(self.entries.swap(WordBuf::empty(), Ordering::AcqRel), access);
-        release(self.indices.swap(WordBuf::empty(), Ordering::AcqRel), access);
+        release_plain(self.indices.swap(WordBuf::empty(), Ordering::AcqRel), access);
         self.end(s);
     }
 }
@@ -600,7 +602,7 @@ impl Drop for DictTable {
     fn drop(&mut self) {
         unsafe {
             WordBuf::free(*self.entries.get_mut() as *mut u8);
-            WordBuf::free(*self.indices.get_mut() as *mut u8);
+            WordBuf::free_plain(*self.indices.get_mut() as *mut u8);
         }
     }
 }

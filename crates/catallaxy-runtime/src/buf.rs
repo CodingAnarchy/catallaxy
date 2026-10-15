@@ -185,6 +185,46 @@ impl WordBuf {
         }
     }
 
+    /// A buffer of `cap` slots, each holding `fill`, with no written-range word in front: for
+    /// slots that never hold references (a dict's index buffer), which minor collections never
+    /// scan (issue #145). Free it with [`WordBuf::free_plain`] or [`release_plain`], never with
+    /// [`WordBuf::free`] or [`release`], and never pass it to the written-range functions.
+    /// Returns the layout the allocator refused, if it did.
+    pub fn try_alloc_plain(cap: usize, fill: u64) -> Result<*mut WordBuf, Layout> {
+        if cap == 0 {
+            return Ok(Self::empty());
+        }
+        let layout =
+            Self::plain_layout(cap).ok_or_else(|| Layout::from_size_align(isize::MAX as usize & !7, 8).unwrap())?;
+        if !crate::cap_allows(layout.size()) {
+            return Err(layout);
+        }
+        unsafe {
+            let p = std::alloc::alloc(layout) as *mut WordBuf;
+            if p.is_null() {
+                crate::allocator_refused();
+                return Err(layout);
+            }
+            Self::init_in_place(p, cap, std::iter::empty(), fill);
+            crate::note_external(cap * 8);
+            Ok(p)
+        }
+    }
+
+    /// The layout of a buffer without a range word: the capacity word and the slots.
+    fn plain_layout(cap: usize) -> Option<Layout> {
+        Some(cap).filter(|&c| c as u64 <= CAP_MASK).and_then(|c| Layout::array::<u64>(c.checked_add(1)?).ok())
+    }
+
+    /// # Safety
+    /// `p` must come from [`WordBuf::try_alloc_plain`] and be unreachable by any reader.
+    pub unsafe fn free_plain(p: *mut u8) {
+        let cap = Self::cap(p as *mut WordBuf);
+        if cap > 0 {
+            std::alloc::dealloc(p, Self::plain_layout(cap).expect("allocated with this layout"));
+        }
+    }
+
     /// # Safety
     /// `p` must come from [`WordBuf::alloc`] and be unreachable by any reader.
     pub unsafe fn free(p: *mut u8) {
@@ -354,13 +394,25 @@ impl WordBuf {
 /// # Safety
 /// `old` must have been unpublished (replaced) by the caller, its only writer.
 pub unsafe fn release(old: *mut WordBuf, access: Access) {
+    release_with(old, access, WordBuf::free)
+}
+
+/// As [`release`], for a buffer from [`WordBuf::try_alloc_plain`].
+///
+/// # Safety
+/// As for [`release`].
+pub unsafe fn release_plain(old: *mut WordBuf, access: Access) {
+    release_with(old, access, WordBuf::free_plain)
+}
+
+unsafe fn release_with(old: *mut WordBuf, access: Access, free: unsafe fn(*mut u8)) {
     if WordBuf::cap(old) == 0 {
         return;
     }
     if access == Access::Local && !PROMOTE_ON_ACCESS.load(Ordering::Relaxed) {
-        WordBuf::free(old as *mut u8);
+        free(old as *mut u8);
     } else {
-        catallaxy_gc::retire(old as *mut u8, WordBuf::free);
+        catallaxy_gc::retire(old as *mut u8, free);
     }
 }
 
