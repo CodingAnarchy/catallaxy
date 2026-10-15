@@ -37,7 +37,8 @@ compile; `catx run` otherwise exits with the program's status.
 /// `catx <command> --help`: each command's usage and options.
 fn command_help(cmd: &str) -> Option<&'static str> {
     Some(match cmd {
-        "run" => "\
+        "run" => {
+            "\
 usage: catx run [--promote-on-access] <file.cx> [args...]
 
 Compiles and runs a program; arguments after the file go to the program (`args()`).
@@ -45,8 +46,10 @@ Exits with the program's status (101 after a panic, 141 when its output pipe clo
 
     --promote-on-access   promote objects another thread touches to shared instead of
                           panicking (a debugging aid; turns off the generational collector)
-",
-        "check" => "\
+"
+        }
+        "check" => {
+            "\
 usage: catx check [--json] <file.cx|dir>...
 
 Type-checks without running. Directories are walked for `*.cx` files, skipping hidden
@@ -54,8 +57,10 @@ directories, `target/`, `reject/` and files whose first line is `# expect:` (tes
 meant to fail). Exits with 1 if there are errors, 2 if a file cannot be read.
 
     --json   print the diagnostics as JSON on stdout
-",
-        "fmt" => "\
+"
+        }
+        "fmt" => {
+            "\
 usage: catx fmt [--check] <file.cx|dir>...
        catx fmt -    (stdin to stdout)
 
@@ -63,31 +68,40 @@ Formats files in place (directories walked as for `catx check`). Exits with 1 if
 finds files that would change, 2 if a file cannot be read, written or parsed.
 
     --check   list the files that would change instead of changing them
-",
-        "fix" => "\
+"
+        }
+        "fix" => {
+            "\
 usage: catx fix [--dry-run] <file.cx|dir>...
 
 Applies the checker's machine-applicable fixes (directories walked as for `catx check`).
 Exits with 1 if errors remain, 2 if a file cannot be read or written.
 
     -n, --dry-run   print the fixes without writing them
-",
+"
+        }
         "test" => crate::test_cmd::HELP,
-        "repl" => "\
+        "repl" => {
+            "\
 usage: catx repl
 
 An interactive session (or, with stdin not a terminal, a session read from stdin).
-",
-        "lsp" => "\
+"
+        }
+        "lsp" => {
+            "\
 usage: catx lsp
 
 A language server over stdin and stdout (`--stdio`, which some clients pass, is accepted).
-",
-        "disasm" => "\
+"
+        }
+        "disasm" => {
+            "\
 usage: catx disasm <file.cx> [function]
 
 Prints the bytecode of the program's functions (those whose name contains `function`).
-",
+"
+        }
         "version" => "usage: catx version\n\nPrints the version.\n",
         _ => return None,
     })
