@@ -229,6 +229,13 @@ A generic type named without arguments is the erased test (`x is Box`, `x as? Bo
 `Box =>`): it narrows to the members of the static type that are a `Box` (with their own arguments), or
 to `Box[Dyn]` when the static type does not say (`Dyn`, an interface, a superclass). `List`, `Set`,
 `Dict` and tuple types are checked element by element, so `x is List[Int]` is allowed on any value.
+A test for an interface (`x is Shape`) passes for values of the classes that satisfy it by the rules of
+§3.1 (every required method, with compatible parameters and result), not just for classes with methods
+of those names; methods from every extension count, as at run time. Since only the class is checked, a
+generic class that satisfies the interface only for some type arguments (`Box[T]` with
+`fn area(self) -> T`, for `Shape`'s `fn area(self) -> Float`) makes the test an error (E0374) where a
+value of such a class could reach it with other arguments: on a `Box[Int]`, or on a `Dyn`, an interface
+value or a type parameter. Tuples and functions pass no interface test.
 A variant pattern (`Ok(v)`) binds its payload with every instantiation the subject may have: on
 `Result[Int, String] | Result[String, Int]`, `v` is an `Int | String`, and on a `Dyn` it is a `Dyn`.
 

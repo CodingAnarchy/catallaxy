@@ -21,6 +21,9 @@ pub struct MethodRef {
 impl Checker {
     /// Modules whose public items are visible from `m` (itself, its imports, the prelude).
     pub fn visible_modules(&self, m: ModId) -> Vec<ModId> {
+        if self.all_visible {
+            return (0..self.mods.len() as ModId).collect();
+        }
         let mut out = vec![m];
         for (i, md) in self.mods.iter().enumerate() {
             if md.is_prelude && i as ModId != m {
@@ -43,7 +46,7 @@ impl Checker {
                 if ext.is_class_methods {
                     continue;
                 }
-                if m == self.cur_module || ext.is_pub || self.mods[m as usize].is_prelude {
+                if m == self.cur_module || ext.is_pub || self.mods[m as usize].is_prelude || self.all_visible {
                     out.push(e);
                 }
             }
@@ -55,7 +58,7 @@ impl Checker {
         let vis = self.visible_modules(self.cur_module);
         self.ifaces
             .iter()
-            .filter(|i| vis.contains(&i.module) && (i.module == self.cur_module || i.is_pub))
+            .filter(|i| vis.contains(&i.module) && (i.module == self.cur_module || i.is_pub || self.all_visible))
             .map(|i| i.id)
             .collect()
     }

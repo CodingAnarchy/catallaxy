@@ -341,6 +341,8 @@ fn compile_entry(
 /// (a [`Prelude`]). The phases over every module skip what is done.
 pub fn run_phases(ck: &mut Checker, module_ids: &FxHashMap<String, u32>, first: u32) {
     let n = ck.mods.len() as u32;
+    // Run-time interface conformance depends on every module's classes and extensions.
+    ck.rt_conf_cache.clear();
     for m in first..n {
         ck.declare_items(m);
     }
@@ -358,6 +360,7 @@ pub fn run_phases(ck: &mut Checker, module_ids: &FxHashMap<String, u32>, first: 
     ck.check_all_bodies();
     ck.check_overrides();
     ck.finish_mutating();
+    ck.finish_rt_ifaces();
 }
 
 fn dedup(diags: &mut Vec<Diagnostic>) {

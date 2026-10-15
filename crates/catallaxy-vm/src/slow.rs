@@ -480,8 +480,7 @@ pub fn generic_neg(vm: &mut Vm, x: Value) -> RtResult<Value> {
 }
 
 pub fn has_iface(v: Value, id: u32) -> bool {
-    let cls = class_of(v);
-    program::iface(id).iter().all(|&m| cls.lookup(m).is_some())
+    program::iface(id).binary_search(&class_id_of(v)).is_ok()
 }
 
 /// Checks `v` against runtime type `id` (deeply for containers).

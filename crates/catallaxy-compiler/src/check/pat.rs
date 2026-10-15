@@ -730,6 +730,18 @@ impl Checker {
     /// Whether every value of type `m` passes the test statically. For the erased form, any type
     /// arguments do.
     pub fn passes_test(&mut self, m: TyId, t: TestTy) -> bool {
+        if !self.passes_static_test(m, t) {
+            return false;
+        }
+        // An interface test passes at run time only for the classes whose methods satisfy the
+        // interface (not just have its method names).
+        match (self.tested_iface(t.ty), self.rt_class_key(m)) {
+            (Some(i), Some(k)) => self.rt_key_conforms(i, k).0,
+            _ => true,
+        }
+    }
+
+    fn passes_static_test(&mut self, m: TyId, t: TestTy) -> bool {
         if !t.erased {
             return self.trial(|c| c.assignable(m, t.ty));
         }
@@ -740,6 +752,172 @@ impl Checker {
         self.suppress_diags -= 1;
         self.rollback(cp);
         ok
+    }
+
+    /// The interface a test is for (`x is Shape`, `x as? Enumerable`), if it is one.
+    pub fn tested_iface(&mut self, t: TyId) -> Option<IfaceId> {
+        match self.types.get(self.types.shallow_resolve(t)) {
+            Ty::Iface(i, _) => Some(*i),
+            _ => None,
+        }
+    }
+
+    /// The run-time class of every value of static type `m`, when `m` decides it: a class, an
+    /// enum, or a tuple or function type (whose values pass no interface test).
+    fn rt_class_key(&mut self, m: TyId) -> Option<RtKey> {
+        match self.types.get(self.types.shallow_resolve(m)).clone() {
+            Ty::Class(c, _) => Some(RtKey::Class(c)),
+            Ty::Enum(e, _) => Some(RtKey::Enum(e)),
+            Ty::Tuple(_) | Ty::Fn(..) => Some(RtKey::None),
+            Ty::Frozen(inner) => self.rt_class_key(inner),
+            _ => None,
+        }
+    }
+
+    fn rt_key_conforms(&mut self, i: IfaceId, k: RtKey) -> (bool, bool) {
+        match k {
+            RtKey::Class(c) => self.rt_conforms(i, c),
+            RtKey::Enum(e) => match self.enums[e as usize].variants.first() {
+                Some(v) => {
+                    let c = v.class_id;
+                    self.rt_conforms(i, c)
+                }
+                None => (false, false),
+            },
+            RtKey::None => (false, false),
+        }
+    }
+
+    /// Whether the run-time test for interface `iid` passes for values of class `cid` (a class
+    /// id, builtin or user, or an enum variant's): the class satisfies the interface, with the
+    /// same rules as a static conversion, for some type arguments of both (`.0`), and for every
+    /// type argument of the class (`.1`). Methods are looked up as at run time, through every
+    /// extension.
+    pub fn rt_conforms(&mut self, iid: IfaceId, cid: ClassId) -> (bool, bool) {
+        if let Some(&r) = self.rt_conf_cache.get(&(iid, cid)) {
+            return r;
+        }
+        let (params, enum_id) = if let Some(&(e, _)) = self.variant_of_class.get(&cid) {
+            (self.enums[e as usize].params.clone(), Some(e))
+        } else if let Some(ci) = self.classes.get(&cid) {
+            (ci.params.clone(), None)
+        } else {
+            self.rt_conf_cache.insert((iid, cid), (false, false));
+            return (false, false);
+        };
+        // Check the bodies of methods whose results are inferred first, with the usual
+        // diagnostics and visibility.
+        let names: Vec<String> =
+            self.ifaces[iid as usize].methods.iter().map(|&f| self.fns[f as usize].name.clone()).collect();
+        let mut owners: Vec<FxHashMap<String, FnId>> = Vec::new();
+        match enum_id {
+            Some(e) => owners.push(self.enums[e as usize].methods.clone()),
+            None => {
+                let mut cur = Some(cid);
+                while let Some(c) = cur {
+                    let Some(ci) = self.classes.get(&c) else { break };
+                    owners.push(ci.methods.clone());
+                    cur = ci.superclass.and_then(|t| match self.types.get(t) {
+                        Ty::Class(c, _) => Some(*c),
+                        _ => None,
+                    });
+                }
+            }
+        }
+        let fids: Vec<FnId> = owners.iter().flat_map(|ms| names.iter().filter_map(|n| ms.get(n).copied())).collect();
+        for f in fids {
+            self.ensure_signature(f);
+        }
+        let mk = |c: &mut Checker, args: Vec<TyId>| match enum_id {
+            Some(e) => c.types.intern(Ty::Enum(e, args)),
+            None => c.types.class(cid, args),
+        };
+        let cp = self.checkpoint();
+        let saved_cache = std::mem::take(&mut self.satisfies_cache);
+        let saved_vis = std::mem::replace(&mut self.all_visible, true);
+        self.suppress_diags += 1;
+        let n_iface = self.ifaces[iid as usize].params.len();
+        let iargs: Vec<TyId> = (0..n_iface).map(|_| self.types.fresh_var()).collect();
+        let ity = self.types.intern(Ty::Iface(iid, iargs));
+        let sargs: Vec<TyId> = params.iter().map(|_| self.types.fresh_var()).collect();
+        let sty = mk(self, sargs);
+        let some = self.satisfies(sty, ity);
+        self.rollback(cp);
+        let all = some && {
+            let iargs: Vec<TyId> = (0..n_iface).map(|_| self.types.fresh_var()).collect();
+            let ity = self.types.intern(Ty::Iface(iid, iargs));
+            let pargs: Vec<TyId> = params.iter().map(|&p| self.param_ty(p)).collect();
+            let aty = mk(self, pargs);
+            let r = self.satisfies(aty, ity);
+            self.rollback(cp);
+            r
+        };
+        self.suppress_diags -= 1;
+        self.all_visible = saved_vis;
+        self.satisfies_cache = saved_cache;
+        self.rt_conf_cache.insert((iid, cid), (some, all));
+        (some, all)
+    }
+
+    /// Every run-time class an interface test may see a value of: builtin and user classes and
+    /// enum variants. (Tuples and closures pass no interface test.)
+    pub fn rt_class_ids(&self) -> Vec<ClassId> {
+        let mut ids: Vec<ClassId> = self.classes.keys().copied().chain(self.variant_of_class.keys().copied()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    /// Records an interface test on a subject that may hold values of any class (a `Dyn`, an
+    /// interface, a type parameter), for [`Self::check_iface_tests`].
+    fn note_iface_test(&mut self, cur: TyId, t: TestTy, span: Span) {
+        if t.erased || self.suppress_diags > 0 {
+            return;
+        }
+        let Some(i) = self.tested_iface(t.ty) else { return };
+        let cur = self.types.shallow_resolve(cur);
+        let members: Vec<TyId> = match self.types.get(cur) {
+            Ty::Union(p) => p.clone(),
+            _ => vec![cur],
+        };
+        for m in members {
+            if self.rt_class_key(m).is_none() && !self.passes_test(m, t) && self.may_pass_test(m, t.ty) {
+                self.pending_iface_tests.push((self.cur_module, i, t.ty, m, span));
+                return;
+            }
+        }
+    }
+
+    /// E0374 for an interface test on a value that may be of any class, when some class
+    /// satisfies the interface only for some of its type arguments: the run-time test cannot
+    /// tell those apart (`Atomic[T]` has `fn get(self) -> T`, so `x is Getter` with
+    /// `interface Getter { fn get(self) -> Int }` would pass an `Atomic[String]`). Runs after
+    /// every body.
+    pub fn check_iface_tests(&mut self) {
+        let saved = self.cur_module;
+        for (module, i, t, m, span) in std::mem::take(&mut self.pending_iface_tests) {
+            self.cur_module = module;
+            let partial = self.rt_class_ids().into_iter().find(|&c| {
+                let (some, all) = self.rt_conforms(i, c);
+                some && !all
+            });
+            let Some(c) = partial else { continue };
+            let class_name = match self.variant_of_class.get(&c) {
+                Some(&(e, _)) => self.enums[e as usize].name.clone(),
+                None => self.classes[&c].name.clone(),
+            };
+            let msg = format!(
+                "cannot test for `{}` at run time: a `{}` value could pass the test without being one",
+                self.show(t),
+                self.show(m)
+            );
+            let why = format!(
+                "`{class_name}` satisfies `{}` only for some of its type arguments, and type arguments are erased at run time",
+                self.show(t)
+            );
+            self.emit(Diag::error("E0374", msg, span).note(why));
+        }
+        self.cur_module = saved;
     }
 
     /// `t` with what the run-time test does not check replaced by fresh inference variables.
@@ -788,6 +966,9 @@ impl Checker {
     /// run-time test for `t`.
     fn may_pass_test(&mut self, m: TyId, t: TyId) -> bool {
         let m = self.types.shallow_resolve(m);
+        if let (Some(i), Some(k)) = (self.tested_iface(t), self.rt_class_key(m)) {
+            return self.rt_key_conforms(i, k).0;
+        }
         match self.types.get(m) {
             Ty::Error | Ty::Var(_) | Ty::Never => return false,
             Ty::Dyn | Ty::Param(_) | Ty::Open(_) | Ty::Iface(..) | Ty::Inter(_) => return true,
@@ -856,27 +1037,33 @@ impl Checker {
         };
         let mut yes = Vec::new();
         let mut no = Vec::new();
-        let mut maybe = None;
+        let mut maybe = false;
+        let mut unsound = None;
+        let iface = self.tested_iface(t.ty);
         for m in members {
             if self.passes_test(m, t) {
                 yes.push(m);
             } else {
-                if maybe.is_none() && self.may_pass_test(m, t.ty) {
-                    maybe = Some(m);
+                if self.may_pass_test(m, t.ty) {
+                    maybe = true;
+                    // A value of `m` may pass at run time without having the tested type: the
+                    // test does not check type arguments (or function types), or `m`'s class
+                    // satisfies the interface but `m` itself does not.
+                    let gap = (!t.erased && self.unchecked_part(t.ty).is_some())
+                        || (iface.is_some() && self.rt_class_key(m).is_some());
+                    if gap && unsound.is_none() {
+                        unsound = Some(m);
+                    }
                 }
                 no.push(m);
             }
         }
         // A member whose values may pass at run time contributes the tested type itself.
-        if maybe.is_some() || yes.is_empty() {
+        if maybe || yes.is_empty() {
             yes.push(t.ty);
         }
         let y = self.types.union(yes);
         let n = if no.is_empty() { None } else { Some(self.types.union(no)) };
-        let unsound = match maybe {
-            Some(m) if !t.erased && self.unchecked_part(t.ty).is_some() => Some(m),
-            _ => None,
-        };
         (y, n, unsound)
     }
 
@@ -884,8 +1071,21 @@ impl Checker {
     /// the subject's static type `cur` (E0374).
     pub fn check_type_test(&mut self, cur: TyId, t: TestTy, te: Option<&ast::TypeExpr>, span: Span) {
         let (_, _, unsound) = self.split_by_test(cur, t);
+        if unsound.is_none() {
+            self.note_iface_test(cur, t, span);
+        }
         let Some(m) = unsound else { return };
-        let why = self.unchecked_part(t.ty).unwrap_or_default();
+        let why = match self.unchecked_part(t.ty) {
+            Some(why) if !t.erased => why,
+            _ => {
+                let head = self.head_name(m);
+                format!(
+                    "the test checks only the value's class, and `{head}` satisfies `{}` for some type arguments (or when not frozen), but `{}` does not",
+                    self.show(t.ty),
+                    self.show(m)
+                )
+            }
+        };
         let msg = format!(
             "cannot test for `{}` at run time: a `{}` value could pass the test without being one",
             self.show(t.ty),
@@ -945,6 +1145,15 @@ fn path_expr(path: &[ast::Ident]) -> ExprKind {
 pub struct TestTy {
     pub ty: TyId,
     pub erased: bool,
+}
+
+/// What decides whether values of a static type pass an interface test at run time.
+#[derive(Clone, Copy, Debug)]
+enum RtKey {
+    Class(ClassId),
+    Enum(EnumId),
+    /// Tuples and functions: never.
+    None,
 }
 
 /// Abstract pattern for exhaustiveness checking.
