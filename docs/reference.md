@@ -670,9 +670,12 @@ path that does not exist is an error (exit status 2), and so is finding no tests
 must fail `catx check` with those diagnostic codes (if every code is a warning, `W...`, it need only
 report them). Any other file must run with standard output
 equal to its `.out` file and exit with status 0, or with the status given by a `# exit: N` line; a
-`.in` file next to it is fed to standard input. A program still running after `CATX_TEST_TIMEOUT`
-seconds (default 120) is killed and fails with its output so far. The exit status is 1 if anything
-failed.
+`.in` file next to it is fed to standard input. Line endings are not compared (`\r\n` in the `.out`
+file or the output counts as `\n`). A difference is shown as a unified diff of the expected and
+actual output, with tabs as `→`, carriage returns as `␍`, other control characters as `\u{..}` and
+trailing spaces as `·`, and a missing final newline noted. A program still running after
+`CATX_TEST_TIMEOUT` seconds (default 120) is killed and fails with its output so far. The exit
+status is 1 if anything failed.
 
 `catx fmt` rewrites files in place (`catx fmt -` filters stdin to stdout). It keeps comments and the
 program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
@@ -680,6 +683,8 @@ program's line structure; it re-indents with two spaces, normalizes spacing betw
 would change and exits with status 1 if there are any. Files with syntax errors are left untouched and
 reported (exit status 2). When walking a directory, `fmt` skips `reject/` directories, whose
 conformance programs are meant to be wrong; a file named on the command line is always formatted.
+A file keeps its line endings: one whose first line ends in `\r\n` is written with `\r\n`
+throughout, any other with `\n`.
 
 `catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
 unsaved edits. It provides:

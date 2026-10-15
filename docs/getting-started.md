@@ -166,10 +166,22 @@ $ catx test .
 3 passed, 0 failed
 ```
 
-A failing test prints the expected and actual output. `assert` and `panic` make a program exit
+A failing test prints a diff of the expected and actual output, with invisible characters such
+as trailing spaces made visible. `assert` and `panic` make a program exit
 with status 101, which fails the test. Each program gets 120 seconds (`CATX_TEST_TIMEOUT`
 changes this). The repository's own `examples/` and `tests/conformance/` directories use this
 layout.
+
+Line endings do not matter to `catx test`, which reads `\r\n` as `\n`, or to `catx fmt`, which
+keeps each file's own line endings. On Windows, where Git may check text files out with `\r\n`
+(`core.autocrlf`), a `.gitattributes` file at the root of the repository keeps sources and
+expected outputs the same on every platform:
+
+```
+*.cx text eol=lf
+*.out text eol=lf
+*.in text eol=lf
+```
 
 ## Editor setup
 

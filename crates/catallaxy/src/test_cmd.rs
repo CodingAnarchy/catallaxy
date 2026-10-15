@@ -2,7 +2,8 @@
 //!
 //! A test is a `*.cx` file. One whose first line is `# expect: CODE[, CODE...]` must fail
 //! `catx check` with those codes (unless every code is a warning). Any other must run with
-//! standard output equal to its `.out` file (empty if there is none) and exit with status 0, or
+//! standard output equal to its `.out` file (empty if there is none; line endings are not
+//! compared) and exit with status 0, or
 //! with the status of a `# exit: N` line; a `.in` file next to it is fed to standard input.
 //!
 //! Each program gets `CATX_TEST_TIMEOUT` seconds (default 120); one that runs longer is killed
@@ -82,7 +83,9 @@ fn run_one(exe: &Path, f: &Path, limit: Duration) -> Result<(), String> {
             Err(format!("expected {want:?}, got {}", text.trim()))
         }
     } else {
-        let want = std::fs::read_to_string(f.with_extension("out")).unwrap_or_default();
+        let out_file = f.with_extension("out");
+        // Line endings are not compared: a checkout may have turned `\n` into `\r\n`.
+        let want = std::fs::read_to_string(&out_file).unwrap_or_default().replace("\r\n", "\n");
         let want_code: i32 =
             src.lines().find_map(|l| l.strip_prefix("# exit:").map(|c| c.trim().parse().unwrap_or(0))).unwrap_or(0);
         let input = f.with_extension("in");
@@ -93,14 +96,15 @@ fn run_one(exe: &Path, f: &Path, limit: Duration) -> Result<(), String> {
             cmd.stdin(file);
         }
         let out = output_within(&mut cmd, limit)?;
-        let got = String::from_utf8_lossy(&out.stdout).to_string();
+        let got = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
         let code = out.status.code().unwrap_or(-1);
         if got == want && code == want_code {
             Ok(())
         } else if code != want_code {
             Err(format!("exit code {code} (want {want_code})\n{}", String::from_utf8_lossy(&out.stderr)))
         } else {
-            Err(format!("output differs:\n--- want\n{want}--- got\n{got}{}", String::from_utf8_lossy(&out.stderr)))
+            let diff = crate::diff::unified(&out_file.display().to_string(), &want, "output", &got);
+            Err(format!("output differs:\n{diff}{}", String::from_utf8_lossy(&out.stderr)))
         }
     }
 }
