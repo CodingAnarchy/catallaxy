@@ -1,0 +1,14 @@
+# Prelude methods that accumulate with `concat` (#140): flat_map, Lazy.flat_map, flatten and
+# delete_if, each producing a 1M-item result. Linear now that `concat` appends in place (#172).
+xs = (0...500000).to_list()
+ys = xs.flat_map { |x| [x, x] }
+puts(ys.length)
+zs = xs.lazy().flat_map { |x| [x, x + 1] }.to_list()
+puts(zs.length)
+nested = xs.map { |x| [x, -x] }
+flat = nested.flatten()
+puts(flat.length)
+flat.delete_if { |x| x % 3 == 0 }
+puts(flat.length)
+r = (0...1000).flat_map { |i| (0...1000).to_list() }
+puts(r.length)
