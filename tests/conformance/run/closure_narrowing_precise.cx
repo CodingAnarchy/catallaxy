@@ -1,0 +1,55 @@
+# Narrowings of locals that closures assign, where no closure can run in between.
+fn other() -> Int { 0 }
+
+# A closure only called through its local runs only at those calls.
+fn contained() -> Int {
+  x: Int? = 1
+  reset = fn() { x = nil }
+  if x != nil {
+    other()
+    total = x + 1
+    reset()
+    return total
+  }
+  0
+}
+
+# A loop without calls keeps the narrowing it keeps over its own assignments.
+fn no_calls() -> Int {
+  x: Int? = 1
+  reset = fn() { x = nil }
+  if x != nil {
+    i = 0
+    while i < 3 {
+      x = x * 2
+      i += 1
+    }
+    n: Int = x
+    reset()
+    return n
+  }
+  0
+}
+
+# A closure's own local, or parameter, of the same name is not the outer variable.
+fn own_local() -> Int {
+  x: Int? = 5
+  f = fn(x: Int?) -> Int? {
+    x = nil
+    x
+  }
+  g = fn() {
+    x: Int? = nil
+    x = 3
+  }
+  if x != nil {
+    f(1)
+    g()
+    return x + 1
+  }
+  0
+}
+
+puts(contained())
+puts(no_calls())
+puts(own_local())

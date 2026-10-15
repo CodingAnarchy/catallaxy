@@ -14,6 +14,7 @@ pub mod lookup;
 pub mod pat;
 pub mod protect;
 pub mod rel;
+pub mod scan;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -104,37 +105,7 @@ pub struct FnCtx {
     pub span: Span,
 }
 
-/// What a function, closure or `for` body (closures in it included) assigns, found before it is
-/// checked: assignments that come later in the text may still run first, through closures,
-/// loops and fibers.
-#[derive(Default, Debug)]
-pub struct AssignScan {
-    /// Names assigned inside a closure or `spawn` block.
-    pub in_closures: FxHashSet<String>,
-    /// How many times each name is assigned (declarations included).
-    pub counts: FxHashMap<String, u32>,
-}
-
-impl AssignScan {
-    pub fn new<'a>(stmts: impl IntoIterator<Item = &'a ast::Expr>) -> Self {
-        let mut scan = AssignScan::default();
-        let mut stack: Vec<(&ast::Expr, bool)> = stmts.into_iter().map(|x| (x, false)).collect();
-        while let Some((x, in_closure)) = stack.pop() {
-            if let ast::ExprKind::Assign { target, .. } = &x.kind {
-                if let ast::ExprKind::Ident(n) = &target.kind {
-                    *scan.counts.entry(n.clone()).or_default() += 1;
-                    if in_closure {
-                        scan.in_closures.insert(n.clone());
-                    }
-                }
-            }
-            let in_closure =
-                in_closure || matches!(x.kind, ast::ExprKind::Closure { .. } | ast::ExprKind::Spawn { .. });
-            stack.extend(crate::query::children(x).into_iter().map(|c| (c, in_closure)));
-        }
-        scan
-    }
-}
+pub use scan::AssignScan;
 
 #[derive(Clone)]
 pub struct Checker {
@@ -223,6 +194,9 @@ pub struct Checker {
     pub satisfies_stack: Vec<(TyId, TyId)>,
     /// Bumped whenever a call drops unstable field-path narrowings.
     pub path_epoch: u32,
+    /// The declaring spans of contained closures' locals called so far, in order (see
+    /// `Checker::clear_runner`).
+    pub runner_log: Vec<Span>,
     /// Narrowings of locals that hold throughout the loops being checked (innermost last):
     /// every assignment to the local in the loop must keep its value within the narrowed type.
     /// (local, narrowed type, number of contexts at the loop).
@@ -377,6 +351,7 @@ impl Checker {
             satisfies_cache: FxHashMap::default(),
             satisfies_stack: Vec::new(),
             path_epoch: 0,
+            runner_log: Vec::new(),
             loop_facts: Vec::new(),
             loop_dropped: Vec::new(),
             capture_block_end: false,
@@ -464,7 +439,8 @@ impl Checker {
     pub fn new_local(&mut self, name: &str, ty: TyId, span: Span, is_param: bool) -> LocalId {
         let ctx = self.ctxs.len() as u32 - 1;
         let scan = &self.ctxs.last().unwrap().scan;
-        let closure_assigned = scan.in_closures.contains(name);
+        let closure_assigned = scan.closure_assigned(name, span);
+        let runners = scan.runners(name, span);
         let reassigned = scan.counts.get(name).is_some_and(|&n| n + u32::from(is_param) > 1);
         self.locals.push(LocalInfo {
             name: name.to_string(),
@@ -473,6 +449,7 @@ impl Checker {
             captured: false,
             assigns: 1,
             closure_assigned,
+            runners,
             reassigned,
             is_param,
             span,

@@ -268,7 +268,14 @@ returns an optional, say), the assignment is E0324.
 
 A closure (a `fn` literal, a block passed to a call, a `Fiber.start` block, the body of a `for` over a
 user `Enumerable`) may be stored and run during any later call, so a narrowing of a variable that some
-closure assigns ends at the next call, wherever the closure is written. Inside a closure, a captured
+closure assigns ends at the next call, wherever the closure is written. A closure that is only ever
+called directly through the variable it is assigned to, in the same function (`reset = fn() { x = nil }`
+and then only `reset()`), runs only there, so the narrowing ends only at those calls; passing, storing,
+copying or capturing `reset`, or calling it in a closure or a `for` body, counts as any call again.
+Assignments are matched to variables as the checker resolves them, so a closure's own variable or
+parameter that shares a name with an outer one does not count. A loop drops such a narrowing at its
+start only if an iteration may run the closure: a call in its body or condition, or a `for` over a
+user type. Inside a closure, a captured
 variable that is assigned anywhere else in its function keeps no narrowing from outside the closure,
 and a nil test inside the closure holds only until the next call (another fiber may run meanwhile).
 When the narrowing must outlive a call, bind the value: `if let v = x { ... }`.

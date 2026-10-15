@@ -37,7 +37,8 @@ fn a_call_ends_the_narrowing_of_a_local_a_closure_assigns() {
         "f = fn() { x = nil }\nif x != nil {\n  f()\n  puts(x + 1)\n}",
         // Any call may run the closure, not just a call of it.
         "f = fn() { x = nil }\nif x != nil {\n  run(f)\n  puts(x + 1)\n}",
-        "f = fn() { x = nil }\nif x != nil {\n  other()\n  puts(x + 1)\n}",
+        // Once the closure's value escapes (here into a field), any call may run it.
+        "f = fn() { x = nil }\nh = Holder.new()\nh.cb = f\nif x != nil {\n  other()\n  puts(x + 1)\n}",
         // A block passed to a method.
         "fs: List[fn()] = []\nfs.push { x = nil }\nif x != nil {\n  fs[0]()\n  puts(x + 1)\n}",
         // A closure stored in a field.
@@ -62,7 +63,7 @@ fn a_call_ends_the_narrowing_of_a_local_a_closure_assigns() {
         assert_eq!(errs[0].0, "E0310", "{src}\n{errs:?}");
     }
     let errs = check("f = fn() { x = nil }\nif x != nil {\n  f()\n  puts(x + 1)\n}");
-    assert!(errs[0].2.contains("a closure assigns `x`"), "{errs:?}");
+    assert!(errs[0].2.contains("the closure in `f` assigns `x`"), "{errs:?}");
 }
 
 #[test]
