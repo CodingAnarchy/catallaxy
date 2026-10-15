@@ -193,7 +193,9 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
   their elements are, and order lexicographically (`(1, "b") < (1, "c")`, `[1, 2] < [1, 2, 0]`). Sorting
   needs it: `sorted`, `sort`, `sort_in_place`, `min` and `max` require `Comparable` items, and `sort_by`,
   `min_by` and `max_by` a `Comparable` key (`recs.sort_by { |r| (r.last, r.first) }`). Use `sort_with`
-  for any other order.
+  for any other order. `Float`'s `<=>` is a total order that puts NaN after every other number (so a
+  list holding NaN sorts, NaN last), while `<`, `<=`, `>` and `>=` follow IEEE 754 and are false
+  whenever NaN is involved.
 
 ### 4.3 Control flow
 
@@ -522,7 +524,7 @@ Annotate the parameter to use any of these.
 ## 7. Errors
 
 - Recoverable errors use `Result[T, E]`, `Ok(v)`, `Err(e)` and `?`. There are no exceptions.
-- `panic(msg)`, failed `assert(cond, msg)`, out-of-bounds indexing, `x!` on nil, integer division by zero
+- `panic(msg)`, failed `assert(cond, msg)`, out-of-bounds indexing (`xs[9]`, `"abc"[3]`), `x!` on nil, integer division by zero
   and ownership violations panic. A panic unwinds only the current thread. In the main thread it prints the
   message and a stack trace to stderr and exits with status 101. Trace frames name functions, `<main>`
   for the entry file's top level, `<block in f>`, `<spawn in f>` and `<parallel block in f>` (a

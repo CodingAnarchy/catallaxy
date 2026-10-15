@@ -1,0 +1,102 @@
+# Edge cases that used to loop forever, return a value of the wrong type or panic without an
+# error kind (#236). Each panic is caught by running the code on a thread and printing the `Err`.
+
+fn panics(f: fn() -> Dyn) -> String {
+  match spawn move { f() }.join() {
+    Ok(v) => "no panic: #{inspect(v)}"
+    Err(e) => e
+  }
+}
+
+# --- String#[] out of range panics like List#[] (it returned nil despite its type).
+puts("abc"[2])
+puts("abc"[-3])
+puts(panics() { "abc"[3] })
+puts(panics() { "abc"[-4] })
+puts(panics() { ""[0] })
+puts(panics() { "héllo"[5] })
+# Slices still clip.
+puts(inspect("abc"[1..10]))
+# A `Dyn` string, like a `Dyn` list, gives nil out of range.
+d: Dyn = "abc"
+puts(inspect(d[1]))
+puts(inspect(d[3]))
+puts(inspect(d[-4]))
+
+# --- Sizes and steps must be positive.
+puts([1, 2, 3, 4, 5].chunk(2))
+puts(panics() { [1, 2, 3].chunk(0) })
+puts(panics() { [1, 2, 3].chunk(-1) })
+puts((1..10).step(3))
+puts(panics() { (1..10).step(0) })
+puts(panics() { (1..10).step(-1) })
+puts([1, 2, 3].each_slice(2).to_list())
+puts(panics() { [1, 2, 3].each_slice(0).to_list() })
+puts(panics() { [1, 2, 3].each_slice(-2) })
+puts([1, 2, 3].each_cons(2).to_list())
+puts(panics() { [1, 2, 3].each_cons(0).to_list() })
+puts(panics() { (1..3).lazy().each_slice(0) })
+
+# --- Error kinds on Int powers and shifts.
+puts(2.pow(10))
+puts(panics() { 2.pow(-1) })
+puts(panics() { 2 ** -1 })
+puts(panics() { 2 ** (2 ** 40) })
+puts(panics() { 1 << -1 })
+puts(panics() { 1 >> -1 })
+big = 2 ** 100
+puts(panics() { 1 << big })
+puts(panics() { 1 << -big })
+
+# --- NaN: `<=>` is a total order with NaN last, so sorting a list holding NaN works.
+nan = 0.0 / 0.0
+inf = 1.0 / 0.0
+puts(nan <=> 1.0)
+puts(1.0 <=> nan)
+puts(nan <=> nan)
+puts(nan <=> inf)
+puts(-0.0 <=> 0.0)
+puts(compare_values(nan, 1))
+puts(compare_values(1, nan))
+puts([3.0, nan, 1.0, -inf, inf, 2].sorted())
+puts([3.0, nan, 1.0].sort_by { |x| x })
+puts([3.0, nan, 1.0].max())
+puts([3.0, nan, 1.0].min())
+puts([nan, 2.0].sort_with { |a, b| a <=> b })
+# The operators stay IEEE: false whenever NaN is involved, also on `Dyn` values.
+puts("#{nan < 1.0} #{nan > 1.0} #{1.0 < nan} #{nan <= nan} #{nan == nan}")
+dn: Dyn = nan
+puts("#{dn < 1.0} #{dn > 1.0} #{dn <= 1}")
+fn less[T: Comparable](a: T, b: T) -> Bool { a < b }
+puts("#{less(nan, 1.0)} #{less(1.0, nan)}")
+xs: List[Float] = [2.0, nan]
+puts(xs.contains(nan))
+
+# --- JSON nesting has an error kind.
+fn nest(n: Int) -> Dyn {
+  v: Dyn = 1
+  n.times { |_i| v = [v] }
+  v
+}
+puts(Json.stringify(nest(3)))
+puts(panics() { Json.stringify(nest(300)) })
+
+# --- Random.int over spans wider than half the Int range.
+lo = -9223372036854775807 - 1
+hi = 9223372036854775807
+Random.seed(7)
+ok = true
+20.times { |_i|
+  r = Random.int(lo, hi)
+  if r < lo or r > hi { ok = false }
+}
+puts(ok)
+ok = true
+20.times { |_i|
+  r = Random.int(hi - 1, hi)
+  if r < hi - 1 { ok = false }
+}
+puts(ok)
+puts(Random.int(5, 5))
+puts(panics() { Random.int(0, 2 ** 70) })
+puts(panics() { Random.int(2, 1) })

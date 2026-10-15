@@ -283,18 +283,21 @@ fn dict_set_with(vm: &mut Vm, d: Value, k: Value, v: Value, may_collect: bool) -
     }
 }
 
-fn char_at(s: &StrObj, i: Value) -> RtResult<Option<&str>> {
+/// The character at index `i` (negative counts from the end); an `IndexError` if out of range,
+/// as `String.[]` raises.
+fn char_at(s: &StrObj, i: Value) -> RtResult<&str> {
     let Some(mut idx) = (if ops::is_int(i) { ops::int_as_i64(i) } else { None }) else {
         return panic(format!("TypeError: string index must be Int, got {}", type_name(i)));
     };
+    let orig = idx;
     let n = s.char_count() as i64;
     if idx < 0 {
         idx += n;
     }
     if idx < 0 || idx >= n {
-        return Ok(None);
+        return panic(format!("IndexError: index {orig} out of range for string of length {n}"));
     }
-    Ok(Some(s.char_at(idx as usize)))
+    Ok(s.char_at(idx as usize))
 }
 
 /// The [start, end) bounds selected by a range over a sequence of `len` items, clamped.
@@ -341,10 +344,8 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
         ObjKind::Str => {
             // SAFETY: matched on the kind.
             let s = unsafe { as_str_obj(x) };
-            match char_at(s, i)? {
-                Some(c) => Ok(vm.m.alloc_str(c)),
-                None => Ok(Value::NIL),
-            }
+            let c = char_at(s, i)?;
+            Ok(vm.m.alloc_str(c))
         }
         ObjKind::Tuple => {
             // SAFETY: matched on the kind.
@@ -362,14 +363,18 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
     }
 }
 
-/// `x[i]` on a `Dyn` value: a list index out of range is nil, like a missing object key.
+/// `x[i]` on a `Dyn` value: a list or string index out of range is nil, like a missing object
+/// key.
 pub fn dyn_index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
-    if kind_of(x) == ObjKind::List {
-        if let Some(idx) = ops::int_as_i64(i) {
-            let len = ownership::read_list(&vm.m, x)?.len() as i64;
-            if idx >= len || idx < -len {
-                return Ok(Value::NIL);
-            }
+    let len = match kind_of(x) {
+        ObjKind::List => Some(ownership::read_list(&vm.m, x)?.len() as i64),
+        // SAFETY: matched on the kind.
+        ObjKind::Str => Some(unsafe { as_str_obj(x) }.char_count() as i64),
+        _ => None,
+    };
+    if let (Some(len), Some(idx)) = (len, ops::int_as_i64(i)) {
+        if idx >= len || idx < -len {
+            return Ok(Value::NIL);
         }
     }
     index_get(vm, x, i)

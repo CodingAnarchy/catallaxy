@@ -46,4 +46,6 @@ puts(("é" * 300 + "needle").index_of("needle"))
 puts(("é" * 300 + "needle" + "é" * 10).rindex_of("needle"))
 puts(mixed[-1])
 puts(mixed[479])
-puts(mixed[480] == nil)
+# Out of range panics (as for a List); `chars.get` gives nil instead.
+puts(spawn { mixed[480] }.join().unwrap_err())
+puts(mixed.chars.get(480) == nil)

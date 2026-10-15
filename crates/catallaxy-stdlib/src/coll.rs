@@ -456,17 +456,8 @@ pub(crate) fn sort_values(vm: &mut Vm, mut items: Vec<Value>) -> RtResult<Vec<Va
     // The stable sorts below allocate a buffer of up to `items.len()` values.
     check_sort_buffer(items.len())?;
     if items.iter().all(|v| v.is_float() || v.is_small_int()) {
-        let mut err = false;
-        items.sort_by(|a, b| {
-            let (x, y) = (as_f(*a), as_f(*b));
-            x.partial_cmp(&y).unwrap_or_else(|| {
-                err = true;
-                CmpOrdering::Equal
-            })
-        });
-        if err {
-            return panic("ArgumentError: comparison of Float with NaN failed");
-        }
+        // `<=>`'s order: NaN sorts last.
+        items.sort_by(|a, b| ops::float_cmp(as_f(*a), as_f(*b)));
         return Ok(items);
     }
     if items.iter().all(|v| str_of(*v).is_some()) {
