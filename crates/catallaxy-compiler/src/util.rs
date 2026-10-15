@@ -32,3 +32,22 @@ pub fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Opt
     }
     best.map(|(_, s)| s.to_string())
 }
+
+/// The native stack the compiler runs on. The parser, checker and code generator recurse over
+/// the syntax tree, whose depth [`crate::parser::MAX_NESTING`] and [`crate::parser::MAX_DEPTH`]
+/// bound; this leaves room for that at the deepest even in a debug build. Like the main VM
+/// thread's stack, it is reserved address space, touched only as deep as it is used.
+pub const COMPILER_STACK: usize = 256 << 20;
+
+/// Runs `f` on a thread with [`COMPILER_STACK`] of native stack and returns its result. A panic
+/// in `f` continues in the caller.
+pub fn on_compiler_stack<R: Send>(f: impl FnOnce() -> R + Send) -> R {
+    std::thread::scope(|s| {
+        let h = std::thread::Builder::new()
+            .name("catx-compile".into())
+            .stack_size(COMPILER_STACK)
+            .spawn_scoped(s, f)
+            .expect("spawn the compiler thread");
+        h.join().unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+    })
+}

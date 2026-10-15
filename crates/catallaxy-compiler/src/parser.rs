@@ -12,7 +12,21 @@ pub struct Parser<'a> {
     pub diags: Vec<Diagnostic>,
     /// Inside an `if`/`while`/`for`/`match` header: `{` does not start a trailing block.
     no_block: bool,
+    /// How deeply the parser has recursed (expressions, types and patterns nested in each other).
+    nesting: u32,
+    /// Set once E0901 is reported, so a deep input reports it once.
+    too_deep: bool,
 }
+
+/// How deeply expressions, types and patterns may nest (`((((x))))`, `[[[x]]]`, `if` in `if`).
+/// The parser, checker and code generator recurse over the nesting; the limit keeps them within
+/// the compiler's stack (see [`crate::util::COMPILER_STACK`]) instead of overflowing it.
+pub const MAX_NESTING: u32 = 1000;
+
+/// How deep the syntax tree of one statement or declaration may be. Unlike [`MAX_NESTING`], this
+/// counts operator and method chains (`a + b + c` nests `a + b` inside the second `+`), which
+/// the parser builds without recursing but later passes walk recursively.
+pub const MAX_DEPTH: u32 = 10_000;
 
 type PResult<T> = Result<T, ()>;
 
@@ -20,7 +34,7 @@ const BLOCK_START: &str = "{";
 
 impl<'a> Parser<'a> {
     pub fn new(toks: Vec<Token>, file: u32, next_id: &'a mut u32) -> Self {
-        Parser { toks, pos: 0, file, next_id, diags: Vec::new(), no_block: false }
+        Parser { toks, pos: 0, file, next_id, diags: Vec::new(), no_block: false, nesting: 0, too_deep: false }
     }
 
     // ---- token helpers -----------------------------------------------------------------------
@@ -143,6 +157,22 @@ impl<'a> Parser<'a> {
 
     fn mk(&mut self, kind: ExprKind, span: Span) -> Expr {
         Expr { id: self.id(), kind, span }
+    }
+
+    /// Runs `f` one nesting level deeper, or reports E0901 past [`MAX_NESTING`].
+    fn nested<T>(&mut self, f: impl FnOnce(&mut Self) -> PResult<T>) -> PResult<T> {
+        if self.nesting >= MAX_NESTING {
+            if !self.too_deep {
+                self.too_deep = true;
+                let span = self.span();
+                self.diags.push(too_deep(span, "nested", MAX_NESTING));
+            }
+            return Err(());
+        }
+        self.nesting += 1;
+        let r = f(self);
+        self.nesting -= 1;
+        r
     }
 
     /// Skips to a plausible statement boundary after an error. Always makes progress.
@@ -562,6 +592,10 @@ impl<'a> Parser<'a> {
     // ---- types -------------------------------------------------------------------------------
 
     pub fn parse_type(&mut self) -> PResult<TypeExpr> {
+        self.nested(Self::parse_type_inner)
+    }
+
+    fn parse_type_inner(&mut self) -> PResult<TypeExpr> {
         let first = self.parse_type_inter()?;
         if !self.is_sym("|") {
             return Ok(first);
@@ -575,7 +609,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_no_union(&mut self) -> PResult<TypeExpr> {
-        self.parse_type_postfix()
+        self.nested(Self::parse_type_postfix)
     }
 
     fn parse_type_inter(&mut self) -> PResult<TypeExpr> {
@@ -815,6 +849,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_prec(&mut self, min: u8) -> PResult<Expr> {
+        self.nested(|p| p.parse_prec_inner(min))
+    }
+
+    fn parse_prec_inner(&mut self, min: u8) -> PResult<Expr> {
         let mut lhs = if min <= 4 && (self.is_kw(Kw::Not)) {
             let start = self.bump().span;
             let e = self.parse_prec(4)?;
@@ -880,7 +918,7 @@ impl<'a> Parser<'a> {
         if let Some(op) = op {
             self.bump();
             // `-2 ** 2` is `-(2 ** 2)`.
-            let e = if op == UnOp::Neg { self.parse_prec(13)? } else { self.parse_unary()? };
+            let e = if op == UnOp::Neg { self.parse_prec(13)? } else { self.nested(Self::parse_unary)? };
             let span = start.to(e.span);
             // Fold negative literals.
             if op == UnOp::Neg {
@@ -1089,8 +1127,10 @@ impl<'a> Parser<'a> {
     fn parse_interpolation(&mut self, code: &str, offset: u32) -> PResult<StrPart> {
         let (toks, diags) = Lexer::new(code, self.file, offset).tokenize();
         let mut sub = Parser::new(toks, self.file, self.next_id);
+        (sub.nesting, sub.too_deep) = (self.nesting, self.too_deep);
         sub.skip_newlines();
         let r = sub.parse_expr();
+        self.too_deep |= sub.too_deep;
         let colon = match sub.tok() {
             Tok::Sym(":" | "::") if r.is_ok() => Some((sub.span().start - offset) as usize),
             _ => None,
@@ -1110,8 +1150,10 @@ impl<'a> Parser<'a> {
         let (toks, diags) = Lexer::new(&code[..colon], self.file, offset).tokenize();
         self.diags.extend(diags);
         let mut sub = Parser::new(toks, self.file, self.next_id);
+        (sub.nesting, sub.too_deep) = (self.nesting, self.too_deep);
         sub.skip_newlines();
         let r = sub.parse_expr();
+        self.too_deep |= sub.too_deep;
         sub.skip_newlines();
         if r.is_ok() && !sub.at_eof() {
             let sp = sub.span();
@@ -1467,6 +1509,10 @@ impl<'a> Parser<'a> {
     // ---- patterns ----------------------------------------------------------------------------
 
     pub fn parse_pattern(&mut self) -> PResult<Pattern> {
+        self.nested(Self::parse_pattern_inner)
+    }
+
+    fn parse_pattern_inner(&mut self) -> PResult<Pattern> {
         let first = self.parse_pattern_single()?;
         if !self.is_sym("|") {
             return Ok(first);
@@ -1594,13 +1640,173 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// E0901: the input nests deeper than the compiler supports.
+fn too_deep(span: Span, what: &str, limit: u32) -> Diagnostic {
+    Diagnostic::error("E0901", format!("expression {what} too deeply (the limit is {limit} levels)"), span)
+        .note("split it up, for example by assigning parts to local variables")
+}
+
 /// Parses a whole file.
 pub fn parse(src: &str, file: u32, next_id: &mut u32) -> (Module, Vec<Diagnostic>) {
     let (toks, mut diags) = Lexer::new(src, file, 0).tokenize();
     let mut p = Parser::new(toks, file, next_id);
-    let m = p.parse_module();
+    let mut m = p.parse_module();
     diags.extend(p.diags);
+    limit_depth(&mut m, &mut diags);
     (m, diags)
+}
+
+/// Replaces each statement or initializer whose tree is deeper than [`MAX_DEPTH`] with an error
+/// node, reporting E0901 at it, so that no later pass recurses that deep. The depth is measured
+/// without recursion.
+fn limit_depth(m: &mut Module, diags: &mut Vec<Diagnostic>) {
+    fn depth(root: &Expr) -> u32 {
+        let mut max = 0;
+        let mut stack = vec![(root, 1u32)];
+        while let Some((e, d)) = stack.pop() {
+            max = max.max(d);
+            if d > MAX_DEPTH {
+                break;
+            }
+            stack.extend(crate::query::children(e).into_iter().map(|c| (c, d + 1)));
+        }
+        max
+    }
+    fn check(e: &mut Expr, diags: &mut Vec<Diagnostic>) {
+        if depth(e) > MAX_DEPTH {
+            diags.push(too_deep(e.span, "nests", MAX_DEPTH));
+            let deep = std::mem::replace(&mut e.kind, ExprKind::Error);
+            drop_iteratively(deep);
+        }
+    }
+    fn block(b: &mut Block, diags: &mut Vec<Diagnostic>) {
+        b.stmts.iter_mut().for_each(|e| check(e, diags));
+    }
+    fn func(f: &mut FnDecl, diags: &mut Vec<Diagnostic>) {
+        for p in &mut f.params {
+            if let Some(d) = &mut p.default {
+                check(d, diags);
+            }
+        }
+        if let Some(b) = &mut f.body {
+            block(b, diags);
+        }
+    }
+    for it in &mut m.items {
+        match it {
+            Item::Fn(f) => func(f, diags),
+            Item::Class(c) => {
+                for f in &mut c.fields {
+                    if let Some(d) = &mut f.default {
+                        check(d, diags);
+                    }
+                }
+                c.consts.iter_mut().for_each(|k| check(&mut k.value, diags));
+                c.methods.iter_mut().for_each(|f| func(f, diags));
+            }
+            Item::Interface(i) => i.methods.iter_mut().for_each(|f| func(f, diags)),
+            Item::Enum(e) => e.methods.iter_mut().for_each(|f| func(f, diags)),
+            Item::Extend(x) => x.methods.iter_mut().for_each(|f| func(f, diags)),
+            Item::Const(c) => check(&mut c.value, diags),
+            Item::Var(v) => check(&mut v.value, diags),
+            Item::Stmt(e) => check(e, diags),
+            Item::Import(_) => {}
+        }
+    }
+}
+
+/// Drops a deep tree without recursing: each node's sub-expressions are taken out and dropped
+/// from a work list. (Patterns and types inside it nest only as deep as the parser recursed.)
+fn drop_iteratively(kind: ExprKind) {
+    fn block(b: Block, out: &mut Vec<ExprKind>) {
+        out.extend(b.stmts.into_iter().map(|e| e.kind));
+    }
+    fn args(a: Vec<Arg>, out: &mut Vec<ExprKind>) {
+        out.extend(a.into_iter().map(|a| a.value.kind));
+    }
+    let mut stack = vec![kind];
+    while let Some(k) = stack.pop() {
+        let out = &mut stack;
+        match k {
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Nil
+            | ExprKind::Ident(_)
+            | ExprKind::SelfValue
+            | ExprKind::Continue
+            | ExprKind::Error => {}
+            ExprKind::Str(parts) => {
+                for p in parts {
+                    if let StrPart::Expr(x) | StrPart::Fmt(x, ..) = p {
+                        out.push(x.kind);
+                    }
+                }
+            }
+            ExprKind::List(xs) | ExprKind::Tuple(xs) => out.extend(xs.into_iter().map(|x| x.kind)),
+            ExprKind::Dict(kvs) => {
+                for (k, v) in kvs {
+                    out.push(k.kind);
+                    out.push(v.kind);
+                }
+            }
+            ExprKind::Unary(_, x)
+            | ExprKind::Unwrap(x)
+            | ExprKind::Try(x)
+            | ExprKind::Move(x)
+            | ExprKind::Is { expr: x, .. }
+            | ExprKind::AsCast { expr: x, .. } => out.push(x.kind),
+            ExprKind::Binary(_, a, b) | ExprKind::Range { lo: a, hi: b, .. } => {
+                out.push(a.kind);
+                out.push(b.kind);
+            }
+            ExprKind::Call { callee: recv, args: a, block: blk } | ExprKind::Member { recv, args: a, block: blk, .. } => {
+                out.push(recv.kind);
+                args(a, out);
+                if let Some(b) = blk {
+                    out.push(b.kind);
+                }
+            }
+            ExprKind::Index { recv, args: xs } => {
+                out.push(recv.kind);
+                out.extend(xs.into_iter().map(|x| x.kind));
+            }
+            ExprKind::Closure { body, .. }
+            | ExprKind::Loop { body }
+            | ExprKind::Block(body)
+            | ExprKind::Spawn { body, .. } => block(body, out),
+            ExprKind::If { cond: x, then, else_ } | ExprKind::IfLet { value: x, then, else_, .. } => {
+                out.push(x.kind);
+                block(then, out);
+                if let Some(e) = else_ {
+                    out.push(e.kind);
+                }
+            }
+            ExprKind::While { cond: x, body } | ExprKind::For { iter: x, body, .. } | ExprKind::WithLock { obj: x, body } => {
+                out.push(x.kind);
+                block(body, out);
+            }
+            ExprKind::Match { subject, arms } => {
+                out.push(subject.kind);
+                for a in arms {
+                    if let Some(g) = a.guard {
+                        out.push(g.kind);
+                    }
+                    out.push(a.body.kind);
+                }
+            }
+            ExprKind::Return(x) | ExprKind::Break(x) => {
+                if let Some(x) = x {
+                    out.push(x.kind);
+                }
+            }
+            ExprKind::Assign { target, value, .. } => {
+                out.push(target.kind);
+                out.push(value.kind);
+            }
+            ExprKind::Let { value, .. } => out.push(value.kind),
+        }
+    }
 }
 
 #[cfg(test)]

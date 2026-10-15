@@ -9,6 +9,7 @@ use crate::check::Checker;
 use crate::codegen::Codegen;
 use crate::diag::{Diagnostic, SourceMap, Span};
 use crate::parser;
+use crate::util::on_compiler_stack;
 use catallaxy_vm::Program;
 
 pub const PRELUDE: &[(&str, &str)] = &[
@@ -17,7 +18,7 @@ pub const PRELUDE: &[(&str, &str)] = &[
 ];
 
 /// Where module sources come from (the file system, or memory in tests and the LSP).
-pub trait SourceLoader {
+pub trait SourceLoader: Sync {
     fn load(&self, path: &Path) -> Option<String>;
 }
 
@@ -73,19 +74,19 @@ pub struct Options {
 /// Compiles an entry file and everything it imports.
 pub fn compile_path(path: &Path, loader: &dyn SourceLoader, opts: &Options) -> Compilation {
     let src = loader.load(path);
-    compile_entry(path, src, loader, opts, None)
+    on_compiler_stack(|| compile_entry(path, src, loader, opts, None))
 }
 
 /// As [`compile_path`], starting from a checked prelude instead of checking it again. See
 /// [`Prelude`] for how the result compares.
 pub fn compile_path_from(prelude: &Prelude, path: &Path, loader: &dyn SourceLoader, opts: &Options) -> Compilation {
     let src = loader.load(path);
-    compile_entry(path, src, loader, opts, Some(prelude))
+    on_compiler_stack(|| compile_entry(path, src, loader, opts, Some(prelude)))
 }
 
 /// Compiles source text as the entry module (named after `path`).
 pub fn compile_source(path: &Path, src: &str, opts: &Options) -> Compilation {
-    compile_entry(path, Some(src.to_string()), &FsLoader, opts, None)
+    on_compiler_stack(|| compile_entry(path, Some(src.to_string()), &FsLoader, opts, None))
 }
 
 /// The prelude, parsed and checked on its own, for compilations to start from (see
@@ -132,12 +133,14 @@ impl Default for Prelude {
 
 impl Prelude {
     pub fn new() -> Prelude {
-        let (sm, mut ck, mut diags, next_id) = load_prelude();
-        ck.record_method_name_misses = true;
-        run_phases(&mut ck, &FxHashMap::default(), 0);
-        diags.append(&mut ck.diags);
-        let misses = std::mem::take(&mut ck.method_name_misses);
-        Prelude { sm, ck, diags, next_id, misses }
+        on_compiler_stack(|| {
+            let (sm, mut ck, mut diags, next_id) = load_prelude();
+            ck.record_method_name_misses = true;
+            run_phases(&mut ck, &FxHashMap::default(), 0);
+            diags.append(&mut ck.diags);
+            let misses = std::mem::take(&mut ck.method_name_misses);
+            Prelude { sm, ck, diags, next_id, misses }
+        })
     }
 
     /// Whether `program` (the modules of a compilation) could change how the prelude checks, so
