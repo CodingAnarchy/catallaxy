@@ -1534,7 +1534,8 @@ t = spawn { items.push(4) }
 ```
 
 Move the value into the block (`spawn move { ... }`), freeze it first (`freeze(items)`), or use a
-`shared class`.
+`shared class`. A closure cannot be shared frozen (a frozen function cannot be called): move it into
+the block, or call it before and capture its result.
 
 ## E0606
 

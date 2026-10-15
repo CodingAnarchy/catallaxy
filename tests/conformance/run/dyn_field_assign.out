@@ -1,0 +1,3 @@
+["n": 2]
+TypeError: cannot assign field `n` through `Dyn` on a P: only records (dictionaries) take field assignment through `Dyn`; convert it first (`as? P`)
+5

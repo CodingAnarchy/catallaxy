@@ -388,12 +388,8 @@ impl Checker {
                         inst.name
                     );
                     let mut d = Diag::error("E0368", msg, inst.span);
-                    let missing = self.missing_methods(actual, b);
-                    if !missing.is_empty() {
-                        d = d.note(format!(
-                            "missing: {}",
-                            missing.iter().map(|x| format!("`{x}`")).collect::<Vec<_>>().join(", ")
-                        ));
+                    for n in self.conformance_notes(actual, b) {
+                        d = d.note(n);
                     }
                     self.emit(d);
                 }

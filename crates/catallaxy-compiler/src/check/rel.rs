@@ -376,6 +376,26 @@ impl Checker {
 
     /// Required methods of interface type `d` that `s` lacks (or has with incompatible signatures).
     pub fn missing_methods(&mut self, s: TyId, d: TyId) -> Vec<String> {
+        self.conformance_gaps(s, d, false).into_iter().map(|g| g.0).collect()
+    }
+
+    /// Why `s` does not satisfy interface type `d`, one sentence per method: missing, or which
+    /// part of its signature does not fit. For diagnostics.
+    pub fn conformance_notes(&mut self, s: TyId, d: TyId) -> Vec<String> {
+        let shown = self.show(s);
+        let iface = self.show(d);
+        let gaps = self.conformance_gaps(s, d, true);
+        gaps.into_iter()
+            .map(|(name, why)| match why {
+                Some(why) => why,
+                None => format!("`{shown}` has no method `{name}`, which `{iface}` requires"),
+            })
+            .collect()
+    }
+
+    /// The required methods of `d` that `s` lacks or has with an incompatible signature, with
+    /// (if `explain`) the reason for the latter.
+    fn conformance_gaps(&mut self, s: TyId, d: TyId, explain: bool) -> Vec<(String, Option<String>)> {
         let Ty::Iface(iid, args) = self.types.get(self.types.shallow_resolve(d)).clone() else { return vec![] };
         let info = self.ifaces[iid as usize].clone();
         let subst: FxHashMap<ParamId, TyId> = info.params.iter().copied().zip(args.iter().copied()).collect();
@@ -387,7 +407,7 @@ impl Checker {
             }
             let found = self.lookup_method(s, &m.name, true);
             let Some(found) = found else {
-                missing.push(m.name.clone());
+                missing.push((m.name.clone(), None));
                 continue;
             };
             // Expected signature with interface params and Self substituted.
@@ -401,7 +421,17 @@ impl Checker {
             let exp_ret = self.types.subst(m.ret, &sub, Some(s));
             let (got_params, got_ret) = self.instantiate_sig(&found);
             if got_params.len() < exp_params.len() {
-                missing.push(m.name.clone());
+                let why = explain.then(|| {
+                    format!(
+                        "`{}` takes {} argument{}, but `{}` passes {}",
+                        m.name,
+                        got_params.len(),
+                        if got_params.len() == 1 { "" } else { "s" },
+                        self.show(d),
+                        exp_params.len()
+                    )
+                });
+                missing.push((m.name.clone(), why));
                 continue;
             }
             let ok = self.trial(|c| {
@@ -418,10 +448,53 @@ impl Checker {
                 c.types.shallow_resolve(exp_ret) == nil || c.assignable(got_ret, exp_ret)
             });
             if !ok {
-                missing.push(m.name.clone());
+                let why = if explain {
+                    self.signature_gap(&m.name, d, &exp_params, &got_params, exp_ret, got_ret)
+                } else {
+                    None
+                };
+                missing.push((m.name.clone(), why));
             }
         }
         missing
+    }
+
+    /// The first part of a method's signature that does not fit the interface's.
+    fn signature_gap(
+        &mut self,
+        name: &str,
+        d: TyId,
+        exp_params: &[TyId],
+        got_params: &[PInfo],
+        exp_ret: TyId,
+        got_ret: TyId,
+    ) -> Option<String> {
+        let iface = self.show(d);
+        for (i, &ep) in exp_params.iter().enumerate() {
+            let gp = got_params[i].ty;
+            if !self.trial(|c| c.assignable(ep, gp)) {
+                return Some(format!(
+                    "`{name}` takes `{}` as `{}`, but `{iface}` may pass `{}`",
+                    self.show(gp),
+                    got_params[i].name,
+                    self.show(ep)
+                ));
+            }
+        }
+        if let Some(p) = got_params[exp_params.len()..].iter().find(|p| !p.has_default) {
+            return Some(format!(
+                "`{name}` also takes `{}`, which `{iface}` does not pass (give it a default value)",
+                p.name
+            ));
+        }
+        if !self.trial(|c| c.assignable(got_ret, exp_ret)) {
+            return Some(format!(
+                "`{name}` returns `{}`, but `{iface}` expects `{}`",
+                self.show(got_ret),
+                self.show(exp_ret)
+            ));
+        }
+        None
     }
 
     /// Infers the interface type arguments with which `s` satisfies interface `iid`.
