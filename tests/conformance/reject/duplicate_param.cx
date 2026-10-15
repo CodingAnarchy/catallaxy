@@ -1,0 +1,4 @@
+# expect: E0228
+# Before 0.5 the second `a` silently shadowed the first: this printed 0.
+fn f(a: Int, a: Int) -> Int { a - a }
+puts(f(1, 2))

@@ -285,6 +285,9 @@ method `f`; to call a function stored in a field, wrap the callee in parentheses
 parenthesized callee (`(xs[0])(x)`, `(make())(x)`) is evaluated first and then called. Closures capture
 variables by reference.
 
+The names in one parameter list, block parameter list, type parameter list or pattern must differ
+(E0228); only `_` may repeat.
+
 A bare `{ ... }` in value position is a block that runs immediately, so `inc = { count += 1 }` would
 store `nil`; that is error E0372. Write `inc = { || count += 1 }` or `fn() { count += 1 }` for code to run
 later.
@@ -438,6 +441,11 @@ pub fn total(xs: Enumerable[Int]) -> Int { xs.reduce(0) { |a, b| a + b } }   # a
 A parameter of an interface type accepts a value of any type that satisfies the interface; each such
 parameter (`fn f(a: I, b: I)`) may get a different type. To require the same type, use a type parameter
 (`fn f[T: I](a: T, b: T)`); an interface with `Self` parameters must be used that way (E0375).
+
+Bounds hold for every instantiation, of functions and of generic classes, enums and interfaces
+(`class SortedList[T: Comparable]`): type arguments written in types (`SortedList[P]`) and type arguments
+inferred for a construction (`SortedList.new()`, `Heap.Node(x, .Leaf)`), including ones inferred from
+later uses, must meet them (E0368). A type parameter used as such an argument needs the bound itself.
 
 Type arguments are erased at run time: one compiled body serves every instantiation, and a type test
 cannot check them (see §4.4 and E0374).
