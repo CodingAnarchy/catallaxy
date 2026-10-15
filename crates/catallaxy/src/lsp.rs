@@ -13,6 +13,7 @@
 //! implement an interface member in the types used as that interface. Code actions offer the fixes
 //! attached to the document's diagnostics as quick fixes.
 
+mod features;
 mod workspace;
 
 use std::panic::AssertUnwindSafe;
@@ -64,6 +65,17 @@ fn capabilities() -> lt::ServerCapabilities {
             ..Default::default()
         }),
         document_formatting_provider: if formatting_available() { Some(lt::OneOf::Left(true)) } else { None },
+        document_range_formatting_provider: if formatting_available() { Some(lt::OneOf::Left(true)) } else { None },
+        document_highlight_provider: Some(lt::OneOf::Left(true)),
+        folding_range_provider: Some(lt::FoldingRangeProviderCapability::Simple(true)),
+        semantic_tokens_provider: Some(lt::SemanticTokensServerCapabilities::SemanticTokensOptions(
+            lt::SemanticTokensOptions {
+                legend: features::legend(),
+                full: Some(lt::SemanticTokensFullOptions::Bool(true)),
+                range: None,
+                work_done_progress_options: Default::default(),
+            },
+        )),
         references_provider: Some(lt::OneOf::Left(true)),
         rename_provider: Some(lt::OneOf::Right(lt::RenameOptions {
             prepare_provider: Some(true),
@@ -101,6 +113,8 @@ struct Server<'a> {
     ws: Arc<Workspace>,
     /// Whether the client accepts `window/workDoneProgress` (for the warm-up).
     progress: bool,
+    /// Whether the client shows diagnostics' `relatedInformation` (else notes go in the message).
+    related: bool,
 }
 
 /// The id of the request registering the file watcher.
@@ -148,7 +162,8 @@ fn serve(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Syn
     }
     let ws = Arc::new(Workspace::new(initial_roots(&params), watching));
     let progress = params["capabilities"]["window"]["workDoneProgress"] == true;
-    let mut s = Server { conn, docs: FxHashMap::default(), ws, progress };
+    let related = params["capabilities"]["textDocument"]["publishDiagnostics"]["relatedInformation"] == true;
+    let mut s = Server { conn, docs: FxHashMap::default(), ws, progress, related };
     s.warm();
     let r = s.serve();
     // Wait for the warm-up's threads, which hold senders of the connection.
@@ -365,8 +380,10 @@ impl Server<'_> {
     }
 
     /// The LSP form of a diagnostic of the checked document, or `None` if it belongs to another
-    /// file (diagnostics in imported modules are reported there).
-    fn lsp_diagnostic(ck: &Checked, d: &catallaxy_compiler::diag::Diagnostic) -> Option<lt::Diagnostic> {
+    /// file (diagnostics in imported modules are reported there). Notes become related
+    /// information (at their own place, or at the diagnostic's) when the client shows it
+    /// (`related`), else lines of the message.
+    fn lsp_diagnostic(ck: &Checked, d: &catallaxy_compiler::diag::Diagnostic, related: bool) -> Option<lt::Diagnostic> {
         let c = &ck.comp;
         let range = if d.span.file == ck.file && (ck.file as usize) < c.sm.files.len() {
             Self::range(c.sm.file(ck.file), d.span.start, d.span.end)
@@ -376,10 +393,11 @@ impl Server<'_> {
             return None;
         };
         let mut message = d.message.clone();
-        let mut related = Vec::new();
+        let own = (d.span.file == ck.file).then(|| Self::location(c, d.span)).flatten();
+        let mut infos = Vec::new();
         for (note, sp) in &d.notes {
-            match sp.and_then(|sp| Self::location(c, sp)) {
-                Some(loc) => related.push(lt::DiagnosticRelatedInformation { location: loc, message: note.clone() }),
+            match sp.and_then(|sp| Self::location(c, sp)).or_else(|| own.clone()).filter(|_| related) {
+                Some(loc) => infos.push(lt::DiagnosticRelatedInformation { location: loc, message: note.clone() }),
                 None => {
                     message.push_str("\nnote: ");
                     message.push_str(note);
@@ -399,7 +417,7 @@ impl Server<'_> {
             code: Some(lt::NumberOrString::String(d.code.to_string())),
             source: Some("catx".into()),
             message,
-            related_information: if related.is_empty() { None } else { Some(related) },
+            related_information: if infos.is_empty() { None } else { Some(infos) },
             ..Default::default()
         })
     }
@@ -407,7 +425,8 @@ impl Server<'_> {
     fn publish(&self, path: &Path) {
         let Some((uri, _)) = self.docs.get(path) else { return };
         let ck = self.compile(path, None);
-        let out: Vec<lt::Diagnostic> = ck.comp.diags.iter().filter_map(|d| Self::lsp_diagnostic(&ck, d)).collect();
+        let out: Vec<lt::Diagnostic> =
+            ck.comp.diags.iter().filter_map(|d| Self::lsp_diagnostic(&ck, d, self.related)).collect();
         let params = lt::PublishDiagnosticsParams { uri: uri.clone(), diagnostics: out, version: None };
         self.notify("textDocument/publishDiagnostics", params);
     }
@@ -524,6 +543,10 @@ impl Server<'_> {
             "textDocument/documentSymbol" => parse(req.params).map(|p| to_json(self.document_symbols(p))),
             "workspace/symbol" => parse(req.params).map(|p| to_json(self.workspace_symbols(p))),
             "textDocument/codeAction" => parse(req.params).map(|p| to_json(self.code_actions(p))),
+            "textDocument/documentHighlight" => parse(req.params).map(|p| to_json(self.document_highlight(p))),
+            "textDocument/foldingRange" => parse(req.params).map(|p| to_json(self.folding_ranges(p))),
+            "textDocument/semanticTokens/full" => parse(req.params).map(|p| to_json(self.semantic_tokens(p))),
+            "textDocument/rangeFormatting" => parse(req.params).map(|p| to_json(self.range_formatting(p))),
             other => {
                 return Response::new_err(
                     id,
@@ -571,6 +594,10 @@ impl Server<'_> {
 
     fn completion(&self, p: lt::CompletionParams) -> Option<lt::CompletionResponse> {
         let (path, text, off) = self.locate(&p.text_document_position)?;
+        let line_start = text[..off as usize].rfind('\n').map_or(0, |i| i + 1);
+        if let Some(cx) = features::import_context(&text[line_start..off as usize]) {
+            return Some(lt::CompletionResponse::Array(self.import_completions(&path, cx)));
+        }
         let bytes = text.as_bytes();
         let mut start = off as usize;
         while start > 0
@@ -611,19 +638,7 @@ impl Server<'_> {
             .into_iter()
             .map(|c| lt::CompletionItem {
                 label: c.label,
-                kind: Some(match c.kind {
-                    QK::Method => lt::CompletionItemKind::METHOD,
-                    QK::Field => lt::CompletionItemKind::FIELD,
-                    QK::Function => lt::CompletionItemKind::FUNCTION,
-                    QK::Variable => lt::CompletionItemKind::VARIABLE,
-                    QK::Class => lt::CompletionItemKind::CLASS,
-                    QK::Enum => lt::CompletionItemKind::ENUM,
-                    QK::Interface => lt::CompletionItemKind::INTERFACE,
-                    QK::Module => lt::CompletionItemKind::MODULE,
-                    QK::Keyword => lt::CompletionItemKind::KEYWORD,
-                    QK::Constant => lt::CompletionItemKind::CONSTANT,
-                    QK::Variant => lt::CompletionItemKind::ENUM_MEMBER,
-                }),
+                kind: Some(completion_kind(c.kind)),
                 detail: c.detail,
                 ..Default::default()
             })
@@ -646,7 +661,7 @@ impl Server<'_> {
             if d.fixes.is_empty() {
                 continue;
             }
-            let Some(diag) = Self::lsp_diagnostic(&ck, d) else { continue };
+            let Some(diag) = Self::lsp_diagnostic(&ck, d, self.related) else { continue };
             let (r, want) = (diag.range, p.range);
             if (r.end.line, r.end.character) < (want.start.line, want.start.character)
                 || (want.end.line, want.end.character) < (r.start.line, r.start.character)
@@ -686,6 +701,91 @@ impl Server<'_> {
             }
         }
         Some(out)
+    }
+
+    /// Modules (and directories) after `import`, and a module's public names after `import m.{`.
+    fn import_completions(&self, path: &Path, cx: features::ImportContext) -> Vec<lt::CompletionItem> {
+        let dir = path.parent().unwrap_or(Path::new("."));
+        match cx {
+            features::ImportContext::Path(segs) => features::module_candidates(dir, &segs, path)
+                .into_iter()
+                .map(|(name, is_dir)| lt::CompletionItem {
+                    label: name,
+                    kind: Some(if is_dir { lt::CompletionItemKind::FOLDER } else { lt::CompletionItemKind::MODULE }),
+                    ..Default::default()
+                })
+                .collect(),
+            features::ImportContext::Items(module) => {
+                let file = module.split('.').fold(dir.to_path_buf(), |p, s| p.join(s)).with_extension("cx");
+                let src = match self.docs.get(&file) {
+                    Some((_, t)) => t.clone(),
+                    None => std::fs::read_to_string(&file).unwrap_or_default(),
+                };
+                features::module_items(&src)
+                    .into_iter()
+                    .map(|(name, kind)| lt::CompletionItem {
+                        label: name,
+                        kind: Some(completion_kind(kind)),
+                        ..Default::default()
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// Every occurrence in the document of the symbol under the cursor (and of the symbols
+    /// renamed with it): declarations as writes, other uses as reads.
+    fn document_highlight(&self, p: lt::DocumentHighlightParams) -> Option<Vec<lt::DocumentHighlight>> {
+        let at = self.symbol_at(&p.text_document_position_params)?;
+        let f = at.unit.file(ENTRY_FILE)?;
+        let family = at.unit.index.family(at.sym);
+        Some(
+            at.unit
+                .index
+                .occs
+                .iter()
+                .filter(|o| o.span.file == ENTRY_FILE && family.contains(&o.sym))
+                .map(|o| lt::DocumentHighlight {
+                    range: Self::range(&f.sf, o.span.start, o.span.end),
+                    kind: Some(if o.is_decl {
+                        lt::DocumentHighlightKind::WRITE
+                    } else {
+                        lt::DocumentHighlightKind::READ
+                    }),
+                })
+                .collect(),
+        )
+    }
+
+    fn folding_ranges(&self, p: lt::FoldingRangeParams) -> Option<Vec<lt::FoldingRange>> {
+        let path = uri_to_path(&p.text_document.uri)?;
+        let text = match self.docs.get(&path) {
+            Some((_, t)) => t.clone(),
+            None => std::fs::read_to_string(&path).ok()?,
+        };
+        Some(features::folding_ranges(&text))
+    }
+
+    fn semantic_tokens(&self, p: lt::SemanticTokensParams) -> Option<lt::SemanticTokensResult> {
+        let path = uri_to_path(&p.text_document.uri)?;
+        let c = self.compile(&path, None);
+        let index = symbols::Index::build(&c.comp.ck, &c.comp.sm);
+        let data = features::semantic_tokens(&c.comp.ck, &c.comp.sm, &index, c.file);
+        Some(lt::SemanticTokensResult::Tokens(lt::SemanticTokens { result_id: None, data }))
+    }
+
+    /// Formatting of the lines a range touches: the document is formatted as a whole, and the
+    /// changes on those lines are kept.
+    fn range_formatting(&self, p: lt::DocumentRangeFormattingParams) -> Option<Vec<lt::TextEdit>> {
+        let path = uri_to_path(&p.text_document.uri)?;
+        let text = self.docs.get(&path).map(|(_, t)| t.clone())?;
+        let formatted = format_document(&text)?;
+        let (lo, mut hi) = (p.range.start.line, p.range.end.line);
+        // A selection ending at the start of a line does not take that line.
+        if hi > lo && p.range.end.character == 0 {
+            hi -= 1;
+        }
+        Some(features::range_edits(&text, &formatted, lo, hi))
     }
 
     fn formatting(&self, p: lt::DocumentFormattingParams) -> Option<Vec<lt::TextEdit>> {
@@ -1042,6 +1142,22 @@ fn open_call(text: &str, off: usize) -> Option<OpenCall> {
         })
         .collect();
     Some(OpenCall { paren, commas, named, closers })
+}
+
+fn completion_kind(k: QK) -> lt::CompletionItemKind {
+    match k {
+        QK::Method => lt::CompletionItemKind::METHOD,
+        QK::Field => lt::CompletionItemKind::FIELD,
+        QK::Function => lt::CompletionItemKind::FUNCTION,
+        QK::Variable => lt::CompletionItemKind::VARIABLE,
+        QK::Class => lt::CompletionItemKind::CLASS,
+        QK::Enum => lt::CompletionItemKind::ENUM,
+        QK::Interface => lt::CompletionItemKind::INTERFACE,
+        QK::Module => lt::CompletionItemKind::MODULE,
+        QK::Keyword => lt::CompletionItemKind::KEYWORD,
+        QK::Constant => lt::CompletionItemKind::CONSTANT,
+        QK::Variant => lt::CompletionItemKind::ENUM_MEMBER,
+    }
 }
 
 fn symbol_kind(k: OutlineKind) -> lt::SymbolKind {

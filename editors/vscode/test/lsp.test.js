@@ -189,6 +189,10 @@ async function main() {
         "inlayHintProvider",
         "documentSymbolProvider",
         "workspaceSymbolProvider",
+        "documentHighlightProvider",
+        "foldingRangeProvider",
+        "semanticTokensProvider",
+        "documentRangeFormattingProvider",
       ]) {
         assert(caps[k], `missing ${k}`);
       }
@@ -453,10 +457,84 @@ async function main() {
       c.notify("textDocument/didChange", { textDocument: { uri: shapesUri, version: 7 }, contentChanges: [{ text: shapes }] });
     });
 
+    await check("documentHighlight: a function's declaration and uses", async () => {
+      const hs = await c.request("textDocument/documentHighlight", at(shapesUri, shapes, "fn total_area", 0, 3));
+      assert.strictEqual(hs.length, 2, JSON.stringify(hs));
+      for (const h of hs) assert.strictEqual(slice(shapes, h.range), "total_area");
+      assert.deepStrictEqual(hs.map((h) => h.kind).sort(), [2, 3]); // read, write
+    });
+
+    await check("foldingRange: declarations and comment blocks", async () => {
+      const rs = await c.request("textDocument/foldingRange", doc(shapesUri));
+      const at = (needle) => pos(shapes, needle).line;
+      assert(rs.some((r) => r.startLine === at("class ByArea") && !r.kind), JSON.stringify(rs));
+      assert(rs.every((r) => r.endLine > r.startLine));
+      const demoRanges = await c.request("textDocument/foldingRange", doc(demoUri));
+      assert(demoRanges.some((r) => r.kind === "imports" && r.startLine === pos(demo, "import lib.geometry").line));
+    });
+
+    await check("semanticTokens: names classified by what they refer to", async () => {
+      const legend = init.capabilities.semanticTokensProvider.legend;
+      const r = await c.request("textDocument/semanticTokens/full", doc(shapesUri));
+      const toks = [];
+      let line = 0;
+      let col = 0;
+      for (let i = 0; i < r.data.length; i += 5) {
+        const [dl, dc, len, ty, mods] = r.data.slice(i, i + 5);
+        line += dl;
+        col = dl ? dc : col + dc;
+        toks.push({ line, col, len, type: legend.tokenTypes[ty], mods });
+      }
+      const find = (needle, delta = 0) => {
+        const p = pos(shapes, needle, 0, delta);
+        return toks.find((t) => t.line === p.line && t.col === p.character);
+      };
+      assert.strictEqual(find("class ByArea", 6).type, "class");
+      assert.strictEqual(find("fn total_area", 3).type, "function");
+      assert.strictEqual(find("by_area =").type, "variable");
+      assert.strictEqual(find("puts(").type, "function");
+    });
+
+    await check("rangeFormatting: only the selected lines change", async () => {
+      const messy = shapes
+        .replace("fn largest[T: Comparable](xs: List[T]) -> T? {", "fn largest[T: Comparable]( xs:List[T] )->T?{")
+        .replace("by_area = shapes", "by_area  =  shapes");
+      c.notify("textDocument/didChange", { textDocument: { uri: shapesUri, version: 20 }, contentChanges: [{ text: messy }] });
+      const line = pos(messy, "fn largest").line;
+      const edits = await c.request("textDocument/rangeFormatting", {
+        ...doc(shapesUri),
+        range: { start: { line, character: 0 }, end: { line, character: 3 } },
+        options: { tabSize: 2, insertSpaces: true },
+      });
+      assert.strictEqual(edits.length, 1, JSON.stringify(edits));
+      assert.strictEqual(edits[0].range.start.line, line);
+      assert.match(edits[0].newText, /^fn largest\[T: Comparable\]\(xs: List\[T\]\) -> T\? \{/);
+      c.notify("textDocument/didChange", { textDocument: { uri: shapesUri, version: 21 }, contentChanges: [{ text: shapes }] });
+    });
+
+    await check("completion: import paths, a module's names, and no operators after `.`", async () => {
+      const probe = "import lib.\n" + demo;
+      c.notify("textDocument/didChange", { textDocument: { uri: demoUri, version: 2 }, contentChanges: [{ text: probe }] });
+      const r = await c.request("textDocument/completion", { ...doc(demoUri), position: { line: 0, character: "import lib.".length } });
+      assert.deepStrictEqual((Array.isArray(r) ? r : r.items).map((i) => i.label).sort(), ["geometry", "textutil"]);
+      const probe2 = "import lib.geometry.{\n" + demo;
+      c.notify("textDocument/didChange", { textDocument: { uri: demoUri, version: 3 }, contentChanges: [{ text: probe2 }] });
+      const r2 = await c.request("textDocument/completion", { ...doc(demoUri), position: { line: 0, character: "import lib.geometry.{".length } });
+      const names = (Array.isArray(r2) ? r2 : r2.items).map((i) => i.label);
+      for (const n of ["Point", "Quadrant", "quadrant", "area"]) assert(names.includes(n), `no ${n} in ${names}`);
+      const probe3 = demo + '\n"abc".\n';
+      c.notify("textDocument/didChange", { textDocument: { uri: demoUri, version: 4 }, contentChanges: [{ text: probe3 }] });
+      const r3 = await c.request("textDocument/completion", { ...doc(demoUri), position: { line: probe3.split("\n").length - 2, character: 6 } });
+      const members = (Array.isArray(r3) ? r3 : r3.items).map((i) => i.label);
+      assert(members.includes("upcase"));
+      for (const op of ["+", "*", "<=>", "[]"]) assert(!members.includes(op), `operator ${op} offered`);
+      c.notify("textDocument/didChange", { textDocument: { uri: demoUri, version: 5 }, contentChanges: [{ text: demo }] });
+    });
+
     await check("an unknown request is answered with MethodNotFound, and the server keeps going", async () => {
       let code;
       try {
-        await c.request("textDocument/semanticTokens/full", doc(shapesUri));
+        await c.request("textDocument/linkedEditingRange", at(shapesUri, shapes, "by_area =", 0));
       } catch (e) {
         code = e.code;
       }

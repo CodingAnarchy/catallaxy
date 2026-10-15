@@ -714,6 +714,214 @@ fn lsp_definition_in_the_prelude() {
     let _ = std::fs::remove_dir_all(&cache);
 }
 
+const GAPS: &str = "import gaps_lib.{greet}
+# A counter.
+# Counts.
+class Counter {
+  n: Int = 0
+  fn bump(mut self) -> Int {
+    self.n = self.n + 1
+    self.n
+  }
+}
+fn twice(x: Int) -> Int { x * 2 }
+c = Counter.new()
+total = twice(c.bump()) + twice(3)
+s = \"\"
+for x in [1, 2] {
+  s = s + greet()
+}
+puts(total)
+puts(s)
+";
+
+const GAPS_LIB: &str =
+    "pub fn greet() -> String { \"hi\" }\npub class Greeter {\n  name: String\n}\nfn hidden() -> Int { 1 }\n";
+
+#[test]
+fn lsp_highlight_folding_tokens_range_formatting() {
+    let dir = scratch_dir("lsp-gaps");
+    std::fs::write(dir.join("gaps_lib.cx"), GAPS_LIB).unwrap();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::write(dir.join("sub/inner.cx"), "pub fn inner() -> Int { 1 }\n").unwrap();
+    let main_path = dir.join("gaps.cx");
+    std::fs::write(&main_path, GAPS).unwrap();
+    let caps = json!({"textDocument": {"publishDiagnostics": {"relatedInformation": true}}});
+    let mut lsp = Lsp::init_workspace_with(&dir, &[], caps);
+    let uri = lsp.open_unsaved(&main_path, GAPS);
+    let t = GAPS;
+    let doc = json!({"textDocument": {"uri": uri}});
+    let at = |p: Value| json!({"textDocument": {"uri": uri}, "position": p});
+
+    // Highlights: the declaration is a write, the uses reads.
+    let r = lsp.request(2, "textDocument/documentHighlight", at(pos(t, 12, "twice", 0)));
+    let mut hs: Vec<(u64, u64, u64)> = r["result"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{r}"))
+        .iter()
+        .map(|h| {
+            (
+                h["range"]["start"]["line"].as_u64().unwrap(),
+                h["range"]["start"]["character"].as_u64().unwrap(),
+                h["kind"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    hs.sort();
+    let p = |l: usize, n: &str, k: usize| {
+        let v = pos(t, l, n, k);
+        (v["line"].as_u64().unwrap(), v["character"].as_u64().unwrap())
+    };
+    let want = vec![(p(10, "twice", 0), 3), (p(12, "twice", 0), 2), (p(12, "twice", 1), 2)];
+    assert_eq!(hs, want.into_iter().map(|((l, c), k)| (l, c, k)).collect::<Vec<_>>());
+
+    // Folding: the comment block, the class, its method, the loop body.
+    let r = lsp.request(3, "textDocument/foldingRange", doc.clone());
+    let folds: Vec<(u64, u64, Option<String>)> = r["result"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{r}"))
+        .iter()
+        .map(|f| {
+            (f["startLine"].as_u64().unwrap(), f["endLine"].as_u64().unwrap(), f["kind"].as_str().map(String::from))
+        })
+        .collect();
+    for want in [(1, 2, Some("comment".to_string())), (3, 8, None), (5, 7, None), (14, 15, None)] {
+        assert!(folds.contains(&want), "{want:?} not in {folds:?}");
+    }
+
+    // Semantic tokens: decode and look up a few names.
+    let init_caps = lsp.request(4, "textDocument/semanticTokens/full", doc.clone());
+    let data: Vec<u64> = init_caps["result"]["data"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+    let (mut line, mut col) = (0, 0);
+    let mut toks = Vec::new();
+    for c in data.chunks(5) {
+        if c[0] > 0 {
+            line += c[0];
+            col = c[1];
+        } else {
+            col += c[1];
+        }
+        toks.push((line, col, c[2], c[3], c[4]));
+    }
+    let tok = |l: usize, n: &str, k: usize| {
+        let (pl, pc) = p(l, n, k);
+        *toks
+            .iter()
+            .find(|t| t.0 == pl && t.1 == pc)
+            .unwrap_or_else(|| panic!("no token for {n} on line {l}: {toks:?}"))
+    };
+    // Legend: class 2, parameter 6, variable 7, property 8, function 10, method 11;
+    // modifiers: declaration 1, readonly 2, defaultLibrary 4.
+    assert_eq!(tok(3, "Counter", 0).3, 2);
+    assert_eq!(tok(3, "Counter", 0).4 & 1, 1);
+    assert_eq!(tok(10, "x", 0).3, 6);
+    assert_eq!(tok(12, "total", 0).3, 7);
+    assert_eq!(tok(12, "bump", 0).3, 11);
+    assert_eq!(tok(12, "twice", 0).3, 10);
+    assert_eq!(tok(6, "n", 0).3, 8);
+    assert_eq!(tok(17, "puts", 0).4 & 4, 4);
+
+    // Range formatting changes only the selected lines.
+    let messy = t
+        .replace("fn twice(x: Int) -> Int { x * 2 }", "fn twice( x:Int )->Int{ x*2 }")
+        .replace("puts(total)", "puts( total )");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": messy}]
+    }}));
+    let mut params = doc.clone();
+    params["range"] = json!({"start": {"line": 10, "character": 0}, "end": {"line": 10, "character": 5}});
+    params["options"] = json!({"tabSize": 2, "insertSpaces": true});
+    let r = lsp.request(5, "textDocument/rangeFormatting", params);
+    let edits = r["result"].as_array().unwrap_or_else(|| panic!("{r}"));
+    assert_eq!(edits.len(), 1, "{r}");
+    assert_eq!(edits[0]["range"]["start"]["line"], 10);
+    assert_eq!(edits[0]["newText"], "fn twice(x: Int) -> Int { x * 2 }\n");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": uri, "version": 3}, "contentChanges": [{"text": t}]
+    }}));
+
+    // Import completion: modules and directories, then a module's public names.
+    let probe = format!("import \n{t}");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": uri, "version": 4}, "contentChanges": [{"text": probe}]
+    }}));
+    let labels = |r: &Value| -> Vec<String> {
+        let mut v: Vec<String> = r["result"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{r}"))
+            .iter()
+            .map(|i| i["label"].as_str().unwrap().to_string())
+            .collect();
+        v.sort();
+        v
+    };
+    let r = lsp.request(6, "textDocument/completion", at(json!({"line": 0, "character": 7})));
+    assert_eq!(labels(&r), vec!["gaps_lib", "sub"]);
+    let probe = format!("import sub.\n{t}");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": uri, "version": 5}, "contentChanges": [{"text": probe}]
+    }}));
+    let r = lsp.request(7, "textDocument/completion", at(json!({"line": 0, "character": 11})));
+    assert_eq!(labels(&r), vec!["inner"]);
+    let probe = format!("import gaps_lib.{{gr\n{t}");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": uri, "version": 6}, "contentChanges": [{"text": probe}]
+    }}));
+    let r = lsp.request(8, "textDocument/completion", at(json!({"line": 0, "character": 18})));
+    assert_eq!(labels(&r), vec!["Greeter", "greet"]);
+
+    // Member completion offers no operators.
+    let probe = format!("{t}\"abc\".\n");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": uri, "version": 7}, "contentChanges": [{"text": probe}]
+    }}));
+    let r = lsp.request(9, "textDocument/completion", at(json!({"line": t.lines().count(), "character": 6})));
+    let l = labels(&r);
+    assert!(l.contains(&"upcase".to_string()), "{l:?}");
+    assert!(l.iter().all(|n| n.starts_with(|c: char| c.is_alphabetic() || c == '_')), "{l:?}");
+
+    // Notes are related information: at their own place, or at the diagnostic's.
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": uri, "version": 8}, "contentChanges": [{"text": t}]
+    }}));
+    let u = uri.clone();
+    let d = lsp.wait("diagnostics", move |v| {
+        v["method"] == "textDocument/publishDiagnostics"
+            && v["params"]["uri"] == json!(u)
+            && v["params"]["diagnostics"].as_array().is_some_and(|a| !a.is_empty())
+    });
+    let w = d["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["code"] == "W0004")
+        .unwrap_or_else(|| panic!("{d}"))
+        .clone();
+    assert!(!w["message"].as_str().unwrap().contains("note:"), "{w}");
+    let rel = w["relatedInformation"].as_array().unwrap_or_else(|| panic!("{w}"));
+    assert_eq!(rel.len(), 3, "{w}");
+    assert_eq!(rel[0]["message"], "the loop");
+    assert_eq!(rel[0]["location"]["range"]["start"]["line"], 14);
+    assert_eq!(rel[1]["location"]["range"], w["range"]);
+    lsp.finish();
+}
+
+#[test]
+fn lsp_notes_stay_in_the_message_without_related_information_support() {
+    let (mut lsp, _) = Lsp::init();
+    let text = "s = \"\"\nfor x in [1, 2] { s = s + \"a\" }\nputs(s)\n";
+    let (uri, path) = file_uri("notes.cx");
+    std::fs::write(&path, text).unwrap();
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+        "textDocument": {"uri": uri, "languageId": "catallaxy", "version": 1, "text": text}
+    }}));
+    let d = lsp.wait("diagnostics", |v| v["method"] == "textDocument/publishDiagnostics");
+    let w = &d["params"]["diagnostics"][0];
+    assert!(w["message"].as_str().unwrap().contains("note: use a StringBuilder"), "{w}");
+    assert!(w["relatedInformation"].is_null(), "{w}");
+    lsp.finish();
+}
+
 #[test]
 fn lsp_signature_help() {
     let (mut lsp, caps) = Lsp::init();
