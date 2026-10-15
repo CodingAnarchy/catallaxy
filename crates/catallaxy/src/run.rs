@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use catallaxy_compiler::diag::SourceMap;
 use catallaxy_compiler::driver::{compile_path, FsLoader, Options};
+use serde_json::value::RawValue;
 
 /// Prints `diags` to stderr, then (if any is an error) where their codes are explained.
 fn print_diags(sm: &SourceMap, diags: &[catallaxy_compiler::diag::Diagnostic]) {
@@ -86,13 +87,13 @@ pub fn cmd_check(args: &[String]) -> i32 {
     }
     let files = crate::files::expand(&files, &[]);
     let mut any_error = false;
-    let mut all_json = Vec::new();
+    let mut all_diags: Vec<Box<RawValue>> = Vec::new();
     let mut codes = Vec::new();
     for f in files {
         let comp = compile_path(&f, &FsLoader, &Options { check_only: true });
         any_error |= comp.has_errors();
         if json {
-            all_json.push(comp.sm.to_json(&comp.diags));
+            all_diags.extend(diagnostics_json(&comp.sm, &comp.diags));
         } else {
             render_diags(&comp.sm, &comp.diags);
             codes.extend(comp.diags.iter().map(|d| d.code));
@@ -100,17 +101,8 @@ pub fn cmd_check(args: &[String]) -> i32 {
     }
     print_code_help(codes);
     if json {
-        if all_json.len() == 1 {
-            println!("{}", all_json[0]);
-        } else {
-            // Merge the per-file diagnostic arrays.
-            let inner: Vec<String> = all_json
-                .iter()
-                .map(|j| j.trim_start_matches("{\"diagnostics\":[").trim_end_matches("]}").to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            println!("{{\"diagnostics\":[{}]}}", inner.join(","));
-        }
+        let report = std::collections::BTreeMap::from([("diagnostics", all_diags)]);
+        println!("{}", serde_json::to_string(&report).expect("serialize diagnostics"));
     } else if !any_error {
         eprintln!("ok");
     }
@@ -119,6 +111,15 @@ pub fn cmd_check(args: &[String]) -> i32 {
     } else {
         0
     }
+}
+
+/// The entries of the `diagnostics` array that [`SourceMap::to_json`] renders for `diags`, kept
+/// verbatim so the merged output has the same field order as a single file's.
+fn diagnostics_json(sm: &SourceMap, diags: &[catallaxy_compiler::diag::Diagnostic]) -> Vec<Box<RawValue>> {
+    let text = sm.to_json(diags);
+    let mut report: std::collections::HashMap<String, Vec<Box<RawValue>>> =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("invalid diagnostics JSON ({e}): {text}"));
+    report.remove("diagnostics").unwrap_or_default()
 }
 
 pub fn cmd_disasm(args: &[String]) -> i32 {
