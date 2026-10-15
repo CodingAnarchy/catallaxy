@@ -4102,6 +4102,19 @@ impl Checker {
         self.check_unique_names(params.iter().map(|p| &p.name), "block parameter");
         let exp_fn = expected.and_then(|t| match self.types.get(self.types.shallow_resolve(t)).clone() {
             Ty::Fn(ps, r) => Some((ps, r)),
+            // An optional block parameter (`f: (fn(T) -> U)? = nil`) types the block as its function.
+            Ty::Union(ms) => {
+                let mut fns = ms.iter().filter_map(|&m| match self.types.get(self.types.shallow_resolve(m)) {
+                    Ty::Fn(ps, r) => Some((ps.clone(), *r)),
+                    _ => None,
+                });
+                let only_nil_besides =
+                    ms.iter().filter(|&&m| self.types.shallow_resolve(m) != self.types.nil).count() == 1;
+                match (fns.next(), fns.next()) {
+                    (Some(f), None) if only_nil_besides => Some(f),
+                    _ => None,
+                }
+            }
             _ => None,
         });
         let mut ptys: Vec<TyId> = Vec::new();

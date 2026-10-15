@@ -1,0 +1,29 @@
+# Dir.walk and Dir.glob (#168), under a fresh relative directory.
+root = "catx_glob_#{Time.millis()}_#{Random.int(0, 1000000)}"
+Dir.create(Path.join_all([root, "src", "lib"]), recursive: true).unwrap()
+Dir.create(Path.join_all([root, "docs"]), recursive: true).unwrap()
+Dir.create(Path.join_all([root, ".git"]), recursive: true).unwrap()
+for f in ["a.cx", "b.txt", "src/main.cx", "src/lib/util.cx", "src/lib/notes.md", "docs/x1.md", "docs/x2.md", "docs/y.md", ".git/HEAD", ".env"] {
+  File.write(Path.join(root, f), f).unwrap()
+}
+n = root.length + 1
+show = { |paths: List[String]| paths.map { |p| p.substring(n, p.length) } }
+
+puts(show(Dir.walk(root).unwrap()))
+puts(Dir.walk(Path.join(root, "nope")).is_err())
+puts(show(Dir.glob("#{root}/*.cx").unwrap()))
+puts(show(Dir.glob("#{root}/**/*.cx").unwrap()))
+puts(show(Dir.glob("#{root}/**/*.md").unwrap()))
+puts(show(Dir.glob("#{root}/docs/x?.md").unwrap()))
+puts(show(Dir.glob("#{root}/docs/[xz][0-9].md").unwrap()))
+puts(show(Dir.glob("#{root}/docs/[!x]*").unwrap()))
+puts(show(Dir.glob("#{root}/*").unwrap()))
+puts(show(Dir.glob("#{root}/.*").unwrap()))
+puts(show(Dir.glob("#{root}/src/lib").unwrap()))
+puts(show(Dir.glob("#{root}/**").unwrap()))
+puts(Dir.glob("#{root}/missing/*").unwrap())
+abs = Dir.glob("#{Dir.current()}/#{root}/*.txt").unwrap()
+puts(abs.length == 1 and abs[0].ends_with("/b.txt") and Path.is_absolute(abs[0]))
+
+Dir.remove(root, recursive: true).unwrap()
+puts(Dir.exists(root))

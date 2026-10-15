@@ -60,15 +60,25 @@ pub interface Enumerable[T] {
     self.each { |x| if not f(x) { out.push(x) } }
     out
   }
+  # The non-nil results of `f`, in order: `select` and `map` in one pass.
+  fn filter_map[U](self, f: fn(T) -> U?) -> List[U] {
+    out: List[U] = []
+    self.each { |x| if let y = f(x) { out.push(y) } }
+    out
+  }
   fn reduce[U](self, init: U, f: fn(U, T) -> U) -> U {
     acc = init
     self.each { |x| acc = f(acc, x) }
     acc
   }
-  fn count(self, f: fn(T) -> Bool) -> Int {
-    n = 0
-    self.each { |x| if f(x) { n += 1 } }
-    n
+  # The number of elements for which `f` is true; without a block, the number of elements.
+  fn count(self, f: (fn(T) -> Bool)? = nil) -> Int {
+    if let g = f {
+      n = 0
+      self.each { |x| if g(x) { n += 1 } }
+      return n
+    }
+    self.size()
   }
   fn size(self) -> Int {
     n = 0
@@ -121,24 +131,36 @@ pub interface Enumerable[T] {
     }
     out
   }
-  fn each_slice(self, n: Int, f: fn(List[T])) {
-    batch: List[T] = []
-    self.each { |x|
-      batch.push(x)
-      if batch.length == n {
-        f(batch)
-        batch = []
+  # Calls `f` with consecutive slices of `n` elements (the last may be shorter). Returns the
+  # slices as a `Lazy`, so without a block `xs.each_slice(2).to_list()` lists them.
+  fn each_slice(self, n: Int, f: (fn(List[T]))? = nil) -> Lazy[List[T]] {
+    slices = Lazy.new({ |g: fn(List[T])|
+      batch: List[T] = []
+      self.each { |x|
+        batch.push(x)
+        if batch.length == n {
+          g(batch)
+          batch = []
+        }
       }
-    }
-    if batch.length > 0 { f(batch) }
+      if batch.length > 0 { g(batch) }
+    })
+    if let h = f { slices.each(h) }
+    slices
   }
-  fn each_cons(self, n: Int, f: fn(List[T])) {
-    window: List[T] = []
-    self.each { |x|
-      window.push(x)
-      if window.length > n { window.shift() }
-      if window.length == n { f(window.dup()) }
-    }
+  # Calls `f` with each run of `n` consecutive elements. Returns the runs as a `Lazy`, as
+  # `each_slice` does.
+  fn each_cons(self, n: Int, f: (fn(List[T]))? = nil) -> Lazy[List[T]] {
+    windows = Lazy.new({ |g: fn(List[T])|
+      window: List[T] = []
+      self.each { |x|
+        window.push(x)
+        if window.length > n { window.shift() }
+        if window.length == n { g(window.dup()) }
+      }
+    })
+    if let h = f { windows.each(h) }
+    windows
   }
   fn take(self, n: Int) -> List[T] {
     out: List[T] = []
@@ -196,6 +218,12 @@ pub interface Enumerable[T] {
     self.each { |x| if f(x) { yes.push(x) } else { no.push(x) } }
     (yes, no)
   }
+  # How many times each element occurs, in order of first occurrence.
+  fn tally(self) -> Dict[T, Int] {
+    out: Dict[T, Int] = [:]
+    self.each { |x| out[x] = (out[x] ?? 0) + 1 }
+    out
+  }
   fn tally_by[K](self, f: fn(T) -> K) -> Dict[K, Int] {
     out: Dict[K, Int] = [:]
     self.each { |x|
@@ -237,6 +265,30 @@ pub interface Enumerable[T] {
     total = 0
     self.each { |x| total += f(x) }
     total
+  }
+  # As `sum_by`, for a `Float` block.
+  fn sum_by_float(self, f: fn(T) -> Float) -> Float {
+    total = 0.0
+    self.each { |x| total += f(x) }
+    total
+  }
+  # The last `n` elements (all of them if there are fewer).
+  fn take_last(self, n: Int) -> List[T] {
+    items = self.to_list()
+    if n <= 0 { return [] }
+    k = if n < items.length { n } else { items.length }
+    items.slice(items.length - k, k)
+  }
+  # The elements' `to_s` joined with `sep` between them.
+  fn join(self, sep: String = "") -> String {
+    sb = StringBuilder.new()
+    first = true
+    self.each { |x|
+      if not first { sb.push(sep) }
+      sb.push_value(x)
+      first = false
+    }
+    sb.to_s
   }
   fn zip[U](self, other: List[U]) -> List[(T, U)] {
     out: List[(T, U)] = []
@@ -314,6 +366,9 @@ pub class Lazy[T] {
   fn reject(self, f: fn(T) -> Bool) -> Lazy[T] {
     Lazy.new({ |g: fn(T)| self.each { |x| if not f(x) { g(x) } } })
   }
+  fn filter_map[U](self, f: fn(T) -> U?) -> Lazy[U] {
+    Lazy.new({ |g: fn(U)| self.each { |x| if let y = f(x) { g(y) } } })
+  }
   # The first `n` elements; the source is not asked for an element past them.
   fn take(self, n: Int) -> Lazy[T] {
     Lazy.new({ |g: fn(T)|
@@ -385,6 +440,8 @@ pub class Lazy[T] {
   }
   # The elements as a list (like `to_list`).
   fn force(self) -> List[T] { self.to_list() }
+  # Not the elements: printing a sequence must not run it (it may be infinite).
+  fn to_s(self) -> String { "#<Lazy>" }
 }
 
 extend[T: Comparable] Enumerable[T] {
@@ -421,19 +478,6 @@ extend Enumerable[Float] {
     total
   }
   fn product(self) -> Float { self.reduce(1.0) { |a, b| a * b } }
-}
-
-extend Enumerable[String] {
-  fn join(self, sep: String = "") -> String {
-    sb = StringBuilder.new()
-    first = true
-    self.each { |x|
-      if not first { sb.push(sep) }
-      sb.push(x)
-      first = false
-    }
-    sb.to_s
-  }
 }
 
 # ---------------------------------------------------------------------------------------------

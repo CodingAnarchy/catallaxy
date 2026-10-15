@@ -127,6 +127,28 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
                 Err(e) => err(vm, &format!("{p}: {e}")),
             })
         },
+        "Dir.walk" => |vm, a| {
+            let p = s(a[0])?.to_string();
+            let r = blocking_io(vm, || -> std::io::Result<Vec<String>> {
+                let mut out = Vec::new();
+                walk_dir(std::path::Path::new(&p), &p, &mut out)?;
+                out.sort();
+                Ok(out)
+            });
+            Ok(match r {
+                Ok(paths) => {
+                    let l = new_str_list(vm, paths.iter().map(|n| n.as_str()))?;
+                    ok(vm, l)
+                }
+                Err(e) => err(vm, &format!("{p}: {e}")),
+            })
+        },
+        "Dir.glob" => |vm, a| {
+            let pattern = s(a[0])?.to_string();
+            let paths = blocking_io(vm, || glob(&pattern));
+            let l = new_str_list(vm, paths.iter().map(|n| n.as_str()))?;
+            Ok(ok(vm, l))
+        },
         "Dir.create" => |vm, a| {
             let p = s(a[0])?.to_string();
             let recursive = arg(a, 1).is_some_and(|v| v.is_true());
@@ -204,7 +226,7 @@ fn unit_result(vm: &mut Vm, path: &str, r: std::io::Result<()>) -> Value {
 
 // ---- Regex -----------------------------------------------------------------------------------
 
-fn regex_of(v: Value) -> RtResult<&'static regex::Regex> {
+pub(crate) fn regex_of(v: Value) -> RtResult<&'static regex::Regex> {
     handle_data::<regex::Regex>(v, "Regex")
 }
 
@@ -557,5 +579,142 @@ fn file_metadata(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
             Ok(ok(vm, md))
         }
         Err(e) => Ok(err(vm, &format!("{p}: {e}"))),
+    }
+}
+
+/// `display` joined with `name` as `Dir.walk` and `Dir.glob` show paths: `/` between them, none
+/// when `display` is empty or already ends with one.
+fn join_display(display: &str, name: &str) -> String {
+    if display.is_empty() {
+        name.to_string()
+    } else if display.ends_with('/') {
+        format!("{display}{name}")
+    } else {
+        format!("{display}/{name}")
+    }
+}
+
+/// Appends every entry under `dir` (shown as `display`) to `out`, recursively. Symbolic links are
+/// listed but not followed.
+fn walk_dir(dir: &std::path::Path, display: &str, out: &mut Vec<String>) -> std::io::Result<()> {
+    for e in std::fs::read_dir(dir)? {
+        let e = e?;
+        let shown = join_display(display, &e.file_name().to_string_lossy());
+        let is_dir = e.file_type()?.is_dir();
+        out.push(shown.clone());
+        if is_dir {
+            walk_dir(&e.path(), &shown, out)?;
+        }
+    }
+    Ok(())
+}
+
+/// The paths matching a glob pattern, sorted (see `Dir.glob`). Unreadable directories match
+/// nothing.
+fn glob(pattern: &str) -> Vec<String> {
+    // Windows also separates components with `\` and starts absolute paths with a drive.
+    let seps: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
+    let b = pattern.as_bytes();
+    let (root, display, body) = if cfg!(windows) && b.len() >= 3 && b[1] == b':' && seps.contains(&(b[2] as char)) {
+        (pattern[..3].to_string(), format!("{}/", &pattern[..2]), &pattern[3..])
+    } else if pattern.starts_with(seps) {
+        ("/".to_string(), "/".to_string(), &pattern[1..])
+    } else {
+        (".".to_string(), String::new(), pattern)
+    };
+    let comps: Vec<&str> = body.split(seps).filter(|c| !c.is_empty()).collect();
+    let mut out = Vec::new();
+    if !comps.is_empty() {
+        glob_from(std::path::Path::new(&root), &display, &comps, &mut out);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn glob_from(dir: &std::path::Path, display: &str, comps: &[&str], out: &mut Vec<String>) {
+    let Some((&comp, rest)) = comps.split_first() else {
+        if !display.is_empty() {
+            out.push(display.to_string());
+        }
+        return;
+    };
+    if comp == "**" {
+        // Zero directories, then each subdirectory with `**` still to match. A trailing `**`
+        // matches files too.
+        glob_from(dir, display, rest, out);
+        for (name, path, is_dir) in dir_entries(dir) {
+            if name.starts_with('.') {
+                continue;
+            }
+            if is_dir {
+                glob_from(&path, &join_display(display, &name), comps, out);
+            } else if rest.is_empty() {
+                out.push(join_display(display, &name));
+            }
+        }
+        return;
+    }
+    if !comp.contains(['*', '?', '[']) {
+        let path = dir.join(comp);
+        if std::fs::symlink_metadata(&path).is_ok() {
+            glob_from(&path, &join_display(display, comp), rest, out);
+        }
+        return;
+    }
+    let pat: Vec<char> = comp.chars().collect();
+    for (name, path, _) in dir_entries(dir) {
+        if name.starts_with('.') && !comp.starts_with('.') {
+            continue;
+        }
+        let chars: Vec<char> = name.chars().collect();
+        if wildcard_match(&pat, &chars) {
+            glob_from(&path, &join_display(display, &name), rest, out);
+        }
+    }
+}
+
+/// The entries of `dir` as (name, path, whether it is a directory, not following links); none if
+/// it cannot be read.
+fn dir_entries(dir: &std::path::Path) -> Vec<(String, std::path::PathBuf, bool)> {
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    rd.filter_map(|e| e.ok())
+        .map(|e| {
+            let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
+            (e.file_name().to_string_lossy().into_owned(), e.path(), is_dir)
+        })
+        .collect()
+}
+
+/// Whether `name` matches the glob component `pat`: `*` any run, `?` one character, `[...]` one
+/// of a set (ranges `a-z`, negated by a leading `!` or `^`). An unclosed `[` is a literal.
+fn wildcard_match(pat: &[char], name: &[char]) -> bool {
+    match pat.split_first() {
+        None => name.is_empty(),
+        Some(('*', rest)) => (0..=name.len()).any(|i| wildcard_match(rest, &name[i..])),
+        Some(('?', rest)) => !name.is_empty() && wildcard_match(rest, &name[1..]),
+        Some(('[', rest)) => match rest.iter().skip(1).position(|&c| c == ']').map(|i| i + 1) {
+            Some(close) => {
+                let Some((&c, tail)) = name.split_first() else { return false };
+                let (negated, set) = match rest[0] {
+                    '!' | '^' => (true, &rest[1..close]),
+                    _ => (false, &rest[..close]),
+                };
+                let mut hit = false;
+                let mut i = 0;
+                while i < set.len() {
+                    if i + 2 < set.len() && set[i + 1] == '-' {
+                        hit |= set[i] <= c && c <= set[i + 2];
+                        i += 3;
+                    } else {
+                        hit |= set[i] == c;
+                        i += 1;
+                    }
+                }
+                hit != negated && wildcard_match(&rest[close + 1..], tail)
+            }
+            None => name.first() == Some(&'[') && wildcard_match(rest, &name[1..]),
+        },
+        Some((&p, rest)) => name.first() == Some(&p) && wildcard_match(rest, &name[1..]),
     }
 }
