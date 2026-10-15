@@ -106,6 +106,8 @@ struct MarkShared {
     /// Each marker's shared deque, for stealing. A marker keeps its work on a private stack and
     /// moves a few items here at a time (see [`mark_worker`]), so these stay small.
     stealers: Mutex<Vec<Stealer<usize>>>,
+    /// How many stealers `stealers` holds (see `Victims`).
+    n_stealers: AtomicUsize,
     /// Set when a marker's stack could not grow and it left an object unmarked (see
     /// [`Tracer::mark`]); the collector then rescans (see [`rescan_major`]).
     overflowed: AtomicBool,
@@ -128,6 +130,7 @@ static GLOBAL: std::sync::LazyLock<Global> = std::sync::LazyLock::new(|| Global 
     retired: Mutex::new(Vec::new()),
     mark: MarkShared {
         stealers: Mutex::new(Vec::new()),
+        n_stealers: AtomicUsize::new(0),
         overflowed: AtomicBool::new(false),
         active: AtomicUsize::new(0),
         color: AtomicU8::new(1),
@@ -630,7 +633,11 @@ fn collect(me: &ThreadRecord) {
             GLOBAL.cv.wait_for(&mut coord, std::time::Duration::from_micros(200));
         }
     }
-    GLOBAL.mark.stealers.lock().clear();
+    {
+        let mut stealers = GLOBAL.mark.stealers.lock();
+        stealers.clear();
+        GLOBAL.mark.n_stealers.store(0, Ordering::Release);
+    }
     let mut rescans = 0;
     while GLOBAL.mark.overflowed.swap(false, Ordering::SeqCst) {
         rescans += 1;
@@ -776,6 +783,10 @@ fn mark_stack_limit() -> usize {
 /// `minor_collect`).
 pub struct Tracer {
     color: u8,
+    /// The first object a major-collection trace marked, traced next without going through
+    /// the stack (0: none). A chain (a linked list) is followed one node at a time this way,
+    /// and since it cannot be split between markers, its cost per node is the pause (#178).
+    direct: usize,
     stack: Vec<usize>,
     /// Bytes of the leaf objects this tracer marked.
     leaf_bytes: usize,
@@ -796,12 +807,13 @@ struct MinorMark {
 
 impl Tracer {
     fn major(color: u8) -> Self {
-        Tracer { color, stack: Vec::new(), leaf_bytes: 0, overflowed: false, minor: None }
+        Tracer { color, direct: 0, stack: Vec::new(), leaf_bytes: 0, overflowed: false, minor: None }
     }
 
     fn minor(tid: u16) -> Self {
         Tracer {
             color: 0,
+            direct: 0,
             stack: Vec::new(),
             leaf_bytes: 0,
             overflowed: false,
@@ -827,9 +839,18 @@ impl Tracer {
     }
 
     /// Traces every object on the stack (and what that pushes); returns their bytes.
+    /// The next object to trace: the direct one, else the top of the stack.
+    #[inline(always)]
+    fn pop(&mut self) -> Option<usize> {
+        if self.direct != 0 {
+            return Some(std::mem::take(&mut self.direct));
+        }
+        self.stack.pop()
+    }
+
     fn drain(&mut self) -> usize {
         let mut bytes = 0;
-        while let Some(o) = self.stack.pop() {
+        while let Some(o) = self.pop() {
             let h = o as *const Header;
             unsafe {
                 let vt = &*(*h).vtable();
@@ -886,6 +907,12 @@ impl Tracer {
             }
             return;
         }
+        if self.direct == 0 {
+            if h.try_mark(self.color) {
+                self.direct = obj as usize;
+            }
+            return;
+        }
         if !self.reserve() {
             self.overflowed = true;
             return;
@@ -896,8 +923,11 @@ impl Tracer {
     }
 }
 
-/// How many entries a marker moves to its shared deque at a time, when that is empty.
-const SHARE_BATCH: usize = 16;
+/// How many entries a marker moves to its shared deque at a time, when that is empty. With
+/// the thieves' batches (at most half a deque), deques stay within their initial 64 entries.
+const SHARE_BATCH: usize = 32;
+/// Objects a marker traces between looks at its shared deque.
+const SHARE_EVERY: usize = 16;
 
 /// Marks until every marker is out of work. Each marker traces from its private stack (the
 /// collector's starts with what the roots reached) and, every few objects, moves a few entries
@@ -906,14 +936,19 @@ const SHARE_BATCH: usize = 16;
 fn mark_worker(start: Option<Tracer>) {
     let m = &GLOBAL.mark;
     let worker = Worker::new_lifo();
-    m.stealers.lock().push(worker.stealer());
+    {
+        let mut stealers = m.stealers.lock();
+        stealers.push(worker.stealer());
+        m.n_stealers.store(stealers.len(), Ordering::Release);
+    }
+    let mut victims = Victims(Vec::new());
     let mut tracer = start.unwrap_or_else(|| Tracer::major(m.color.load(Ordering::SeqCst)));
     m.markers_seen.fetch_add(1, Ordering::Relaxed);
     m.active.fetch_add(1, Ordering::SeqCst);
     let mut bytes = 0usize;
     let mut n = 0usize;
     loop {
-        if n % 32 == 0 && tracer.stack.len() > 1 && worker.is_empty() {
+        if n % SHARE_EVERY == 0 && tracer.stack.len() > 1 && worker.is_empty() {
             for _ in 0..SHARE_BATCH.min(tracer.stack.len() / 2) {
                 if let Some(o) = tracer.stack.pop() {
                     worker.push(o);
@@ -921,7 +956,7 @@ fn mark_worker(start: Option<Tracer>) {
             }
         }
         n += 1;
-        let next = tracer.stack.pop().or_else(|| worker.pop()).or_else(|| steal(m, &worker));
+        let next = tracer.pop().or_else(|| worker.pop()).or_else(|| victims.steal(m, &worker));
         match next {
             Some(obj) => {
                 let h = obj as *const Header;
@@ -935,7 +970,7 @@ fn mark_worker(start: Option<Tracer>) {
                 // Termination: go idle, and finish only when every worker is idle with no work left.
                 m.active.fetch_sub(1, Ordering::SeqCst);
                 loop {
-                    if has_work(m) {
+                    if victims.has_work(m) {
                         m.active.fetch_add(1, Ordering::SeqCst);
                         break;
                     }
@@ -954,23 +989,43 @@ fn mark_worker(start: Option<Tracer>) {
     }
 }
 
-fn steal(m: &MarkShared, local: &Worker<usize>) -> Option<usize> {
-    loop {
-        let stealers = m.stealers.lock();
-        let mut retry = false;
-        for s in stealers.iter() {
-            match s.steal_batch_and_pop(local) {
-                Steal::Success(o) => return Some(o),
-                Steal::Retry => retry = true,
-                Steal::Empty => {}
+/// A marker's copy of the other markers' stealers, refreshed (under the lock) only when one
+/// joined since: idle markers poll for work without contending on a mutex (#178).
+struct Victims(Vec<Stealer<usize>>);
+
+impl Victims {
+    fn refresh(&mut self, m: &MarkShared) {
+        if m.n_stealers.load(Ordering::Acquire) != self.0.len() {
+            let all = m.stealers.lock();
+            // Marking must not abort for want of memory (#139): if the copy cannot grow, the
+            // old one serves. Missing a marker only costs parallelism: its owner is busy, so
+            // marking cannot end before its deque is empty.
+            if self.0.try_reserve(all.len().saturating_sub(self.0.len())).is_ok() {
+                self.0.clear();
+                self.0.extend(all.iter().cloned());
             }
         }
-        if !retry {
-            return None;
+    }
+
+    fn steal(&mut self, m: &MarkShared, local: &Worker<usize>) -> Option<usize> {
+        self.refresh(m);
+        loop {
+            let mut retry = false;
+            for s in &self.0 {
+                match s.steal_batch_and_pop(local) {
+                    Steal::Success(o) => return Some(o),
+                    Steal::Retry => retry = true,
+                    Steal::Empty => {}
+                }
+            }
+            if !retry {
+                return None;
+            }
         }
     }
-}
 
-fn has_work(m: &MarkShared) -> bool {
-    m.stealers.lock().iter().any(|s| !s.is_empty())
+    fn has_work(&mut self, m: &MarkShared) -> bool {
+        self.refresh(m);
+        self.0.iter().any(|s| !s.is_empty())
+    }
 }
