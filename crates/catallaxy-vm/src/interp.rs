@@ -652,6 +652,9 @@ impl Vm {
                     tri!(ownership::publish_into_shared(&self.m, v));
                     program::global(d).store(v.0, Ordering::Release);
                 }
+                // Closures, cells and their registers are only made and read by compiled code
+                // (never by the program's values), so their kinds are invariants of the compiler:
+                // the unchecked views below are safe.
                 Op::GetCap => {
                     let c = unsafe { as_closure(fr.closure) };
                     set!(a, c.caps()[b_of(w)]);
@@ -912,14 +915,18 @@ impl Vm {
                     let (b, n) = (b_of(w), c_of(w));
                     for i in 0..n {
                         if str_of(r!(b + i)).is_none() {
+                            // A value of the wrong type (through `Dyn` or a hole in the checker).
                             save!();
-                            return Err(Trap::Panic("internal error: Concat of a non-string".into()));
+                            // (A static message: building one here, even in a cold call, costs
+                            // the whole interpreter loop's register allocation.)
+                            return Err(Trap::Panic("TypeError: expected String operands to concatenate".into()));
                         }
                     }
                     // The parts stay in their registers, so they stay valid while they are
                     // copied, even if the allocator refuses and a collection runs.
                     let v = tri!(self.m.try_alloc_concat(n, |i| {
                         let x = r!(b + i);
+                        // SAFETY: every part was checked to be a string above.
                         unsafe { as_str_obj(x) }
                     }));
                     set!(a, v);
@@ -1137,12 +1144,13 @@ impl Vm {
                     let slot = data!() as usize;
                     let nargs = b_of(w);
                     let recv = r!(a);
-                    if !recv.is_ptr() {
+                    let fid = if recv.is_ptr() { unsafe { heap_class(recv.as_ptr()) }.vtable.get(slot) } else { None };
+                    let Some(&fid) = fid else {
+                        // A value of the wrong type (through `Dyn` or a hole in the checker).
                         save!();
-                        return Err(Trap::Panic("internal error: virtual call on a non-object".into()));
-                    }
-                    let cls = unsafe { heap_class(recv.as_ptr()) };
-                    let f = program::func(cls.vtable[slot]);
+                        return Err(slow::virtual_on_wrong_type(recv));
+                    };
+                    let f = program::func(fid);
                     if let Some(nf) = f.native {
                         call_native!(nf, a, nargs);
                     } else {
@@ -1164,13 +1172,11 @@ impl Vm {
                 Op::GetField => {
                     let o = r!(b_of(w));
                     let i = c_of(w);
-                    if !o.is_ptr() {
+                    let Some(inst) = instance_with_field(o, i) else {
                         save!();
                         return Err(slow::field_on_non_object(o));
-                    }
-                    let h = unsafe { &*o.as_ptr() };
-                    let inst = unsafe { as_instance(o) };
-                    debug_assert!(i < inst.nfields(), "field index out of range");
+                    };
+                    let h = &inst.header;
                     let v = if h.is_local_or_frozen(tid) {
                         inst.get(i)
                     } else {
@@ -1184,32 +1190,28 @@ impl Vm {
                     let d = data!();
                     let (i, j) = ((d & 0xffff) as usize, (d >> 16) as usize);
                     let (o1, o2) = (r!(b_of(w)), r!(c_of(w)));
-                    if o1.is_ptr()
-                        && o2.is_ptr()
-                        && unsafe { &*o1.as_ptr() }.is_local_or_frozen(tid)
-                        && unsafe { &*o2.as_ptr() }.is_local_or_frozen(tid)
-                    {
-                        set!(a, unsafe { as_instance(o1) }.get(i));
-                        set!(a + 1, unsafe { as_instance(o2) }.get(j));
-                    } else {
-                        save!();
-                        let v1 = tri!(slow::get_field(self, o1, i));
-                        set!(a, v1);
-                        let v2 = tri!(slow::get_field(self, o2, j));
-                        set!(a + 1, v2);
+                    if let (Some(x1), Some(x2)) = (instance_with_field(o1, i), instance_with_field(o2, j)) {
+                        if x1.header.is_local_or_frozen(tid) && x2.header.is_local_or_frozen(tid) {
+                            set!(a, x1.get(i));
+                            set!(a + 1, x2.get(j));
+                            continue;
+                        }
                     }
+                    save!();
+                    let v1 = tri!(slow::get_field(self, o1, i));
+                    set!(a, v1);
+                    let v2 = tri!(slow::get_field(self, o2, j));
+                    set!(a + 1, v2);
                 }
                 Op::SetField => {
                     let o = r!(a);
                     let i = b_of(w);
                     let v = r!(c_of(w));
-                    if !o.is_ptr() {
+                    let Some(inst) = instance_with_field(o, i) else {
                         save!();
                         return Err(slow::field_on_non_object(o));
-                    }
-                    let h = unsafe { &*o.as_ptr() };
-                    let inst = unsafe { as_instance(o) };
-                    debug_assert!(i < inst.nfields(), "field index out of range");
+                    };
+                    let h = &inst.header;
                     let meta = h.meta();
                     if Header::state_of(meta) == ObjState::Owned && Header::owner_of(meta) == tid {
                         if Header::needs_remember(meta) {
@@ -1270,8 +1272,12 @@ impl Vm {
                 Op::ListGet => {
                     let l = r!(b_of(w));
                     let i = r!(c_of(w));
-                    let h = unsafe { &*l.as_ptr() };
-                    if h.is_local_or_frozen(tid) && i.is_small_int() {
+                    // A value of another kind takes the slow path, which raises the TypeError.
+                    if kind_of(l) == ObjKind::List
+                        && i.is_small_int()
+                        && unsafe { &*l.as_ptr() }.is_local_or_frozen(tid)
+                    {
+                        // SAFETY: checked to be a list just above.
                         let list = unsafe { as_list(l) };
                         let mut idx = i.as_small_int();
                         if idx < 0 {
@@ -1293,12 +1299,13 @@ impl Vm {
                 }
                 Op::ListLen => {
                     let l = r!(b_of(w));
-                    let h = unsafe { &*l.as_ptr() };
-                    let n = if h.is_local_or_frozen(tid) {
+                    // A value of another kind takes the slow path, which raises the TypeError.
+                    let n = if kind_of(l) == ObjKind::List && unsafe { &*l.as_ptr() }.is_local_or_frozen(tid) {
+                        // SAFETY: checked to be a list just above.
                         unsafe { as_list(l) }.len()
                     } else {
                         save!();
-                        tri!(ownership::read_list(&self.m, l)).len()
+                        tri!(slow::list_len(self, l))
                     };
                     set!(a, Value::small_int(n as i64));
                 }
@@ -1314,6 +1321,7 @@ impl Vm {
                     if recv.is_ptr() {
                         let h = unsafe { &*recv.as_ptr() };
                         if h.is_local_or_frozen(tid) && unsafe { heap_class(h).kind } == ObjKind::Dict {
+                            // SAFETY: checked to be a dict just above.
                             let t = unsafe { as_dict(recv).table() };
                             if let Some(shape) = t.shape() {
                                 let c = ic.cache.load(Ordering::Relaxed);
@@ -1344,6 +1352,11 @@ impl Vm {
                 Op::TupleGet => {
                     let t = r!(b_of(w));
                     let i = c_of(w);
+                    if kind_of(t) != ObjKind::Tuple {
+                        save!();
+                        return Err(slow::wrong_type("Tuple", t));
+                    }
+                    // SAFETY: checked to be a tuple just above.
                     let elems = unsafe { as_tuple(t) }.elems();
                     if i >= elems.len() {
                         save!();

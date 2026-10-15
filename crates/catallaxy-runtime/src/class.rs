@@ -51,6 +51,9 @@ pub struct Class {
     pub gc: GcVTable,
     pub kind: ObjKind,
     pub id: u32,
+    /// The number of fields for an instance class, 0 for other kinds: `i < instance_fields`
+    /// checks in one compare that a value is an instance with a field `i`.
+    pub instance_fields: u32,
     pub name: Box<str>,
     pub capability: Capability,
     pub superclass: Option<&'static Class>,
@@ -153,6 +156,7 @@ pub fn register_class(spec: ClassSpec) -> &'static Class {
         gc: object::vtable_for(spec.kind),
         kind: spec.kind,
         id: id as u32,
+        instance_fields: if spec.kind == ObjKind::Instance { spec.field_names.len() as u32 } else { 0 },
         name: spec.name.into_boxed_str(),
         capability: spec.capability,
         superclass: spec.superclass,
