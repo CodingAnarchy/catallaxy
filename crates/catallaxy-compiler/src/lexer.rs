@@ -502,7 +502,12 @@ impl<'a> Lexer<'a> {
                 }
             }
             _ => {
-                self.err(start, self.pos, "E0003", format!("unknown escape `\\{}`", c as char));
+                // Step over the whole character, which may take more than one byte.
+                let ch = self.src.get(self.pos - 1..).and_then(|s| s.chars().next());
+                if let Some(ch) = ch {
+                    self.pos += ch.len_utf8() - 1;
+                }
+                self.err(start, self.pos, "E0003", format!("unknown escape `\\{}`", ch.unwrap_or(c as char)));
             }
         }
     }
@@ -618,6 +623,17 @@ mod tests {
 
     fn toks(s: &str) -> Vec<Tok> {
         lex(s, 0).0.into_iter().map(|t| t.tok).collect()
+    }
+
+    #[test]
+    fn unknown_escape_of_a_multibyte_character() {
+        // Found by the fuzzer: the lexer stepped into the middle of `ޣ` and panicked.
+        for src in ["\"\\ޣ\"", "\"a\\é#{1}\"", "\"\\😀", "\"\\"] {
+            let (_, diags) = lex(src, 0);
+            assert!(diags.iter().any(|d| d.code == "E0003" || d.code == "E0004"), "{src}: {diags:?}");
+        }
+        let (_, diags) = lex("\"\\ޣ\"", 0);
+        assert!(diags[0].message.contains("`\\ޣ`"), "{diags:?}");
     }
 
     #[test]
