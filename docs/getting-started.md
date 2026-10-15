@@ -117,7 +117,11 @@ Arguments after the file name are available as `args()`. The standard library (`
 `catx check` and `catx fmt` take directories as well as files. `catx check .` type-checks every
 `.cx` file under the current directory, and `catx fmt .` formats them in place (`catx fmt --check .`
 only lists the files that would change, which is useful in CI). `catx fix .` applies the fixes the
-checker is sure of, such as adding `.new` to `Point(1)`. Add `--dry-run` to only list them.
+checker is sure of, such as adding `.new` to `Point(1)`. Add `--dry-run` to only list them. While
+walking a directory, all three leave out tests that are meant to fail to compile (files starting
+with `# expect:`, see below, and `reject/` directories). Every command explains itself with
+`--help`. They exit with status 0 when all is well, 1 when they found problems, and 2 when they
+could not run (a mistyped option or path); the reference, §10, has the table.
 
 ## Testing
 
@@ -169,7 +173,9 @@ $ catx test .
 A failing test prints a diff of the expected and actual output, with invisible characters such
 as trailing spaces made visible. `assert` and `panic` make a program exit
 with status 101, which fails the test. Each program gets 120 seconds (`CATX_TEST_TIMEOUT`
-changes this). The repository's own `examples/` and `tests/conformance/` directories use this
+changes this). `catx test -j 8` runs eight tests at a time, `--filter greeting` runs only the
+tests whose path contains `greeting`, `-v` lists every test with its time, and `--json` prints a
+machine-readable report. The repository's own `examples/` and `tests/conformance/` directories use this
 layout.
 
 Line endings do not matter to `catx test`, which reads `\r\n` as `\n`, or to `catx fmt`, which

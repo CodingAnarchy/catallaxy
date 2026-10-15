@@ -50,7 +50,7 @@ pub fn cmd_fix(args: &[String]) -> i32 {
         return 2;
     }
     let (mut failed, mut errors_left, mut fixed_files) = (false, 0, 0);
-    for path in crate::files::expand(&paths, &["reject"]) {
+    for path in crate::files::expand(&paths, crate::files::MEANT_TO_FAIL) {
         let shown = path.to_string_lossy().replace('\\', "/");
         let src = match std::fs::read_to_string(&path) {
             Ok(s) => s,

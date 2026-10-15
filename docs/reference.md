@@ -665,9 +665,30 @@ method call), with a `TypeError` panic that names the expected and actual types:
 
 ## 10. Tooling
 
-`catx run file.cx [args]`, `catx check [--json] paths...`, `catx fmt [--check] paths...`, `catx repl`,
-`catx lsp`, `catx test [paths...]`. `check` and `fmt` take files and directories; a directory stands for
-every `*.cx` file under it, skipping hidden directories and `target/`.
+`catx run file.cx [args]`, `catx check [--json] paths...`, `catx fmt [--check] paths...`,
+`catx fix [--dry-run] paths...`, `catx test [paths...]`, `catx repl`, `catx lsp`,
+`catx disasm file.cx [function]`, `catx version`. `check`, `fmt` and `fix` take files and
+directories; a directory stands for every `*.cx` file under it, skipping hidden directories,
+`target/`, and programs meant to fail: `reject/` directories and files whose first line is
+`# expect: ...` (see `catx test` below). A file named on the command line is always processed.
+
+Every command describes itself with `--help` (or `-h`, or `catx help <command>`) on standard output
+and exits with status 0. For `catx run`, `--help` counts only before the file; after it, arguments
+belong to the program. An unknown option or an argument a command does not take is an error
+(status 2). A file that cannot be read is diagnostic E0001 with the reason (`No such file or
+directory`, `it is a directory`, `it is not UTF-8 text`).
+
+The exit status means the same for every command:
+
+| Status | Meaning |
+|---|---|
+| 0 | success (`check`: no errors, warnings allowed; `test`: every test passed) |
+| 1 | problems found: errors (`check`, and `fix` when errors remain), failed tests (`test`), files that would change (`fmt --check`) |
+| 2 | the command could not do its job: a usage error, a file that cannot be read or written, a file `fmt` cannot parse, `catx test` finding no tests, or a program `catx run` cannot compile |
+| other | `catx run` exits with the program's status: `exit(n)`, 101 after a panic, 141 when its standard output is closed (see below), 70 if it cannot be loaded, and 128 + N (as a shell shows it) after signal N |
+
+The `help:` line after errors links to the error index (`docs/errors.md`) at the tag of the
+running version, so an installed release explains exactly the codes it reports.
 
 A program's standard output (`puts`, `print`) is buffered: it is written when 64 KB have collected,
 when the program ends, before it reads standard input, sleeps or waits for I/O, and before anything
@@ -694,6 +715,19 @@ trailing spaces as `·`, and a missing final newline noted. A program still runn
 `CATX_TEST_TIMEOUT` seconds (default 120) is killed and fails with its output so far. The exit
 status is 1 if anything failed.
 
+Options of `catx test`:
+
+- `-j N` (`--jobs N`) runs N tests at a time (default 1). Results are still reported in path
+  order, each as soon as it and the ones before it are done, so the output does not depend on N.
+- `--filter TEXT` runs only the tests whose path (with `/` separators) contains `TEXT`; given
+  more than once, a test matching any of them runs. A filter that matches nothing is an error
+  (status 2), like a path with no tests.
+- `-v` (`--verbose`) lists every test with its time (`ok   path (12 ms)`); failures always show
+  theirs (`FAIL path (12 ms)`).
+- `--json` prints one JSON document on standard output instead of the human report:
+  `{"tests": [...], "passed": N, "failed": M}`, each test with `path`, `kind` (`"run"` or
+  `"expect"`), `passed`, `time_ms` and, if it failed, `failure` (the report text).
+
 `catx fmt` rewrites files in place (`catx fmt -` filters stdin to stdout). It keeps comments and the
 program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
 `{ ... }` block across lines when its line would exceed 100 columns. `--check` lists the files that
@@ -706,8 +740,9 @@ throughout, any other with `\n`.
 `catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
 unsaved edits. It provides:
 
-- diagnostics (published on open, change and save), hover (types, signatures), go to definition,
-  completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
+- diagnostics (published on open, change and save), hover (types, signatures; on a binding name
+  in a `for`, `let`, `if let` or `match` pattern, a block parameter or a function parameter, that
+  variable's type), go to definition, completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
 - find references and rename (with prepare-rename) for locals, parameters (including named
   arguments), functions, methods (an override and the method it overrides rename together), fields,
   classes, enums, variants, interfaces and constants. An interface member renames together with the
