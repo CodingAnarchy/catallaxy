@@ -1,0 +1,61 @@
+# Generic classes and enums with bounded type parameters, instantiated with types that meet them.
+class SortedList[T: Comparable] {
+  items: List[T] = []
+  fn add(self, x: T) {
+    self.items.push(x)
+    self.items = self.items.sorted
+  }
+}
+
+class Version {
+  major: Int
+  minor: Int
+  fn <=>(self, o: Version) -> Int { (self.major, self.minor) <=> (o.major, o.minor) }
+  fn to_s(self) -> String { "#{self.major}.#{self.minor}" }
+}
+
+enum Tree[T: Comparable] {
+  Leaf
+  Node(Tree[T], T, Tree[T])
+}
+
+fn insert[T: Comparable](t: Tree[T], x: T) -> Tree[T] {
+  match t {
+    .Leaf => Tree.Node(.Leaf, x, .Leaf)
+    .Node(l, v, r) => if x < v {
+      Tree.Node(insert(l, x), v, r)
+    } else {
+      Tree.Node(l, v, insert(r, x))
+    }
+  }
+}
+
+fn walk[T: Comparable](t: Tree[T], out: List[T]) -> Nil {
+  match t {
+    .Leaf => nil
+    .Node(l, v, r) => {
+      walk(l, out)
+      out.push(v)
+      walk(r, out)
+    }
+  }
+}
+
+s = SortedList.new()
+s.add(3)
+s.add(1)
+s.add(2)
+puts(s.items)
+
+vs: SortedList[Version] = SortedList.new()
+vs.add(Version.new(1, 10))
+vs.add(Version.new(1, 2))
+puts(vs.items.map { it.to_s() })
+
+t: Tree[String] = .Leaf
+for w in ["pear", "apple", "fig"] {
+  t = insert(t, w)
+}
+out: List[String] = []
+walk(t, out)
+puts(out)

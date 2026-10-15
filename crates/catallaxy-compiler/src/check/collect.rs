@@ -582,6 +582,7 @@ impl Checker {
             }
             return self.types.error;
         }
+        self.note_instance(name, &params, &arg_tys, span);
         mk(&mut self.types, arg_tys)
     }
 
@@ -676,6 +677,7 @@ impl Checker {
     }
 
     fn type_params(&mut self, tps: &[ast::TypeParam], scope: &mut TypeScope) -> Vec<ParamId> {
+        self.check_unique_names(tps.iter().map(|tp| &tp.name), "type parameter");
         let ids: Vec<ParamId> = tps
             .iter()
             .map(|tp| {
@@ -696,6 +698,7 @@ impl Checker {
         let mut sc = scope.clone();
         let tps = self.type_params(&d.type_params, &mut sc);
         let mut params = Vec::new();
+        self.check_unique_names(d.params.iter().map(|p| &p.name), "parameter");
         let mut untyped = false;
         for p in &d.params {
             let ty = match &p.ty {
@@ -764,6 +767,7 @@ impl Checker {
                 Item::Interface(f) => (&f.name.name, &f.type_params),
                 _ => continue,
             };
+            self.check_unique_names(tps.iter().map(|tp| &tp.name), "type parameter");
             let mut scope = TypeScope::default();
             let ids: Vec<ParamId> = tps
                 .iter()
@@ -1049,6 +1053,7 @@ impl Checker {
         let self_ty = self.types.intern(Ty::Enum(eid, ptys));
         scope.self_ty = Some(self_ty);
         for (vi, v) in e.variants.iter().enumerate() {
+            self.check_unique_names(v.fields.iter().filter_map(|(n, _)| n.as_ref()), "field");
             let fields: Vec<(Option<String>, TyId)> = v
                 .fields
                 .iter()

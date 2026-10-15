@@ -1,0 +1,15 @@
+# expect: E0368
+# Before 0.5 this checked, then failed at run time: comparison of P with P failed.
+class SortedList[T: Comparable] {
+  items: List[T] = []
+  fn add(self, x: T) {
+    self.items.push(x)
+    self.items = self.items.sorted
+  }
+}
+class P {
+  n: Int = 0
+}
+s = SortedList.new()
+s.add(P.new())
+s.add(P.new())
