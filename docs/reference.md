@@ -100,6 +100,8 @@ Generic type arguments use square brackets. Plain types never hold `nil`.
 - Generic classes are invariant: `List[Int]` is not a `List[Int?]`.
 - `Int` converts implicitly to `Float` only in arithmetic with a `Float` operand.
 - `frozen T` and `T` are distinct; `freeze(x: T) -> frozen T`. Frozen types allow only non-mutating methods.
+  A frozen type is usable as an interface only if none of the methods that implement the interface
+  mutates (E0614): `freeze([1])` is no `Pusher` with `fn push(self, x: Int)`.
   `Int`, `Float`, `Bool`, `Nil`, `String`, `Range` and tuples/enums of frozen types are already frozen.
 
 ### 3.2 Inference
@@ -611,7 +613,10 @@ Captured variables inside `spawn` and `par_*` blocks are copied (they cannot be 
 `freeze(x)` freezes the object in place, so `x` itself has the frozen type afterwards (until it is
 reassigned); moving a value (`move x`, `spawn move`) makes `x` unusable until reassigned. Both apply
 to every local the compiler knows refers to the same object (`b = a`). Aliases it cannot see, such as
-an object also stored in a field or list, are caught at run time by the ownership checks below.
+an object also stored in a field or list, or a variable captured by a closure created earlier, are
+caught at run time: the object itself is frozen or moved, so modifying it through the alias panics
+with `FrozenError`, and touching it while another thread owns it panics with `OwnershipError`. For
+example, `add = fn() { xs.push(3) }` followed by `freeze(xs)` makes a later `add()` panic.
 Only locals and fresh literals can be moved; a literal has no other reference, so `move` on it
 (`Mutex.new(move ["hits": 0])`) is accepted and optional.
 At runtime every object is owned (by one thread), frozen or shared. Touching another thread's owned
@@ -654,7 +659,10 @@ pages = fs.map { |f| f.join().unwrap() }
 - `Fiber.start { ... }` creates a fiber; `join()` waits for it and returns `Result[T, String]`
   (`Err` holds the message of a panic, which ends only that fiber); `is_done()`;
   `Fiber.yield()` lets the thread's other fibers run.
-- A fiber runs on the OS thread that started it, for its whole life. Fibers on one thread
+- A fiber runs on the OS thread that started it, for its whole life, and only that thread can
+  join it: a `Fiber`, or a value that holds one, cannot be sent, moved to a `spawn move` block or
+  a `Mutex`, or returned from a thread or `par_*` block (E0619). Send its result instead.
+- Fibers on one thread
   interleave only where one of them waits: channel `send`/`recv`, `join`, `sleep`, socket,
   file, directory, process and console I/O, HTTP requests, `Fiber.yield()`. Their blocks may therefore capture and mutate owned values (no
   capability rules apply), and code between two waits runs without interruption.

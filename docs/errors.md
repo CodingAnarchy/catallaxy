@@ -1648,6 +1648,14 @@ xs.push(3)
 
 Mutate a copy (`ys = xs.dup()`), or make the change before freezing.
 
+The same error reports a frozen value used as an interface that it implements with a mutating
+method: a call through the interface would modify the frozen object.
+
+```
+interface Pusher { fn push(self, x: Int) }
+p: Pusher = freeze([1, 2])
+```
+
 ## E0615
 
 Parallel method over owned elements. `par_map` and the other `par_*` methods run their block on other
@@ -1709,6 +1717,21 @@ a.get.push(1)
 
 Use `Atomic` for frozen values (`Int`, `String`, frozen objects) and shareable ones. Keep a mutable
 value in a `Mutex` and change it inside `lock`.
+
+## E0619
+
+A fiber cannot move to another thread. A `Fiber` runs on the thread that started it, and only that
+thread can join it. So a fiber, or a value that holds one (a list of fibers, an object with a fiber
+field), cannot be sent through a channel, moved into a `spawn move` block or a `Mutex`, or returned
+from a thread or a `par_*` block.
+
+```cx
+ch: Channel[Fiber[Int]] = Channel.new()
+f = Fiber.start { 1 }
+ch.send(move f)
+```
+
+Join the fiber on its own thread and send its result instead: `ch.send(f.join().unwrap())`.
 
 ## E0801
 

@@ -1,0 +1,8 @@
+# expect: E0614
+# A frozen list is no `Pusher`: calling `push` through the interface would modify it.
+interface Pusher {
+  fn push(self, x: Int)
+}
+f = freeze([1, 2])
+p: Pusher = f
+p.push(3)

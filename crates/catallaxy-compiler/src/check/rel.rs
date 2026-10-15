@@ -347,6 +347,7 @@ impl Checker {
             self.conform_impls.insert(key, impls);
         }
         self.conform_log.push(key);
+        self.conform_spans.push(self.expr_span);
     }
 
     /// `Comparable` for builtin types without a `<=>` method: tuples and lists compare
