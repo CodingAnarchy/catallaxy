@@ -170,6 +170,8 @@ fn help_link_is_pinned_to_the_version() {
     let (_, _, err) = catx(&[OsStr::new("check"), bad.as_os_str()]);
     let want = format!("/blob/v{}/docs/errors.md#e0300", env!("CARGO_PKG_VERSION"));
     assert!(err.contains(&want), "{err}");
+    std::fs::remove_dir_all(&dir).ok();
+}
 
 /// Long operator chains run; nesting past the limit is a diagnostic from `check` and `run`
 /// alike, never a stack overflow (#156).
