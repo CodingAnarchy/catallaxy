@@ -8,6 +8,13 @@
 //! slots written since the owner's last minor collection, which a minor collection of an old
 //! container scans instead of every slot (issue #120). See [`WordBuf::note_written`]. Buffers
 //! embedded in a container's own object ([`WordBuf::init_in_place`]) have no such word.
+//!
+//! **Cards.** A buffer of at least [`CARD_MIN`] slots also has a card table in front of that
+//! word: one bit per [`CARD`] slots, set when a young reference is stored into the card's slots.
+//! A minor collection scans only the dirty cards, so writes scattered over a large buffer cost
+//! what they touched rather than the span between them (issue #144). Such a buffer's range word
+//! always reads as covering nothing, so every recorded store takes the slow path that marks the
+//! card.
 
 use std::alloc::Layout;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,8 +35,29 @@ struct Prefixed {
     buf: WordBuf,
 }
 
-/// Words in front of the capacity word of a buffer this module allocates.
+/// Words in front of the capacity word of a buffer this module allocates (besides its cards).
 const PREFIX: usize = 1;
+
+/// Slots per card.
+pub const CARD: usize = 128;
+/// The smallest buffer with a card table, in slots.
+pub const CARD_MIN: usize = 4096;
+
+/// Words the card table of a buffer of `cap` slots takes (none below [`CARD_MIN`]).
+#[inline(always)]
+fn card_words(cap: usize) -> usize {
+    if cap >= CARD_MIN {
+        cap.div_ceil(CARD).div_ceil(64)
+    } else {
+        0
+    }
+}
+
+/// Words in front of the capacity word of a buffer of `cap` slots.
+#[inline(always)]
+fn head_words(cap: usize) -> usize {
+    PREFIX + card_words(cap)
+}
 
 /// Written-range words: the high half is the first slot written, the low half one past the last.
 /// (So a plain count `n` below 2^32 reads as the range `0..n`; see [`WordBuf::range_covers`].)
@@ -37,13 +65,62 @@ const PREFIX: usize = 1;
 const WRITTEN_ALL: u64 = u32::MAX as u64;
 /// No slot.
 const WRITTEN_NONE: u64 = (u32::MAX as u64) << 32;
+/// The range word of a buffer with cards: like [`WRITTEN_NONE`], it covers no slot, so every
+/// recorded store reaches [`WordBuf::mark_card`].
+pub const CARDED: u64 = ((u32::MAX as u64) << 32) | 1;
 
 /// The buffer of every container with no capacity. Never written, never freed.
 static EMPTY: Prefixed = Prefixed { written: AtomicU64::new(WRITTEN_ALL), buf: WordBuf { cap: 0, slots: [] } };
 
 impl WordBuf {
     fn layout(cap: usize) -> Layout {
-        Layout::from_size_align(8 * (cap + 1 + PREFIX), 8).expect("container too large")
+        Layout::from_size_align(8 * (cap + 1 + head_words(cap)), 8).expect("container too large")
+    }
+
+    /// The layout of a buffer of `cap` slots, if it can have one.
+    fn try_layout(cap: usize) -> Option<Layout> {
+        cap.checked_add(1 + head_words(cap)).and_then(|n| Layout::array::<u64>(n).ok())
+    }
+
+    /// Writes the head of a buffer of `cap` slots allocated at `base`: its cards (all dirty, as
+    /// a new buffer's range covers everything) and its range word. Returns the buffer.
+    ///
+    /// # Safety
+    /// `base` must be valid for writes of `8 * head_words(cap)` bytes and 8-aligned.
+    unsafe fn init_head(base: *mut u8, cap: usize) -> *mut WordBuf {
+        let cw = card_words(cap);
+        std::ptr::write_bytes(base, 0xff, 8 * cw);
+        let n = cap.div_ceil(CARD);
+        if cw > 0 && n % 64 != 0 {
+            // No bits past the last card.
+            *(base as *mut u64).add(cw - 1) = (1u64 << (n % 64)) - 1;
+        }
+        let pre = base.add(8 * cw) as *mut Prefixed;
+        let word = if cw > 0 { CARDED } else { WRITTEN_ALL };
+        std::ptr::addr_of_mut!((*pre).written).write(AtomicU64::new(word));
+        std::ptr::addr_of_mut!((*pre).buf)
+    }
+
+    /// The card table of `p`, a live buffer this module allocated: one bit per [`CARD`] slots,
+    /// card `c` being bit `c % 64` of word `c / 64`; empty below [`CARD_MIN`]. Only the
+    /// container's writer (its owner, or a shared container's lock holder) and its owner's minor
+    /// collections touch it, one at a time, so a load and a store set a bit.
+    ///
+    /// # Safety
+    /// As for [`WordBuf::note_written`].
+    #[inline]
+    unsafe fn cards<'a>(p: *const WordBuf) -> &'a [AtomicU64] {
+        let cw = card_words((*p).cap);
+        let base = (p as *const u8).sub(8 * (PREFIX + cw)) as *const AtomicU64;
+        std::slice::from_raw_parts(base, cw)
+    }
+
+    /// Marks cards `lo..hi` dirty.
+    fn set_cards(cards: &[AtomicU64], lo: usize, hi: usize) {
+        for c in lo..hi {
+            let w = &cards[c / 64];
+            w.store(w.load(Ordering::Relaxed) | 1 << (c % 64), Ordering::Relaxed);
+        }
     }
 
     /// The shared empty buffer.
@@ -79,17 +156,14 @@ impl WordBuf {
             return Ok(Self::empty());
         }
         // A size past `isize::MAX` is refused like any other.
-        let layout = cap
-            .checked_add(1 + PREFIX)
-            .and_then(|n| Layout::array::<u64>(n).ok())
-            .ok_or_else(|| Layout::from_size_align(isize::MAX as usize & !7, 8).unwrap())?;
+        let layout =
+            Self::try_layout(cap).ok_or_else(|| Layout::from_size_align(isize::MAX as usize & !7, 8).unwrap())?;
         unsafe {
-            let base = std::alloc::alloc(layout) as *mut Prefixed;
+            let base = std::alloc::alloc(layout);
             if base.is_null() {
                 return Err(layout);
             }
-            std::ptr::addr_of_mut!((*base).written).write(AtomicU64::new(WRITTEN_ALL));
-            let p = std::ptr::addr_of_mut!((*base).buf);
+            let p = Self::init_head(base, cap);
             Self::init_in_place(p, cap, prefix, fill);
             crate::note_external(cap * 8);
             Ok(p)
@@ -138,20 +212,19 @@ impl WordBuf {
             // the same alignment and the header words more, so `realloc` may grow it in place.
             let old = Layout::array::<u64>(cap).expect("container too large");
             // A vector's allocation is at most `isize::MAX` bytes; the header words may not fit.
-            let Some(new) = cap.checked_add(1 + PREFIX).and_then(|n| Layout::array::<u64>(n).ok()) else {
+            let Some(new) = Self::try_layout(cap) else {
                 std::alloc::dealloc(ptr as *mut u8, old);
                 return Err(old);
             };
-            let base = std::alloc::realloc(ptr as *mut u8, old, new.size()) as *mut Prefixed;
+            let base = std::alloc::realloc(ptr as *mut u8, old, new.size());
             if base.is_null() {
                 // The vector's allocation is still valid; free it before reporting.
                 std::alloc::dealloc(ptr as *mut u8, old);
                 return Err(new);
             }
             let words = base as *mut u64;
-            std::ptr::copy(words, words.add(1 + PREFIX), len);
-            std::ptr::addr_of_mut!((*base).written).write(AtomicU64::new(WRITTEN_ALL));
-            let p = std::ptr::addr_of_mut!((*base).buf);
+            std::ptr::copy(words, words.add(1 + head_words(cap)), len);
+            let p = Self::init_head(base, cap);
             std::ptr::addr_of_mut!((*p).cap).write(cap);
             let slots = Self::slots_ptr(p);
             for i in len..cap {
@@ -168,7 +241,7 @@ impl WordBuf {
         let b = p as *mut WordBuf;
         let cap = (*b).cap;
         if cap > 0 {
-            std::alloc::dealloc(p.sub(8 * PREFIX), Self::layout(cap));
+            std::alloc::dealloc(p.sub(8 * head_words(cap)), Self::layout(cap));
         }
     }
 
@@ -234,9 +307,27 @@ impl WordBuf {
     /// caller must have write access to the container that holds it.
     #[inline(always)]
     pub unsafe fn note_written(p: *const WordBuf, lo: usize, hi: usize) {
-        if !Self::range_covers(Self::range_word(p), lo, hi) {
-            Self::widen_written(p, lo, hi);
+        let r = Self::range_word(p);
+        if !Self::range_covers(r, lo, hi) {
+            if r == CARDED && hi == lo + 1 {
+                Self::mark_card(p, lo);
+            } else {
+                Self::widen_written(p, lo, hi);
+            }
         }
+    }
+
+    /// Marks the card of slot `i` of `p`, a buffer with cards (its range word is [`CARDED`]).
+    /// A few instructions, inline: the table sits just before the range word.
+    ///
+    /// # Safety
+    /// As for [`WordBuf::note_written`], and `i` is below the capacity.
+    #[inline(always)]
+    pub unsafe fn mark_card(p: *const WordBuf, i: usize) {
+        let cw = (*p).cap.div_ceil(CARD).div_ceil(64);
+        let c = i / CARD;
+        let w = &*((p as *const u8).sub(8 * (PREFIX + cw)) as *const AtomicU64).add(c / 64);
+        w.store(w.load(Ordering::Relaxed) | 1 << (c % 64), Ordering::Relaxed);
     }
 
     /// The slow path of [`WordBuf::note_written`]: widens the range to cover `lo..hi`.
@@ -246,6 +337,12 @@ impl WordBuf {
     #[cold]
     #[inline(never)]
     pub unsafe fn widen_written(p: *const WordBuf, lo: usize, hi: usize) {
+        let cards = Self::cards(p);
+        if !cards.is_empty() {
+            let n = (*p).cap.div_ceil(CARD);
+            Self::set_cards(cards, (lo / CARD).min(n), (hi.div_ceil(CARD)).min(n));
+            return;
+        }
         let w = Self::written_word(p);
         let r = w.load(Ordering::Relaxed);
         let (lo, hi) = (lo.min((r >> 32) as usize), hi.max((r as u32) as usize));
@@ -260,25 +357,90 @@ impl WordBuf {
     /// As for [`WordBuf::note_written`], for both buffers.
     #[inline]
     pub unsafe fn copy_written(from: *const WordBuf, to: *const WordBuf) {
-        if (*to).cap > 0 {
+        if (*to).cap == 0 {
+            return;
+        }
+        let (fc, tc) = (Self::cards(from), Self::cards(to));
+        if tc.is_empty() && fc.is_empty() {
             Self::written_word(to).store(Self::written_word(from).load(Ordering::Relaxed), Ordering::Relaxed);
+            return;
+        }
+        if tc.is_empty() {
+            // Only a buffer as large as one with cards could have taken over its items.
+            let r = Self::written(from);
+            let w = if r.is_empty() { WRITTEN_NONE } else { ((r.start as u64) << 32) | r.end as u64 };
+            Self::written_word(to).store(w, Ordering::Relaxed);
+            return;
+        }
+        for c in tc {
+            c.store(0, Ordering::Relaxed);
+        }
+        if fc.is_empty() {
+            let r = Self::written(from);
+            if !r.is_empty() {
+                Self::widen_written(to, r.start, r.end);
+            }
+        } else {
+            // `from` has no bits past its last card, and the slots past its capacity hold only
+            // the fill, so their cards stay clear.
+            for (t, f) in tc.iter().zip(fc) {
+                t.store(f.load(Ordering::Relaxed), Ordering::Relaxed);
+            }
         }
     }
 
-    /// The slots written since the last call (within the capacity), which it then forgets.
+    /// Calls `f` with each run of slots written since the last call (within the capacity), in
+    /// order, and forgets them.
     ///
     /// # Safety
     /// As for [`WordBuf::note_written`]; called by a minor collection of the owning thread.
     #[inline]
-    pub unsafe fn take_written(p: *const WordBuf) -> std::ops::Range<usize> {
-        let r = Self::written(p);
-        if (*p).cap > 0 {
-            Self::written_word(p).store(WRITTEN_NONE, Ordering::Relaxed);
+    pub unsafe fn take_written(p: *const WordBuf, mut f: impl FnMut(std::ops::Range<usize>)) {
+        let cap = (*p).cap;
+        if cap == 0 {
+            return;
         }
-        r
+        let cards = Self::cards(p);
+        if cards.is_empty() {
+            let r = Self::written(p);
+            Self::written_word(p).store(WRITTEN_NONE, Ordering::Relaxed);
+            if !r.is_empty() {
+                f(r);
+            }
+            return;
+        }
+        // Runs of dirty cards, merged across words.
+        let mut run: Option<(usize, usize)> = None;
+        for (wi, w) in cards.iter().enumerate() {
+            let mut bits = w.load(Ordering::Relaxed);
+            if bits == 0 {
+                continue;
+            }
+            w.store(0, Ordering::Relaxed);
+            while bits != 0 {
+                let b = bits.trailing_zeros() as usize;
+                let ones = (bits >> b).trailing_ones() as usize;
+                let (lo, hi) = (wi * 64 + b, wi * 64 + b + ones);
+                bits = if b + ones >= 64 { 0 } else { bits & !(((1u64 << ones) - 1) << b) };
+                run = match run {
+                    Some((a, e)) if e == lo => Some((a, hi)),
+                    Some((a, e)) => {
+                        f(a * CARD..(e * CARD).min(cap));
+                        Some((lo, hi))
+                    }
+                    None => Some((lo, hi)),
+                };
+            }
+        }
+        if let Some((a, e)) = run {
+            if a * CARD < cap {
+                f(a * CARD..(e * CARD).min(cap));
+            }
+        }
     }
 
-    /// The slots written since the last [`WordBuf::take_written`] (within the capacity).
+    /// The slots written since the last [`WordBuf::take_written`] (within the capacity): with
+    /// cards, the span from the first dirty card to the end of the last. For tests.
     ///
     /// # Safety
     /// As for [`WordBuf::note_written`].
@@ -287,6 +449,15 @@ impl WordBuf {
         let cap = (*p).cap;
         if cap == 0 {
             return 0..0;
+        }
+        let cards = Self::cards(p);
+        if !cards.is_empty() {
+            let n = cap.div_ceil(CARD);
+            let dirty = |c: &usize| cards[c / 64].load(Ordering::Relaxed) & (1 << (c % 64)) != 0;
+            return match ((0..n).find(dirty), (0..n).rev().find(dirty)) {
+                (Some(a), Some(b)) => a * CARD..((b + 1) * CARD).min(cap),
+                _ => 0..0,
+            };
         }
         let r = Self::range_word(p);
         let hi = ((r as u32) as usize).min(cap);
