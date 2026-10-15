@@ -1,6 +1,18 @@
 # Catallaxy Language Design
 
-*Matthew Tanous · October 12, 2026.*
+*Matthew Tanous · October 12, 2026. Status notes updated during 0.5.0.*
+
+This document was written before the first line of code, and it still records why the language and
+runtime look the way they do. Most of it is now built. Where the implementation differs from the
+plan, or a part does not exist, a note in bold says so:
+
+- **Built** notes say what shipped, where it differs in detail from the text before them;
+- **Not built yet** notes mark parts of the plan that do not exist;
+- **Declined** notes mark ideas that were tried or measured and not adopted, with a pointer to the
+  write-up.
+
+A paragraph with no note describes the code as it is. The [language reference](reference.md) is the
+authority on syntax and semantics; this document explains the reasons.
 
 ## Goals and non-goals
 
@@ -21,6 +33,12 @@ Catallaxy is a statically typed language that reads like Ruby, checks every prog
 - Runtime metaprogramming: `method_missing`, `eval`, or adding methods to classes at runtime. Statically resolved extension methods cover the common case.
 - A JIT. Static types make one easier later, but v1 is an interpreter.
 - A concurrent or incremental garbage collector. v1 pauses the world; pause-time work comes later.
+
+Both still hold. **Declined:** a Cranelift method JIT was 4–10× faster on integer kernels but
+covered too little of real programs to justify its cost (`experiments/jit`), and concurrent marking
+was measured and left out for now (`docs/gc-concurrent-marking.md`). Pauses were shortened another
+way: each thread collects its own young objects without stopping the others, and major collections
+have dedicated marker threads (see Memory management).
 
 ## Type system
 
@@ -45,7 +63,7 @@ emails = users.map { |u| u.email ?? "none" }
 
 **Inference.** Bidirectional and local, not whole-program Hindley–Milner. Locals, block parameters and generic arguments at call sites are inferred from context. Annotations are required on `pub` functions, class fields and interface members. That keeps errors local to where the mistake is, lets modules be checked independently, and gives LLMs an explicit contract to write against.
 
-**Structural interfaces (checked duck typing).** A type satisfies an interface by having the right methods; there is no `implements` clause. `List`, `Set` and user classes with an `each` method are all `Iterable`. Interfaces can also be written inline: `fn render(x: { fn to_s(self) -> String })`.
+**Structural interfaces (checked duck typing).** A type satisfies an interface by having the right methods; there is no `implements` clause. `List`, `Set` and user classes with an `each` method are all `Enumerable`. Interfaces can also be written inline: `fn render(x: { fn to_s(self) -> String })`.
 
 **Interfaces as annotations.** Any parameter, field or return type can be an interface, so public signatures say what a value must *do*, not what class it is:
 
@@ -57,11 +75,11 @@ pub fn log_all(items: Enumerable[Display & Hashable]) { … }
 
 An interface in parameter position is sugar for a generic bound, like Rust's `impl Trait`; since generics are erased, both compile to the same code. Interfaces combine with `&`.
 
-**Standard interfaces, Ruby-style.** The core library defines `Enumerable[T]` (requires `each`), `Comparable` (requires `<=>`), `Hashable`, `Display` (requires `to_s`), `Indexable[T]` and `Callable`. Interfaces can carry default methods: any type with a matching `each` gets `map`, `select`, `reduce`, `sort_by`, `each_slice` and the rest, exactly as including `Enumerable` works in Ruby, but with no `include` line and with every call type-checked.
+**Standard interfaces, Ruby-style.** The core library defines `Enumerable[T]` (requires `each`), `Comparable` (requires `<=>`), `Hashable`, `Display` (requires `to_s`), `Indexable[T]` and `Callable`. Interfaces can carry default methods: any type with a matching `each` gets `map`, `select`, `reduce`, `sort_by`, `each_slice` and the rest, exactly as including `Enumerable` works in Ruby, but with no `include` line and with every call type-checked. **Built** as described, in the prelude (`crates/catallaxy-compiler/src/prelude/core.cx`). An interface whose methods take `Self`, such as `Comparable`, can be used only as a generic bound, not as a value type (E0375).
 
 **Implicit generics, for maximum duck typing.** A private function may leave parameters unannotated, as `shout` does above. The checker infers the structural interface each parameter needs from the body, and checks every call site against it. This is Ruby-style duck typing with compile-time guarantees. Requiring annotations on `pub` functions keeps inferred interfaces from leaking into APIs, where they make error messages hard to read.
 
-**Classes and extensions.** Classes are nominal, with fields declared up front, single inheritance and mixin interfaces with default methods. Classes cannot be reopened at runtime. Instead, `extend String { fn shout(self) -> String { … } }` adds methods that resolve statically and are visible only where their module is imported.
+**Classes and extensions.** Classes are nominal, with fields declared up front, single inheritance and mixin interfaces with default methods. Classes cannot be reopened at runtime. Instead, `extend String { fn shout(self) -> String { … } }` adds methods that resolve statically and are visible only where their module is imported. **Built:** there is no mixin syntax; a class that structurally satisfies an interface gets its default methods. Extensions are exported with `pub extend`.
 
 **Nil and unions.** `T` never holds nil; `T?` might. Unwrapping uses `?.`, `??`, `if let`, or flow narrowing after `if x != nil`. Union types (`Int | String`) narrow with `is` checks and `match`.
 
@@ -105,7 +123,7 @@ How the tags work:
 - Untagged collections from natives such as `Json.parse`, which a type test can't narrow.
 - Instances of user generic classes (`Box[Int]` through `Dyn` and back as `Box`). These need type-argument tags of their own.
 
-**Tooling for people and agents.** `check --json` emits diagnostics with exact spans, error codes and machine-applicable fix suggestions. An LSP server, a deterministic formatter, and `check` fast enough to run on every save (target: under 200 ms for 10k lines) are part of the language, not afterthoughts.
+**Tooling for people and agents.** `check --json` emits diagnostics with exact spans, error codes and machine-applicable fix suggestions. An LSP server, a deterministic formatter, and `check` fast enough to run on every save (target: under 200 ms for 10k lines) are part of the language, not afterthoughts. **Built:** `catx check --json`, `catx fix` (applies the fixes), `catx fmt`, and `catx lsp`, which also offers the fixes as quick fixes. `catx check` type-checks 8,000 lines in about 20 ms on an Apple M-series machine.
 
 ## Concurrency model
 
@@ -128,6 +146,8 @@ Recommendation: one shared heap, ordinary threads, and three kinds of object (fr
 
 **Race semantics.** Within shared objects, each single operation (`list.push`, `dict[k] = v`, attribute set) is atomic and linearizable. Compound operations (`d[k] += 1`) are not, just as in Java or free-threaded Python. Explicit tools cover the rest: `Mutex`, `Atomic`, channels, and a `with lock(obj)` block that locks one shared object.
 
+**Built** as described: the states live in the object header (`crates/catallaxy-gc/src/header.rs`), along with `freeze`, `move` (`spawn move`, `ch.send(move x)`), `OwnershipError`, `--promote-on-access`, `Mutex`, `Atomic`, bounded and unbounded channels with `Channel.select`, and `with lock`, which is reentrant up to 1,000 levels.
+
 **Why not "everything shared, lock everything"?** That is the PEP 703 approach and it works, but every dict and list access pays for a lock word check and biased refcounts. The ownership bit buys the same safety with a cheaper common path and catches accidental sharing as an error instead of a heisenbug.
 
 ## Object model and value representation
@@ -140,36 +160,44 @@ Every value is one 64-bit word that can be loaded and stored atomically, so no t
 - 48-bit small integer (overflow promotes to a heap bigint)
 - `nil`, `true`, `false`, interned symbols
 
+**Built:** pointers, integers and the constants are as described (`crates/catallaxy-runtime/src/value.rs`). There is no symbol value: method and field names are interned inside the compiler and VM, and the language has no symbol type.
+
 This keeps floats unboxed and makes every slot a single machine word. With static types, typed opcodes such as `add_int` and `add_float` skip tag checks entirely; tags matter only for erased generics, unions and `Dyn`. A uniform one-word representation is what lets generics stay erased instead of monomorphized.
 
-**Object header (16 bytes):**
+**Object header (16 bytes).** As built (`crates/catallaxy-gc/src/header.rs`), word 0 points to the class's `GcVTable`, the first field of the runtime class descriptor, and is written once at allocation. Word 1 is one atomic word:
 
-| Word | Bits | Field |
-| --- | --- | --- |
-| 0 | 64 | Class pointer: vtable, interface tables, field count, capability. Written once at allocation |
-| 1 | 2 | State: owned / frozen / shared |
-| 1 | 16 | Owner thread id (meaningful only when owned) |
-| 1 | 2 | GC mark bits |
-| 1 | 8 | Lock byte (parking\_lot-style: spin, then park) |
-| 1 | 32 | Identity hash, lazily assigned |
+| Bits | Field |
+| --- | --- |
+| 0..2 | State: owned / frozen / shared |
+| 2..4 | GC mark color |
+| 4 | Lock held (parking\_lot-style: spin, then park) |
+| 5 | Lock has parked waiters |
+| 6..16 | Lock recursion depth |
+| 16..32 | Owner thread id when owned; lock holder when shared and locked |
+| 32..61 | Identity hash (29 bits), lazily assigned |
+| 61 | Remembered: an old object in its owner's remembered set |
+| 62 | Young: allocated since its owner's last minor collection |
+| 63 | Minor-collection mark |
 
-**Fixed layouts instead of shapes.** Field offsets are known statically, so a typed field read compiles to `get_field r1, r2, #3`, with no lookup and no cache. Because an object's class never changes after allocation, header word 0 is never written again, which removes a whole category of races. Hidden classes are kept only for `Dyn` records such as parsed JSON objects.
+The plan had a separate lock byte and a 32-bit hash; the lock state and the three generational bits took their room.
 
-**Fields.** Field values live inline after the header. When the checker knows a value's capability, it picks the cheapest access: plain loads and stores for owned and frozen objects, `Acquire` loads and `Release` stores for shared ones. Only `Dyn` and erased generic code needs the runtime state check.
+**Fixed layouts instead of shapes.** Field offsets are known statically, so a typed field read compiles to `get_field r1, r2, #3`, with no lookup and no cache. Because an object's class never changes after allocation, header word 0 is never written again, which removes a whole category of races. Hidden classes are kept only for `Dyn` records such as parsed JSON objects. **Built:** a parsed JSON object is a `Dict[String, Dyn]` that starts in a "shape mode": its keys live in shared, immutable shapes with a transition tree, and `DynGet` caches `(shape, slot)` per site. It falls back to the ordinary table on a delete, a non-string key or more than 32 keys (`crates/catallaxy-runtime/src/dict.rs`).
+
+**Fields.** Field values live inline after the header. When the checker knows a value's capability, it picks the cheapest access: plain loads and stores for owned and frozen objects, `Acquire` loads and `Release` stores for shared ones. Only `Dyn` and erased generic code needs the runtime state check. **Built differently:** there is one `GetField` and one `SetField` instruction, and each checks the header state at run time: one load and a predictable branch. Owned and frozen objects then get relaxed loads and stores; other objects get the ownership check and `Acquire`/`Release`. **Not built yet:** choosing the access statically where the checker knows the capability.
 
 **Containers.**
 
-- **List:** header, length, pointer to a backing array. Growing a shared list allocates a new array and swaps the pointer under the object's lock. Readers holding the old array stay safe because the GC keeps it alive. Lists created with room for at most 7 elements (literals, small vectors, `[]`) keep them in an array inside the list object, so they cost one heap slot and no `malloc`. The pointer then points into the object. A list that outgrows that array moves out of line the same way and never moves back. A reader still holding the inline array reads old values from memory that lives as long as the list.
-- **Dict:** insertion-ordered open-addressing table (the CPython 3.6+ layout). Shared dicts take the lock for writes; v1 also locks reads, and a seqlock fast path for reads is a later optimization.
+- **List:** header, length, pointer to a backing array. Growing a shared list allocates a new array and swaps the pointer under the object's lock. Readers holding the old array stay safe because the GC keeps it alive. Reads never lock, even on shared lists: the length and the array pointer are atomic words, and a replaced array is freed only at the next stop-the-world collection. Lists created with room for at most 7 elements (literals, small vectors, `[]`) keep them in an array inside the list object, so they cost one heap slot and no `malloc`. The pointer then points into the object. A list that outgrows that array moves out of line the same way and never moves back. A reader still holding the inline array reads old values from memory that lives as long as the list.
+- **Dict:** insertion-ordered open-addressing table (the CPython 3.6+ layout). Shared dicts take the lock for writes; v1 also locks reads, and a seqlock fast path for reads is a later optimization. **Built:** the seqlock fast path shipped in 0.2.0. A read of a shared dict tries a lock-free read, validated by a sequence counter, and takes the lock only if a writer interfered.
 - **String:** immutable UTF-8 with a cached hash. Mutable buffers are a separate `StringBuilder` type, so strings are always frozen and freely shared.
 
 ## Memory management
 
 v1 uses a non-moving, parallel, stop-the-world mark-sweep collector with thread-local allocation. Non-moving matters in Rust: raw pointers held across a safepoint stay valid, which removes a whole class of `unsafe` bugs.
 
-**Allocation.** The heap is a set of 256 KB segments, each split into pages of one size class (16, 32, 48 … 2048 bytes; larger objects get their own segment). Each thread owns its current page per size class and bump-allocates from it with no atomics. Only grabbing a fresh page touches a global (sharded) free-page list.
+**Allocation.** The heap is a set of 256 KB segments, each split into pages of one size class (16, 32, 48 … 2048 bytes; larger objects get their own segment). Each thread owns its current page per size class and bump-allocates from it with no atomics. Only grabbing a fresh page touches a global (sharded) free-page list. **Built:** segments hold eight 32 KB pages, and the 40 size classes step by 16 bytes up to 512, then grow to 2048. Larger objects get their own allocation from the system allocator. The global free-page lists are kept per size class rather than sharded.
 
-**Safepoints.** Every thread polls a global `gc_requested` flag at backward jumps, calls, and allocation slow paths: one load and a predictable branch. A thread in native code or blocking I/O sets its state to `in_native` first. The collector treats such threads as already stopped, the same trick the JVM and Go use, so a thread stuck in `read()` never delays a collection.
+**Safepoints.** Every thread polls a global `gc_requested` flag at backward jumps, calls, and allocation slow paths: one load and a predictable branch. **Built:** the poll reads a per-thread flag, at backward jumps, calls and loop heads. Allocation does not poll, so allocating never collects (see Running out of memory). A thread in native code or blocking I/O sets its state to `in_native` first. The collector treats such threads as already stopped, the same trick the JVM and Go use, so a thread stuck in `read()` never delays a collection.
 
 **Roots.** Interpreter frames and registers live in a VM-managed stack of `Value`s, so scanning them is precise and trivial. Rust code that holds `Value`s across a possible GC must root them in a `HandleScope<'a>`. Handles borrow the scope, so the borrow checker stops them from escaping. This is the main safety boundary for native code. Each fiber has its own register stack, scanned with its thread's roots. A minor collection skips a parked fiber whose roots referenced no young object when one last scanned them: only the fiber writes its roots, so until it runs again they reference only old objects, and the remembered set finds the young objects those reference. A fiber that ran is scanned again; so is one whose roots still reached a young object, which can happen because a large object that only roots reference stays young. With 40,000 parked fibers, this takes a thread's minor collections from 323 ms to 9 ms in total.
 
@@ -187,9 +215,9 @@ v1 uses a non-moving, parallel, stop-the-world mark-sweep collector with thread-
 
 **Running out of memory.** Allocation never fails or collects, so when the OS refuses a new segment the heap takes one from a small reserve of mapped segments (4 MB), hands a 2 MB headroom block back to the OS so the runtime's own allocations can go on, and requests a collection. That collection sweeps at once and refills the reserve from the segments it emptied, or from the OS. If it cannot, the next thread to reach a safepoint panics with a `MemoryError`; only an allocation that finds the reserve used up aborts. The global allocator of `catx` and of the C API libraries (`catallaxy_gc::Allocator`; a Rust embedder opts in with one line) does the same for allocations inside Rust's collections: a refused request releases the headroom block and is retried once, and the collection it schedules decides whether to raise the error. Allocations the runtime makes where it can raise an error (strings, `StringBuilder`, list and dict buffers, register and fiber stacks, and the vectors natives build their results in) check for refusal themselves, and for strings, builders, list pushes and dict inserts collect once and retry first. A native that has built values nothing roots yet (the items of a list it is about to return) cannot collect, so it raises the error at once; natives that allocate much check before they start whether the OS has refused memory since the last collection, and collect first if so. The fallible heap allocations (`LocalHeap::try_alloc_uninit`) do not draw on the reserve: once a segment has been refused they return null for objects that need a new one until the next collection, which leaves the reserve to the allocations that cannot report failure.
 
-**Key insight for later: thread-local young collection.** The ownership rules guarantee that frozen and shared objects never point to owned objects (freezing is deep, and promotion walks the graph). So a thread's owned young objects are reachable only from that thread. That thread can collect its own nursery without stopping anyone, much like OCaml 5's per-domain minor heaps. This should be the first major GC upgrade after v1, and it makes most garbage free to collect.
+**Thread-local young collection.** The ownership rules guarantee that frozen and shared objects never point to owned objects (freezing is deep, and promotion walks the graph). So a thread's owned young objects are reachable only from that thread. That thread can collect its own nursery without stopping anyone, much like OCaml 5's per-domain minor heaps. This was planned as the first major GC upgrade after v1, since it makes most garbage free to collect. **Built** in 0.2.0: each thread has a nursery (4 MiB by default, `CATX_GC_NURSERY`) and collects it on its own. The collection does not move objects: young, remembered and minor-mark bits in the header track generations, and a remembered set records old objects that were written to. Any path that lets another thread or a global reach an object tenures it first. `CATX_GC_GENERATIONAL=0` turns it off. Major collections also gained dedicated marker threads (`CATX_GC_THREADS`), which cut a 1.6 GB heap's longest pause from 143 ms to 25 ms. `docs/gc-minor-cost.md` measures what a minor collection costs.
 
-**Deliberately absent.** No reference counting (atomic refcount traffic is exactly the cost this design avoids), and no general finalizers. Resources close via explicit `close`/`with` blocks, with weak references for caches.
+**Deliberately absent.** No reference counting (atomic refcount traffic is exactly the cost this design avoids), and no general finalizers. Resources close via explicit `close`/`with` blocks, with weak references for caches. **Built:** there are no user-visible finalizers. Sockets, listeners and channels have `close()`; internally, a socket or native handle that dies still releases its OS resource, so a forgotten `close` does not leak a descriptor. **Not built yet:** weak references, and a `with` block for resources (`with` exists only as `with lock(obj)`).
 
 ## Execution
 
@@ -197,11 +225,11 @@ The VM is a register-based bytecode interpreter, one instance per OS thread, all
 
 **Pipeline.** Source → lexer → parser (hand-written, Pratt for expressions) → AST → name resolution → **type checker** (inference, interface checks, capability checks, exhaustiveness) → typed IR → bytecode. Nothing reaches the VM until it type-checks. Compiled functions are frozen `Code` objects, so every thread can run them with no synchronization.
 
-**Bytecode.** 32-bit fixed-width instructions with 8-bit opcode and register operands, in the style of Lua 5.x. Opcodes are typed where the checker knows the types (`add_int`, `lt_float`, `get_field`, `call_static`) and generic only for unions, erased generics and `Dyn`. Dispatch is a `match` in a tight loop, which LLVM turns into a jump table; tail-call threading can be tried later if profiling demands it.
+**Bytecode.** 32-bit fixed-width instructions with 8-bit opcode and register operands, in the style of Lua 5.x. Opcodes are typed where the checker knows the types (`add_int`, `lt_float`, `get_field`, `call_static`) and generic only for unions, erased generics and `Dyn`. Dispatch is a `match` in a tight loop, which LLVM turns into a jump table; tail-call threading can be tried later if profiling demands it. **Built:** typed opcodes follow this plan under other names (`AddI`, `AddF`, `LtF`, `GetField`), with A/B/C, Bx and sBx operand forms; a wide operand (a function, class or global id) takes one extra data word. Superinstructions fuse common sequences, such as compare-and-jump and two field reads. **Declined:** tail-call threaded dispatch was 3–19% slower than the `match` loop on aarch64 and worse on x86-64 (`experiments/dispatch`).
 
 **Inline caches, only where needed.** Interface calls and `Dyn` operations get a per-site cache of `(class_id, method_index)` packed into one `AtomicU64`. A reader loads the word once and either hits or takes the slow path. Since the whole entry is one atomic word, a thread can never see a class from one write and a method from another.
 
-**Method dispatch.** Calls on a known class compile to `call_static` (final methods) or a vtable slot (overridable methods). Calls through a structural interface look the method up by name in the receiver's class table on the first miss, then hit the inline cache. Extension methods are resolved at compile time and are just static calls. With no runtime class reopening, cached dispatch never needs invalidating.
+**Method dispatch.** Calls on a known class compile to `call_static` (final methods) or a vtable slot (overridable methods). (The instructions are named `Call` and `CallVirtual`; an interface call is `CallMethod`.) Calls through a structural interface look the method up by name in the receiver's class table on the first miss, then hit the inline cache. Extension methods are resolved at compile time and are just static calls. With no runtime class reopening, cached dispatch never needs invalidating.
 
 **Threads.** v1 maps language threads 1:1 onto OS threads.
 
@@ -210,11 +238,13 @@ The VM is a register-based bytecode interpreter, one instance per OS thread, all
 - `par_map`, `par_each` and `par_reduce` on collections run on a shared work-stealing pool, and the compiler checks that the block captures only frozen or shared values.
 - Lightweight fibers for I/O-bound work (M:N scheduling) are a phase-4 feature, not v1.
 
-**Globals and modules.** Module objects are shared. Top-level constants are frozen on assignment. Module-level mutable variables are allowed but are shared objects, so they pay locking costs, which nudges people toward constants and passing state explicitly.
+**Built:** threads, channels and `par_*` as described. Fibers shipped in 0.2.0, but not with M:N scheduling: a fiber is a stackful coroutine that stays on the OS thread that started it, and a thread's fibers take turns. Blocking calls go to a pool of I/O threads (`CATX_IO_THREADS`) and sockets to a non-blocking reactor, so one thread can serve thousands of connections. Because a fiber never changes threads, it may capture owned values; the checker keeps a fiber handle from crossing to another thread (E0619).
+
+**Globals and modules.** Module objects are shared. Top-level constants are frozen on assignment. Module-level mutable variables are allowed but are shared objects, so they pay locking costs, which nudges people toward constants and passing state explicitly. **Built differently:** there are no module objects at run time; a module is a compile-time namespace, imported by a path relative to the importing file (reference §2). A module-level `var` must have a frozen or shareable type (E0601), and its slot is one atomic word, so assigning it publishes the value as shared without taking a lock.
 
 ## Crate architecture and phases
 
-Six crates in one Cargo workspace, layered so that all `unsafe` code sits in `runtime` and `gc`, where it can be fuzzed and run under Miri and ThreadSanitizer.
+Seven crates in one Cargo workspace, layered so that all `unsafe` code sits in `runtime` and `gc`, where it can be fuzzed and run under Miri and ThreadSanitizer. **Built:** the memory-management and object-model `unsafe` code is in `gc` and `runtime`. `vm` (the register file and object views), `stdlib` (native object access) and `capi` (the FFI boundary) also use `unsafe`, through those crates' APIs; the compiler and the `catallaxy` crate use none.
 
 | Crate | Role | Depends on |
 | --- | --- | --- |
@@ -224,10 +254,11 @@ Six crates in one Cargo workspace, layered so that all `unsafe` code sits in `ru
 | `catallaxy-compiler` | lexer, parser, type checker, bytecode emitter, formatter | `vm` |
 | `catallaxy-stdlib` | native standard library | `vm`, `runtime`, `gc` |
 | `catallaxy` | the `catx` CLI, REPL, language server, embedding API | all of the above |
+| `catallaxy-capi` | C ABI for embedding and native extensions (`include/catallaxy.h`) | `catallaxy`, `stdlib`, `vm`, `runtime`, `gc` |
 
 The compiler never touches the heap directly; it hands frozen `Code` objects to the VM, which keeps the parser and type checker testable in isolation. The type checker is the largest single module in the project and gets its own test suite of programs that must and must not compile.
 
-**Phases.** Each ends with something runnable and a growing conformance test suite.
+**Phases.** Each ends with something runnable and a growing conformance test suite. **Built:** phases 1–4 shipped in 0.1.0, except fibers, which came in 0.2.0 with phase 5: thread-local young collection, seqlock dict reads and superinstructions shipped, and the JIT experiment ended in a "not now" (`experiments/jit`). Later work is tracked in [GitHub milestones](https://github.com/CodingAnarchy/catallaxy/milestones) and `CHANGELOG.md`.
 
 1. **Typed core.** Lexer, parser, type checker for primitives, functions, classes and simple generics, bytecode compiler, VM, simple single-threaded mark-sweep, `check --json`. Exit: typed fib, closures and classes run, and ill-typed programs are rejected with precise diagnostics.
 2. **Full type system and object model.** Structural interfaces, implicit generics, nullables, unions, enums and exhaustive `match`, `Result` and `?`, extension methods, lists, dicts, strings, modules, first LSP. Exit: few-hundred-line programs check and run within 2x of CPython.
@@ -245,7 +276,7 @@ These are the choices that shape everything else; the first two should be settle
 - [x] **Error handling.** Decided: `Result[T, E]` with the `?` operator for recoverable errors, `panic` for bugs, no exceptions. A panic unwinds only its own thread, and `join` reports it as an error value.
 - [x] **Implicit generics.** Decided: unannotated parameters are allowed only on private functions. `pub` signatures must be annotated, but an annotation can be any interface (`Enumerable[Int]`, `Comparable`, `Display & Hashable`), so public APIs still describe behavior rather than concrete classes.
 - [x] **Integers.** Decided: arbitrary precision. Values that fit in 48 bits are stored inline in the `Value` word; overflow promotes transparently to a heap bigint.
-- [x] **Native extensions.** Decided: v1 supports Rust extensions only, as ordinary crates against the VM's `HandleScope` API, so the borrow checker enforces rooting and ownership rules. A C ABI may come later as a thin wrapper, once the object model is stable.
+- [x] **Native extensions.** Decided: v1 supports Rust extensions only, as ordinary crates against the VM's `HandleScope` API, so the borrow checker enforces rooting and ownership rules. A C ABI may come later as a thin wrapper, once the object model is stable. **Built:** both. The Rust API is `Engine::register` with `HandleScope`, and the C ABI shipped in 0.2.0 as `catallaxy-capi` (`include/catallaxy.h`, reference §11).
 - [x] **Build approach.** Decided: the conformance suite comes first (programs that must check, programs that must be rejected with specific error codes, expected outputs) and serves as the definition of done. An agent fleet builds the parser, type checker, compiler, stdlib and tooling phase by phase against it. Code in `runtime` and `gc` must also pass Miri, Loom, ThreadSanitizer and fuzzing gates, plus human review.
 - [x] **Name.** Decided: **Catallaxy**, Hayek's and Mises's term for the order that emerges from many independent actors exchanging without a central planner, just as threads here coordinate through ownership and explicit exchange with no global lock. The crate name `catallaxy` was unclaimed on crates.io as of October 12, 2026. Proposed short forms: `catx` for the CLI and `.cx` for source files.
-- [ ] **Next:** reserve the `catallaxy` crate name, GitHub org and a domain.
+- [x] **Crate name and repository.** Done: the crates are published on crates.io as `catallaxy` and `catallaxy-*`, and the code lives at [github.com/CodingAnarchy/catallaxy](https://github.com/CodingAnarchy/catallaxy). **Not built yet:** a GitHub organization and a domain.
