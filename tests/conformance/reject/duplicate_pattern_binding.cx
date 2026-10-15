@@ -1,0 +1,7 @@
+# expect: E0228
+pairs = [(1, 2), (3, 4)]
+pairs.each { |p|
+  match p {
+    (a, a) => puts(a)
+  }
+}

@@ -4075,6 +4075,7 @@ impl Checker {
         expected: Option<TyId>,
         spawn_like: Option<bool>,
     ) -> TyId {
+        self.check_unique_names(params.iter().map(|p| &p.name), "block parameter");
         let exp_fn = expected.and_then(|t| match self.types.get(self.types.shallow_resolve(t)).clone() {
             Ty::Fn(ps, r) => Some((ps, r)),
             _ => None,

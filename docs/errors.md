@@ -502,6 +502,18 @@ Use the overridden method's types (`food: Int`), or give the new method a differ
 that mutates `self` is allowed; it makes the overridden method mutating too, so calling it on a frozen
 value is E0614.
 
+## E0228
+
+A name declared twice in one list: the parameters of a function, the parameters of a block, the type
+parameters of a function, class, enum or interface, the named fields of an enum variant, or the
+variables bound by one pattern. The second declaration would silently hide the first.
+
+```cx
+fn f(a: Int, a: Int) -> Int { a - a }
+```
+
+Rename one of them. Use `_` for a parameter or a pattern position you don't need; `_` may repeat.
+
 ## E0230
 
 Recursive function without a return type. A function that calls itself must annotate its result

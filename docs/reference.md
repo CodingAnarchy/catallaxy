@@ -285,6 +285,9 @@ method `f`; to call a function stored in a field, wrap the callee in parentheses
 parenthesized callee (`(xs[0])(x)`, `(make())(x)`) is evaluated first and then called. Closures capture
 variables by reference.
 
+The names in one parameter list, block parameter list, type parameter list or pattern must differ
+(E0228); only `_` may repeat.
+
 A bare `{ ... }` in value position is a block that runs immediately, so `inc = { count += 1 }` would
 store `nil`; that is error E0372. Write `inc = { || count += 1 }` or `fn() { count += 1 }` for code to run
 later.

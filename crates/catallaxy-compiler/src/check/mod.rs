@@ -377,6 +377,24 @@ impl Checker {
         }
     }
 
+    /// Reports each name declared again in one list (parameters, block parameters, type
+    /// parameters, the bindings of one pattern), with a note at the first declaration. `_` may
+    /// repeat.
+    pub fn check_unique_names<'a>(&mut self, names: impl IntoIterator<Item = &'a ast::Ident>, what: &str) {
+        let mut seen: FxHashMap<&str, Span> = FxHashMap::default();
+        for n in names {
+            if n.name == "_" {
+                continue;
+            }
+            if let Some(&first) = seen.get(n.name.as_str()) {
+                let msg = format!("{what} `{}` is declared more than once", n.name);
+                self.emit(Diagnostic::error("E0228", msg, n.span).note_at("first declared here", first));
+            } else {
+                seen.insert(&n.name, n.span);
+            }
+        }
+    }
+
     pub fn has_errors(&self) -> bool {
         self.diags.iter().any(|d| d.is_error())
     }
