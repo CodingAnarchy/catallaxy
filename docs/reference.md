@@ -8,7 +8,12 @@ Source files use the `.cx` extension and are UTF-8. The CLI is `catx`.
 
 ## 1. Lexical structure
 
-- Comments: `#` to end of line. A file may start with a `#!` shebang line.
+- Comments: `#` to end of line. A file may start with a `#!` shebang line. A block of whole-line
+  comments directly above a declaration (a function, method, class, interface, enum, variant,
+  field, constant or module variable), with no blank line between, is its *documentation
+  comment*: editors show it on hover and in completion, and the standard library's appear in
+  `docs/stdlib.md`. It is Markdown; lines indented two more spaces than the `# ` (`#   code`) are
+  example code. `# allow(...)`, `# expect:` and `# exit:` directive lines are not part of it.
 - Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Names starting with an uppercase letter are *type-like*
   (classes, enums, interfaces, variants, constants); others are values (locals, functions, fields, methods).
 - Keywords: `and as break class const continue else enum extend false fn for frozen if import in interface
@@ -266,10 +271,20 @@ variable that is assigned anywhere else in its function keeps no narrowing from 
 and a nil test inside the closure holds only until the next call (another fiber may run meanwhile).
 When the narrowing must outlive a call, bind the value: `if let v = x { ... }`.
 
+"Call" here includes the methods the language calls for you when they are user-defined: `[]` and `[]=`
+in indexing (`v[i]`, `v[i] = x`, `v[i] += 1`), operator methods (`v + 1`, `v += 1`, and operators on a
+`Dyn`, union or generic value), `==` and `<=>` (also inside list, tuple and dict comparisons, and for
+literal patterns in a `match`), `hash` and `==` of a dict or set key (`d[k]`, `d[k] = v`, `[k: v]`),
+`to_s` and `inspect` in string interpolation (also of values nested in a list or a field), and `each`
+in a `for` loop. Builtin ones, such as indexing a `List` or interpolating an `Int`, are not calls. The
+same holds before a loop: a narrowing that a call would end is dropped for the loop if its body contains
+such a call.
+
 A field path on a local or `self` (`n.next`, `self.head.next`) is narrowed by `!= nil` / `== nil` tests
 and by assigning it a non-nil value, as long as nothing could have changed it since: the narrowing ends at
 any assignment to a field of that name, a reassignment of the root variable, any call (unless every field
-on the path belongs to a `frozen class` or is read through a frozen value), and it does not reach into
+on the path belongs to a `frozen class` or is read through a frozen value, and a call cannot reassign
+the root variable as described above), and it does not reach into
 closures or across loop iterations that might change it. Fields of shared classes are never narrowed.
 When it does not apply, bind the value: `if let next = n.next { ... }`.
 
@@ -627,6 +642,9 @@ to code that does not hold the lock:
 ### 8.2 Fibers
 
 A fiber is a lightweight cooperative thread for I/O-bound work. Thousands can run on one OS thread.
+A waiting fiber costs about 20 KB: the touched pages of its 256 KB native stack, and a register
+stack that starts at 2 KB and grows as its calls nest. Starting and finishing one takes O(1) time,
+and a thread reuses the native stacks of its finished fibers.
 
 ```
 fs = urls.map { |u| Fiber.start { fetch(u) } }     # fetch waits on files, channels, sleep...
@@ -765,12 +783,14 @@ unsaved edits. It provides:
 
 - diagnostics (published on open, change and save), hover (types, signatures; on a binding name
   in a `for`, `let`, `if let` or `match` pattern, a block parameter or a function parameter, that
-  variable's type), go to definition (a prelude function, class or method opens a read-only copy
-  of the prelude's source, which the server writes to `catallaxy/prelude-<version>-<hash>/` in the
-  user's cache directory: `$XDG_CACHE_HOME` if set, else `~/Library/Caches` on macOS, `~/.cache`
-  on other Unix systems and `%LOCALAPPDATA%` on Windows; that copy is not checked or indexed, and
-  if it cannot be written the definition is empty), completion (members after `.`, names in
-  scope, keywords) and document formatting (as `catx fmt`);
+  variable's type; on a function or method, its signature with default values; and the
+  declaration's documentation comment), go to definition (a prelude function, class or method
+  opens a read-only copy of the prelude's source, which the server writes to
+  `catallaxy/prelude-<version>-<hash>/` in the user's cache directory: `$XDG_CACHE_HOME` if set,
+  else `~/Library/Caches` on macOS, `~/.cache` on other Unix systems and `%LOCALAPPDATA%` on
+  Windows; that copy is not checked or indexed, and if it cannot be written the definition is
+  empty), completion (members after `.`, names in scope, keywords; each with its documentation
+  comment) and document formatting (as `catx fmt`);
 - find references and rename (with prepare-rename) for locals, parameters (including named
   arguments), functions, methods (an override and the method it overrides rename together), fields,
   classes, enums, variants, interfaces and constants. An interface member renames together with the

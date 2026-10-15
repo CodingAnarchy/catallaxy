@@ -9,6 +9,7 @@ pub mod caps;
 pub mod collect;
 pub mod env;
 pub mod expr;
+pub mod implicit;
 pub mod lookup;
 pub mod pat;
 pub mod protect;

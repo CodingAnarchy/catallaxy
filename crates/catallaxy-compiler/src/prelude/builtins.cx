@@ -6,39 +6,51 @@ pub enum Result[T, E] {
 
   fn is_ok(self) -> Bool { match self { Ok(_) => true, Err(_) => false } }
   fn is_err(self) -> Bool { not self.is_ok() }
+  # The `Ok` value, or nil for an `Err`.
   fn ok(self) -> T? { match self { Ok(v) => v, Err(_) => nil } }
+  # The `Err` value, or nil for an `Ok`.
   fn err(self) -> E? { match self { Ok(_) => nil, Err(e) => e } }
+  # The `Ok` value. Panics on an `Err` with `called unwrap on Err: <error>`.
   fn unwrap(self) -> T {
     match self {
       Ok(v) => v
       Err(e) => panic("called unwrap on Err: #{e}")
     }
   }
+  # The `Err` value. Panics on an `Ok` with `called unwrap_err on Ok: <value>`.
   fn unwrap_err(self) -> E {
     match self {
       Ok(v) => panic("called unwrap_err on Ok: #{v}")
       Err(e) => e
     }
   }
+  # The `Ok` value. Panics on an `Err` with `<message>: <error>`.
   fn expect(self, message: String) -> T {
     match self {
       Ok(v) => v
       Err(e) => panic("#{message}: #{e}")
     }
   }
+  # The `Ok` value, or `default` for an `Err`.
   fn unwrap_or(self, default: T) -> T { match self { Ok(v) => v, Err(_) => default } }
+  # The `Ok` value, or `f(error)` for an `Err` (`f` runs only then).
   fn unwrap_or_else(self, f: fn(E) -> T) -> T { match self { Ok(v) => v, Err(e) => f(e) } }
+  # `Ok(f(value))`, or the same `Err`.
   fn map[U](self, f: fn(T) -> U) -> Result[U, E] { match self { Ok(v) => Ok(f(v)), Err(e) => Err(e) } }
+  # `Err(f(error))`, or the same `Ok`.
   fn map_err[F](self, f: fn(E) -> F) -> Result[T, F] { match self { Ok(v) => Ok(v), Err(e) => Err(f(e)) } }
+  # `f(value)` for an `Ok` (chaining steps that can fail), or the same `Err`.
   fn and_then[U](self, f: fn(T) -> Result[U, E]) -> Result[U, E] { match self { Ok(v) => f(v), Err(e) => Err(e) } }
 }
 
 # Optionals: a nil-able value as a `Result`, so `?` can propagate a missing value from a function
 # that returns a `Result`: `port = env["PORT"].ok_or("PORT is not set")?`.
 extend[T] T? {
+  # `Ok(value)`, or `Err(error)` if nil.
   fn ok_or[E](self, error: E) -> Result[T, E] {
     if let v = self { Ok(v) } else { Err(error) }
   }
+  # `Ok(value)`, or `Err(f())` if nil (`f` runs only then).
   fn ok_or_else[E](self, f: fn() -> E) -> Result[T, E] {
     if let v = self { Ok(v) } else { Err(f()) }
   }
@@ -46,12 +58,15 @@ extend[T] T? {
 
 extend Int {
   # Digits in `base` (2 to 36, lowercase letters above 9), with a leading `-` if negative.
+  # Panics with an `ArgumentError` for another base.
   native fn to_s(self, base: Int = 10) -> String
   native fn hash(self) -> Int
   fn <=>(self, other: Int) -> Int { if self < other { -1 } else if self > other { 1 } else { 0 } }
+  # The nearest `Float`; `Infinity` (or `-Infinity`) beyond its range.
   native fn to_f(self) -> Float
   fn to_i(self) -> Int { self }
   fn abs(self) -> Int { if self < 0 { -self } else { self } }
+  # -1, 0 or 1.
   fn sign(self) -> Int { if self < 0 { -1 } else if self > 0 { 1 } else { 0 } }
   fn is_even(self) -> Bool { self % 2 == 0 }
   fn is_odd(self) -> Bool { self % 2 != 0 }
@@ -60,6 +75,7 @@ extend Int {
   fn pred(self) -> Int { self - 1 }
   fn min(self, other: Int) -> Int { if self < other { self } else { other } }
   fn max(self, other: Int) -> Int { if self > other { self } else { other } }
+  # Calls `f` with 0, 1, ... up to `self - 1`; not at all if `self <= 0`.
   fn times(self, f: fn(Int)) {
     i = 0
     while i < self {
@@ -67,6 +83,7 @@ extend Int {
       i += 1
     }
   }
+  # Calls `f` with `self`, `self + 1`, ... up to `limit` inclusive; not at all if `limit < self`.
   fn upto(self, limit: Int, f: fn(Int)) {
     i = self
     while i <= limit {
@@ -74,6 +91,8 @@ extend Int {
       i += 1
     }
   }
+  # Calls `f` with `self`, `self - 1`, ... down to `limit` inclusive; not at all if
+  # `limit > self`.
   fn downto(self, limit: Int, f: fn(Int)) {
     i = self
     while i >= limit {
@@ -81,6 +100,7 @@ extend Int {
       i -= 1
     }
   }
+  # The greatest common divisor, never negative; `0.gcd(0)` is 0.
   fn gcd(self, other: Int) -> Int {
     a = self.abs
     b = other.abs
@@ -91,14 +111,24 @@ extend Int {
     }
     a
   }
+  # The least common multiple, never negative; 0 if either is 0.
   fn lcm(self, other: Int) -> Int {
     if self == 0 or other == 0 { return 0 }
     (self / self.gcd(other) * other).abs
   }
+  # `self ** exp`, exact (`Int`s grow as needed; `0.pow(0)` is 1). Panics if `exp` is negative;
+  # use `Float` powers for those.
   fn pow(self, exp: Int) -> Int { self ** exp }
+  # As `to_s(radix)`. Panics with an `ArgumentError` unless `radix` is 2 to 36.
   native fn to_s_radix(self, radix: Int) -> String
+  # The character with this Unicode code point: `65.chr == "A"`. Panics with a `RangeError` for a
+  # negative number, a surrogate (0xD800-0xDFFF) or one above 0x10FFFF.
   native fn chr(self) -> String
+  # The integer square root (rounded down), exact for any size. Panics with a `Math::DomainError`
+  # if negative.
   native fn sqrt(self) -> Int
+  # The decimal digits of the absolute value, least significant first:
+  # `1234.digits == [4, 3, 2, 1]`, `0.digits == [0]`.
   fn digits(self) -> List[Int] {
     n = self.abs
     out: List[Int] = []
@@ -109,21 +139,37 @@ extend Int {
     }
     out
   }
+  # The number of bits in the absolute value: `255.bit_length == 8`, `0.bit_length == 0`.
   native fn bit_length(self) -> Int
 }
 
 extend Float {
+  # The shortest text that reads back as the same value, always with a `.`: `1.0`, `0.1`; with an
+  # exponent below 1e-4 and from 1e16 on: `1.0e+21`, `1.0e-07`. Also `NaN`, `Infinity`,
+  # `-Infinity`.
   native fn to_s(self) -> String
   native fn hash(self) -> Int
   fn <=>(self, other: Float) -> Int { if self < other { -1 } else if self > other { 1 } else { 0 } }
   fn to_f(self) -> Float { self }
+  # Truncates toward zero, exactly (an `Int` holds any finite Float). Panics with a
+  # `FloatDomainError` for NaN or an infinity, as `floor`, `ceil`, `round` and `truncate` do.
   native fn to_i(self) -> Int
+  # The largest `Int` not above this. Panics with a `FloatDomainError` for NaN or an infinity.
   native fn floor(self) -> Int
+  # The smallest `Int` not below this. Panics with a `FloatDomainError` for NaN or an infinity.
   native fn ceil(self) -> Int
+  # The nearest `Int`, halves away from zero (`2.5.round == 3`, `(-2.5).round == -3`). Panics with
+  # a `FloatDomainError` for NaN or an infinity.
   native fn round(self) -> Int
+  # Rounded to `digits` decimal places (halves away from zero), as a Float: `2.345.round_to(2)`
+  # is `2.35`; a negative `digits` rounds to tens, hundreds...: `1234.5.round_to(-2) == 1200.0`.
+  # `digits` is clamped to -15..15. NaN and infinities stay as they are.
   native fn round_to(self, digits: Int) -> Float
+  # As `to_i`: toward zero. Panics with a `FloatDomainError` for NaN or an infinity.
   native fn truncate(self) -> Int
   fn abs(self) -> Float { if self < 0.0 { -self } else { self } }
+  # NaN for a negative number (no panic), as the other math methods return NaN or an infinity
+  # outside their domain (`(-1.0).ln` is NaN, `0.0.ln` is `-Infinity`).
   native fn sqrt(self) -> Float
   native fn cbrt(self) -> Float
   native fn sin(self) -> Float
@@ -137,11 +183,18 @@ extend Float {
   native fn ln(self) -> Float
   native fn log10(self) -> Float
   native fn log2(self) -> Float
+  # True only for NaN (which is not equal to itself).
   native fn is_nan(self) -> Bool
   native fn is_infinite(self) -> Bool
+  # False for NaN and the infinities.
   native fn is_finite(self) -> Bool
+  # The smaller of the two. If either is NaN the result is `other`.
   fn min(self, other: Float) -> Float { if self < other { self } else { other } }
+  # The larger of the two. If either is NaN the result is `other`.
   fn max(self, other: Float) -> Float { if self > other { self } else { other } }
+  # Fixed-point text with exactly `decimals` digits after the point (clamped to 0..30), no
+  # exponent: `3.14159.format(2) == "3.14"`. Rounds the exact binary value, ties to even
+  # (`2.5.format(0) == "2"`), unlike `round_to`. Infinities are `inf` / `-inf`, NaN is `NaN`.
   native fn format(self, decimals: Int) -> String
 }
 
@@ -159,28 +212,46 @@ extend String {
   native fn hash(self) -> Int
   native fn <=>(self, other: String) -> Int
   native fn +(self, other: String) -> String
+  # The text repeated `times` times (`""` for 0). Panics with an `ArgumentError` if negative.
   native fn *(self, times: Int) -> String
+  # The character (Unicode scalar value) at character position `index`; negative counts from the
+  # end. Indexing with a range (`s[1..3]`) returns those characters, clipped to the string.
   native fn [](self, index: Int) -> String
+  # The number of characters (Unicode scalar values), not bytes; see `byte_length`.
   native fn length(self) -> Int
+  # The number of bytes in the UTF-8 encoding.
   native fn byte_length(self) -> Int
   fn size(self) -> Int { self.length }
   fn is_empty(self) -> Bool { self.byte_length == 0 }
+  # Unicode uppercase; may change the length (`"straße".upcase == "STRASSE"`).
   native fn upcase(self) -> String
+  # Unicode lowercase.
   native fn downcase(self) -> String
+  # The first character uppercased and the rest lowercased: `"hELLO wORLD"` becomes
+  # `"Hello world"`.
   native fn capitalize(self) -> String
   native fn swapcase(self) -> String
+  # The characters in reverse order (by Unicode scalar value, so combining marks move).
   native fn reverse(self) -> String
+  # Without leading and trailing Unicode whitespace (including `\n`, `\t` and U+00A0).
   native fn strip(self) -> String
+  # Without leading Unicode whitespace.
   native fn lstrip(self) -> String
+  # Without trailing Unicode whitespace.
   native fn rstrip(self) -> String
   fn trim(self) -> String { self.strip }
+  # Without one trailing `\n` or `\r\n` (only one: `"a\n\n".chomp == "a\n"`).
   native fn chomp(self) -> String
   # The pieces between occurrences of `sep` (a string or a `Regex`); with the default `""`, the
   # words between runs of whitespace. With a positive `limit`, at most `limit` pieces: the last
   # holds the rest of the text.
   native fn split(self, sep: String | Regex = "", limit: Int = 0) -> List[String]
+  # The lines without their `\n` or `\r\n` endings; a final line ending adds no empty line, and
+  # `"".lines` is `[]`.
   native fn lines(self) -> List[String]
+  # Each character (Unicode scalar value) as a one-character string.
   native fn chars(self) -> List[String]
+  # The UTF-8 bytes, each 0 to 255 (`"é".bytes == [195, 169]`).
   native fn bytes(self) -> List[Int]
   # The UTF-8 encoding as `Bytes`.
   native fn to_bytes(self) -> Bytes
@@ -192,33 +263,75 @@ extend String {
   native fn ends_with(self, suffix: String) -> Bool
   native fn contains(self, sub: String) -> Bool
   fn include(self, sub: String) -> Bool { self.contains(sub) }
+  # The character position of the first occurrence of `sub` at or after character position
+  # `from` (a negative `from` counts as 0), or nil. An empty `sub` is found at `from`, or at the
+  # end if `from` is past it.
   native fn index_of(self, sub: String, from: Int = 0) -> Int?
+  # The character position of the last occurrence of `sub`, or nil.
   native fn rindex_of(self, sub: String) -> Int?
+  # Every non-overlapping occurrence of `old` replaced, left to right; an empty `old` changes
+  # nothing. For patterns, see `gsub`.
   native fn replace(self, old: String, new: String) -> String
+  # The first occurrence of `old` replaced. For patterns, see `sub`.
   native fn replace_first(self, old: String, new: String) -> String
+  # Up to `len` characters from character position `start` (negative counts from the end). Never
+  # panics: the range is clipped to the string, so it may be shorter or `""`.
   native fn slice(self, start: Int, len: Int) -> String
+  # The characters from position `start` up to (not including) `end`; negative positions count
+  # from the end. Clipped to the string; `""` if `end <= start`. Never panics.
   native fn substring(self, start: Int, end: Int) -> String
+  # The number of non-overlapping occurrences of `sub` (`"aaaa".count("aa") == 2`); 0 for `""`.
   native fn count(self, sub: String) -> Int
+  # The decimal integer, or nil if the text is not one. Surrounding whitespace, a leading `+` or
+  # `-` and `_` separators are allowed (`" 1_000 "` is 1000); there is no size limit. For other
+  # bases, see `parse_int`.
   native fn to_i(self) -> Int?
+  # The number, or nil if the text is not one. Surrounding whitespace, exponents (`"1e3"`) and
+  # `inf`, `infinity` and `NaN` (any case) are allowed; `_` is not.
   native fn to_f(self) -> Float?
+  # The integer in base `radix` (digits and letters of either case, an optional sign, surrounding
+  # whitespace), or nil. No `0x`-style prefix. Panics with an `ArgumentError` unless `radix` is 2
+  # to 36.
   native fn parse_int(self, radix: Int = 10) -> Int?
+  # The Unicode code point of the first character (`"é".ord == 233`). Panics with an
+  # `ArgumentError` on an empty string.
   native fn ord(self) -> Int
+  # The text centered in `width` characters, padded with repeats of `pad` (any extra one goes on
+  # the right). Unchanged if already that wide or `pad` is empty.
   native fn center(self, width: Int, pad: String = " ") -> String
+  # The text padded on the right to `width` characters with repeats of `pad`. Unchanged if already
+  # that wide or `pad` is empty.
   native fn ljust(self, width: Int, pad: String = " ") -> String
+  # The text padded on the left to `width` characters with repeats of `pad`: `"7".rjust(3, "0")` is
+  # `"007"`. Unchanged if already that wide or `pad` is empty.
   native fn rjust(self, width: Int, pad: String = " ") -> String
   # Fills a runtime template: `{}` takes the next argument's `to_s`, `{:spec}` formats it with a
   # spec as in `"#{x:spec}"`, `{{` and `}}` are literal braces. Panics with a `FormatError` on a bad
   # spec or when the placeholders and arguments do not match in number.
   native fn format(self, args: List[Dyn]) -> String
+  # True if the text is non-empty and all ASCII digits `0`-`9` (other scripts' digits are not).
+  # The `is_` tests are all false for `""`.
   native fn is_digit(self) -> Bool
+  # True if non-empty and every character is a Unicode letter (`"é"` is).
   native fn is_alpha(self) -> Bool
+  # True if non-empty and every character is a Unicode letter or digit.
   native fn is_alnum(self) -> Bool
+  # True if non-empty and every character is Unicode whitespace.
   native fn is_space(self) -> Bool
+  # True if non-empty and no letter in it is lowercase; non-letters are ignored, so `"AB1"` and
+  # `"12"` are upper.
   native fn is_upper(self) -> Bool
+  # True if non-empty and no letter in it is uppercase; non-letters are ignored.
   native fn is_lower(self) -> Bool
+  # The text without `prefix` if it starts with it, else unchanged.
   native fn delete_prefix(self, prefix: String) -> String
+  # The text without `suffix` if it ends with it, else unchanged.
   native fn delete_suffix(self, suffix: String) -> String
+  # Each run of a repeated character collapsed to one: `"aaabcc".squeeze == "abc"`.
   native fn squeeze(self) -> String
+  # Each character found in `from` replaced by the one at the same position in `to` (or the
+  # last character of `to` if it is shorter): `"hello".tr("el", "ip") == "hippo"`. There are no
+  # ranges: `-` is an ordinary character. With an empty `to`, nothing changes.
   native fn tr(self, from: String, to: String) -> String
   # Calls `f` with each character; returns the characters (so without a block, `chars`).
   fn each_char(self, f: (fn(String))? = nil) -> List[String] {
@@ -226,6 +339,7 @@ extend String {
     if let g = f { for c in cs { g(c) } }
     cs
   }
+  # As `self * n`: panics with an `ArgumentError` if `n` is negative.
   fn repeat(self, n: Int) -> String { self * n }
   # Regex conveniences: `re.matches(self)`, the texts of `re.find_all(self)`, `re.replace(self, r)`
   # and `re.replace_all(self, r)`.
@@ -240,36 +354,67 @@ extend List[T] {
   # An empty list with room for `n` items. The capacity is a hint: at most 2^24 items are
   # reserved up front, and the list grows past that as usual. Panics if `n` is negative.
   native fn with_capacity(n: Int) -> List[T]
-  # `n` copies of `value`. Panics with a MemoryError if the list cannot fit in memory.
+  # `n` copies of `value` (the same object `n` times, not copies of it). Panics with an
+  # `ArgumentError` if `n` is negative, or a MemoryError if the list cannot fit in memory.
   native fn filled(n: Int, value: T) -> List[T]
   native fn length(self) -> Int
   fn size(self) -> Int { self.length }
   fn is_empty(self) -> Bool { self.length == 0 }
+  # Appends `item` at the end (amortized O(1)).
   native fn push(mut self, item: T)
+  # As `push`: appends one item. To append a whole list, use `concat`.
   fn append(mut self, item: T) { self.push(item) }
+  # Removes and returns the last item, or nil if the list is empty.
   native fn pop(mut self) -> T?
+  # Removes and returns the first item, or nil if the list is empty. It moves every other item;
+  # use a `Deque` for a queue.
   native fn shift(mut self) -> T?
+  # Inserts `item` at the front, moving every other item (see `Deque`).
   native fn unshift(mut self, item: T)
+  # Inserts `item` before position `index`, so `index == length` appends; a negative `index`
+  # counts from the end with -1 appending. Panics with an `IndexError` past either end.
   native fn insert(mut self, index: Int, item: T)
+  # Removes and returns the item at `index` (negative counts from the end). Panics with an
+  # `IndexError` if out of range.
   native fn remove_at(mut self, index: Int) -> T
   native fn clear(mut self)
+  # Appends every item of `other`, in place (`xs.concat(xs)` doubles `xs`). `+` returns a new list
+  # instead.
   native fn concat(mut self, other: List[T])
+  # The item at `index`; negative counts from the end (`xs[-1]` is the last). Panics with an
+  # `IndexError` if out of range; `get` returns nil instead. Indexing with a range (`xs[1..3]`)
+  # returns a new list of those items, clipped to the list.
   native fn [](self, index: Int) -> T
+  # Replaces the item at `index` (negative counts from the end). Panics with an `IndexError` if
+  # out of range: it never grows the list (use `push`).
   native fn []=(mut self, index: Int, value: T)
+  # The item at `index` (negative counts from the end), or nil if out of range.
   native fn get(self, index: Int) -> T?
+  # A new list of up to `len` items from position `start` (negative counts from the end). Never
+  # panics: the range is clipped to the list, so the result may be shorter or empty.
   native fn slice(self, start: Int, len: Int) -> List[T]
+  # A shallow copy: a new list holding the same items.
   native fn dup(self) -> List[T]
+  # A new list with the items in reverse order; `reverse_in_place` reverses this one.
   native fn reverse(self) -> List[T]
   native fn reverse_in_place(mut self)
+  # Exchanges the items at `i` and `j` (negative counts from the end). Panics with an
+  # `IndexError` if either is out of range.
   native fn swap(mut self, i: Int, j: Int)
+  # Removes the items from position `len` on; does nothing if the list is not longer. A negative
+  # `len` empties it.
   native fn truncate(mut self, len: Int)
+  # A new list: this one's items followed by `other`'s. Neither list changes.
   fn +(self, other: List[T]) -> List[T] {
     out = self.dup()
     out.concat(other)
     out
   }
+  # The first item, or nil if the list is empty.
   fn first(self) -> T? { self.get(0) }
+  # The last item, or nil if the list is empty.
   fn last(self) -> T? { self.get(-1) }
+  # The last `n` items (all of them if there are fewer; none if `n <= 0`).
   fn take_last(self, n: Int) -> List[T] {
     if n <= 0 { return [] }
     k = if n < self.length { n } else { self.length }
@@ -344,6 +489,7 @@ extend List[T] {
     }
     acc
   }
+  # The position of the first item `== item`, or nil.
   fn index_of(self, item: T) -> Int? {
     i = 0
     while i < self.length {
@@ -353,6 +499,7 @@ extend List[T] {
     nil
   }
   fn contains(self, item: T) -> Bool { self.index_of(item) != nil }
+  # Removes the first item `== item`; returns whether there was one. Later equal items stay.
   fn delete(mut self, item: T) -> Bool {
     if let i = self.index_of(item) {
       self.remove_at(i)
@@ -360,11 +507,14 @@ extend List[T] {
     }
     false
   }
+  # Removes, in place, every item for which `f` is true. Returns nothing; `reject` returns a new
+  # list instead.
   fn delete_if(mut self, f: fn(T) -> Bool) {
     kept = self.reject(f)
     self.clear()
     self.concat(kept)
   }
+  # Sets every existing item to `value`, in place (the length does not change).
   fn fill(mut self, value: T) {
     i = 0
     while i < self.length {
@@ -372,12 +522,16 @@ extend List[T] {
       i += 1
     }
   }
+  # A new list rotated left by `n` (right if negative), wrapping around:
+  # `[1, 2, 3, 4].rotate(1) == [2, 3, 4, 1]`, `[1, 2, 3, 4].rotate(-1) == [4, 1, 2, 3]`.
   fn rotate(self, n: Int = 1) -> List[T] {
     len = self.length
     if len == 0 { return [] }
     k = n % len
     self.slice(k, len - k) + self.slice(0, k)
   }
+  # The items in consecutive lists of `size` (the last may be shorter). `size` must be positive:
+  # with 0 or less it never returns.
   fn chunk(self, size: Int) -> List[List[T]] {
     out: List[List[T]] = []
     i = 0
@@ -387,6 +541,8 @@ extend List[T] {
     }
     out
   }
+  # The items reordered as a stable sort of `keys` (one per item, at the same position) orders
+  # them. Panics with an `ArgumentError` if the lengths differ.
   native fn sort_by_keys[K: Comparable](self, keys: List[K]) -> List[T]
   # A stable sort by the comparator `f`: negative, zero or positive as its first argument sorts
   # before, with or after its second.
@@ -394,20 +550,32 @@ extend List[T] {
   # As `Enumerable`'s, natively: the first item with the smallest (largest) key.
   native fn min_by[K: Comparable](self, f: fn(T) -> K) -> T?
   native fn max_by[K: Comparable](self, f: fn(T) -> K) -> T?
+  # `map` on a pool of worker threads; the results keep the items' order. The items and what
+  # `f` captures must be frozen or shareable. If `f` panics, `par_map` panics with that message.
   native fn par_map[U](self, f: fn(T) -> U) -> List[U]
+  # Calls `f` with every item on a pool of worker threads, in no particular order; returns when
+  # all calls are done. Requirements as for `par_map`.
   native fn par_each(self, f: fn(T))
+  # Combines the items with `f` on worker threads: each chunk is folded from `identity`, then the
+  # chunk results are combined. So `f` must be associative and `identity` neutral for it (0 for
+  # `+`); an empty list gives `identity`.
   native fn par_reduce(self, identity: T, f: fn(T, T) -> T) -> T
+  # `select` on worker threads; the kept items stay in order. Requirements as for `par_map`.
   native fn par_select(self, f: fn(T) -> Bool) -> List[T]
 }
 
 # Sorting by the natural order needs `Comparable` items (tuples and lists of comparable items are
 # compared lexicographically).
 extend[T: Comparable] List[T] {
+  # A new, stably sorted list; the list itself is unchanged. Panics with an `ArgumentError` if
+  # two items cannot be compared (a NaN, for one).
   native fn sorted(self) -> List[T]
+  # Sorts this list, stably, in place; panics as `sorted` does.
   native fn sort_in_place(mut self)
 }
 
 extend List[List[U]] {
+  # The inner lists' items in one new list (one level deep).
   fn flatten(self) -> List[U] {
     out: List[U] = []
     for xs in self { out.concat(xs) }
@@ -432,6 +600,7 @@ pub class Deque[T] {
     self._head = 0
     self._len = 0
   }
+  # A deque of `items`, in order.
   fn from(items: Enumerable[T]) -> Deque[T] {
     d: Deque[T] = Deque.new()
     items.each { |x| d.push(x) }
@@ -448,7 +617,7 @@ pub class Deque[T] {
     self._buf[j] = item
     self._len += 1
   }
-  # Removes and returns the last item.
+  # Removes and returns the last item, or nil if empty.
   fn pop(self) -> T? {
     if self._len == 0 { return nil }
     j = self._head + self._len - 1
@@ -467,7 +636,7 @@ pub class Deque[T] {
     self._head = h
     self._len += 1
   }
-  # Removes and returns the first item.
+  # Removes and returns the first item, or nil if empty.
   fn shift(self) -> T? {
     if self._len == 0 { return nil }
     h = self._head
@@ -478,8 +647,12 @@ pub class Deque[T] {
     self._len -= 1
     x
   }
+  # The front item, or nil if empty.
   fn first(self) -> T? { self.get(0) }
+  # The back item, or nil if empty.
   fn last(self) -> T? { self.get(-1) }
+  # The item at `index` from the front (negative counts from the back). Panics with an
+  # `IndexError` if out of range; `get` returns nil instead.
   fn [](self, index: Int) -> T {
     i = if index < 0 { index + self._len } else { index }
     if i < 0 or i >= self._len { panic("IndexError: index #{index} out of range for length #{self._len}") }
@@ -487,6 +660,8 @@ pub class Deque[T] {
     if j >= self._buf.length { j -= self._buf.length }
     self._buf[j]
   }
+  # Replaces the item at `index` (negative counts from the back). Panics with an `IndexError` if
+  # out of range.
   fn []=(self, index: Int, value: T) {
     i = if index < 0 { index + self._len } else { index }
     if i < 0 or i >= self._len { panic("IndexError: index #{index} out of range for length #{self._len}") }
@@ -494,6 +669,7 @@ pub class Deque[T] {
     if j >= self._buf.length { j -= self._buf.length }
     self._buf[j] = value
   }
+  # The item at `index` (negative counts from the back), or nil if out of range.
   fn get(self, index: Int) -> T? {
     i = if index < 0 { index + self._len } else { index }
     if i < 0 or i >= self._len { return nil }
@@ -560,46 +736,65 @@ extend Dict[K, V] {
   native fn length(self) -> Int
   fn size(self) -> Int { self.length }
   fn is_empty(self) -> Bool { self.length == 0 }
+  # The value for `key`, or nil if it is absent (never panics). Use `has_key` to tell an absent
+  # key from a nil value.
   native fn [](self, key: K) -> V?
+  # Sets the value for `key`. A new key goes last in iteration order; an existing one keeps its
+  # place.
   native fn []=(mut self, key: K, value: V)
+  # As `d[key]`: the value, or nil.
   native fn get(self, key: K) -> V?
+  # The value for `key`, or `default` if it is absent or its value is nil. Never panics.
   fn fetch(self, key: K, default: V) -> V { self.get(key) ?? default }
   native fn has_key(self, key: K) -> Bool
   fn contains_key(self, key: K) -> Bool { self.has_key(key) }
+  # Removes `key`; returns its value, or nil if it was absent.
   native fn delete(mut self, key: K) -> V?
   native fn clear(mut self)
+  # The keys in insertion order (as `values` and `entries` are).
   native fn keys(self) -> List[K]
+  # The values in insertion order of their keys.
   native fn values(self) -> List[V]
+  # The `(key, value)` pairs in insertion order.
   native fn entries(self) -> List[(K, V)]
+  # A shallow copy: a new dict holding the same keys and values.
   native fn dup(self) -> Dict[K, V]
   fn each(self, f: fn((K, V))) {
     for e in self.entries() { f(e) }
   }
   fn each_key(self, f: fn(K)) { for k in self.keys() { f(k) } }
   fn each_value(self, f: fn(V)) { for v in self.values() { f(v) } }
+  # The value for `key`; if it is absent (or nil), stores `default` under it first and returns
+  # that. `default` is evaluated either way.
   fn get_or_insert(mut self, key: K, default: V) -> V {
     if let v = self.get(key) { return v }
     self[key] = default
     default
   }
+  # A new dict with this one's entries and then `other`'s: on a shared key `other`'s value wins
+  # (the key keeps this dict's position). Neither dict changes.
   fn merge(self, other: Dict[K, V]) -> Dict[K, V] {
     out = self.dup()
     for (k, v) in other.entries() { out[k] = v }
     out
   }
+  # As `merge`, in place: copies `other`'s entries into this dict, overwriting shared keys.
   fn update(mut self, other: Dict[K, V]) {
     for (k, v) in other.entries() { self[k] = v }
   }
+  # A new dict with the same keys (in order) and `f` applied to each value.
   fn map_values[W](self, f: fn(V) -> W) -> Dict[K, W] {
     out: Dict[K, W] = [:]
     for (k, v) in self.entries() { out[k] = f(v) }
     out
   }
+  # A new dict of the entries for which `f(key, value)` is true, in order.
   fn select_entries(self, f: fn(K, V) -> Bool) -> Dict[K, V] {
     out: Dict[K, V] = [:]
     for (k, v) in self.entries() { if f(k, v) { out[k] = v } }
     out
   }
+  # Values as keys and keys as values. When values repeat, the last key with that value wins.
   fn invert(self) -> Dict[V, K] {
     out: Dict[V, K] = [:]
     for (k, v) in self.entries() { out[v] = k }
@@ -608,12 +803,14 @@ extend Dict[K, V] {
 }
 
 extend[K: Comparable, V] Dict[K, V] {
+  # The `(key, value)` pairs sorted by key (the dict itself keeps its order).
   fn sort_by_key(self) -> List[(K, V)] {
     self.entries().sort_by { |e| e.0 }
   }
 }
 
 extend[K, V: Comparable] Dict[K, V] {
+  # The `(key, value)` pairs sorted by value, stably (equal values keep insertion order).
   fn sort_by_value(self) -> List[(K, V)] {
     self.entries().sort_by { |e| e.1 }
   }
@@ -621,27 +818,35 @@ extend[K, V: Comparable] Dict[K, V] {
 
 extend Set[T] {
   native fn new() -> Set[T]
+  # The distinct items, in order of first occurrence.
   native fn from(items: List[T]) -> Set[T]
   native fn length(self) -> Int
   fn size(self) -> Int { self.length }
   fn is_empty(self) -> Bool { self.length == 0 }
+  # Adds `item`; returns true if it was not already there (false leaves the set unchanged).
   native fn add(mut self, item: T) -> Bool
+  # Removes `item`; returns true if it was there.
   native fn remove(mut self, item: T) -> Bool
   native fn contains(self, item: T) -> Bool
   native fn clear(mut self)
+  # The items in insertion order.
   native fn to_list(self) -> List[T]
+  # A shallow copy.
   native fn dup(self) -> Set[T]
   fn each(self, f: fn(T)) { for x in self.to_list() { f(x) } }
+  # A new set of the items in either (`a | b`): this set's in order, then `other`'s new ones.
   fn union(self, other: Set[T]) -> Set[T] {
     out = self.dup()
     for x in other.to_list() { out.add(x) }
     out
   }
+  # A new set of this set's items that are also in `other` (`a & b`), in this set's order.
   fn intersection(self, other: Set[T]) -> Set[T] {
     out: Set[T] = Set.new()
     for x in self.to_list() { if other.contains(x) { out.add(x) } }
     out
   }
+  # A new set of this set's items that are not in `other` (`a - b`), in this set's order.
   fn difference(self, other: Set[T]) -> Set[T] {
     out: Set[T] = Set.new()
     for x in self.to_list() { if not other.contains(x) { out.add(x) } }
@@ -650,13 +855,17 @@ extend Set[T] {
   fn |(self, other: Set[T]) -> Set[T] { self.union(other) }
   fn &(self, other: Set[T]) -> Set[T] { self.intersection(other) }
   fn -(self, other: Set[T]) -> Set[T] { self.difference(other) }
+  # True if every item is in `other` (so a set is a subset of itself, and the empty set of any set).
   fn is_subset(self, other: Set[T]) -> Bool { self.all { |x| other.contains(x) } }
   fn is_superset(self, other: Set[T]) -> Bool { other.is_subset(self) }
 }
 
 extend Range {
+  # The start bound, even for an empty range: `(5..1).first == 5`.
   native fn first(self) -> Int
+  # The end bound as written, even when excluded: `(1...5).last == 5`, not 4.
   native fn last(self) -> Int
+  # True for `a...b` (end excluded), false for `a..b`.
   native fn is_exclusive(self) -> Bool
   fn each(self, f: fn(Int)) {
     i = self.first
@@ -666,14 +875,19 @@ extend Range {
       i += 1
     }
   }
+  # The number of integers in the range; 0 if it is empty (`5..1` counts nothing, it does not
+  # count down).
   fn length(self) -> Int {
     n = if self.is_exclusive { self.last - self.first } else { self.last - self.first + 1 }
     n.max(0)
   }
   fn size(self) -> Int { self.length }
+  # True if `first <= x` and `x` is before (`...`) or at most (`..`) `last`.
   fn contains(self, x: Int) -> Bool {
     if self.is_exclusive { x >= self.first and x < self.last } else { x >= self.first and x <= self.last }
   }
+  # Every `n`th integer from `first`: `(1..10).step(3) == [1, 4, 7, 10]`. `n` must be positive:
+  # with 0 or less it never returns.
   fn step(self, n: Int) -> List[Int] {
     out: List[Int] = []
     i = self.first
@@ -689,6 +903,7 @@ extend Range {
     for i in self { out.push(i) }
     out
   }
+  # The total of the integers in the range; 0 if it is empty.
   fn sum(self) -> Int {
     total = 0
     for i in self { total += i }
@@ -698,19 +913,32 @@ extend Range {
 
 extend StringBuilder {
   native fn new() -> StringBuilder
+  # Appends `s`.
   native fn push(mut self, s: String)
+  # Appends `v.to_s` (as string interpolation does).
   native fn push_value(mut self, v: Dyn)
+  # Appends the character with Unicode code point `code`. Panics with a `RangeError` if it is not
+  # a valid one, as `Int.chr` does.
   native fn push_char(mut self, code: Int)
+  # The text built so far (the builder can keep growing).
   native fn to_s(self) -> String
+  # The length so far in characters, like `String.length`.
   native fn length(self) -> Int
   native fn clear(mut self)
 }
 
 extend Mutex[T] {
+  # A mutex guarding `value`, which becomes shared (it and what it holds may then be used from
+  # any thread, under the lock).
   native fn new(move value: T) -> Mutex[T]
+  # Calls `f` with the value while holding the lock and returns `f`'s result. Mutate the value
+  # inside `f`; do not keep it after.
   native fn lock[R](self, f: fn(T) -> R) -> R
+  # Replaces the value with `f(value)` under the lock; returns the new value.
   native fn update(self, f: fn(T) -> T) -> T
+  # The value, read under the lock (for an object, the object itself, not a copy).
   native fn get(self) -> T
+  # Replaces the value under the lock.
   native fn set(self, move value: T)
 }
 
@@ -718,20 +946,36 @@ extend Atomic[T] {
   native fn new(value: T) -> Atomic[T]
   native fn get(self) -> T
   native fn set(self, value: T)
+  # Stores `value` and returns the previous one, atomically.
   native fn swap(self, value: T) -> T
+  # Stores `value` if the current value `==` `expected`; returns whether it did.
   native fn compare_and_set(self, expected: T, value: T) -> Bool
+  # Adds `delta` atomically and returns the new value. Panics with a `TypeError` unless the
+  # value is an `Int`.
   native fn add(self, delta: Int) -> Int
+  # Replaces the value with `f(value)` atomically (retrying `f` if another thread changed it
+  # meanwhile, so `f` should have no side effects); returns the new value.
   native fn update(self, f: fn(T) -> T) -> T
 }
 
 extend Channel[T] {
+  # A channel holding at most `capacity` queued items (`send` waits when it is full); 0, the
+  # default, means unbounded. Panics with an `ArgumentError` if negative.
   native fn new(capacity: Int = 0) -> Channel[T]
+  # Queues `item` (moving it, if owned, to the receiver), waiting while a bounded channel is
+  # full. Panics with a `ChannelError` if the channel is closed.
   native fn send(self, move item: T)
+  # The next item, waiting for one; nil once the channel is closed and drained.
   native fn recv(self) -> T?
+  # The next item if one is queued, else nil at once (also when the channel is closed and empty).
   native fn try_recv(self) -> T?
+  # Closes the channel: later `send`s panic, receivers get the queued items and then nil.
+  # Closing twice is allowed.
   native fn close(self)
   native fn is_closed(self) -> Bool
+  # The number of queued items.
   native fn length(self) -> Int
+  # Calls `f` with each item received until the channel is closed and drained.
   fn each(self, f: fn(T)) {
     loop {
       if let x = self.recv() { f(x) } else { break }
@@ -740,7 +984,11 @@ extend Channel[T] {
 }
 
 extend Thread[T] {
+  # Waits for the thread and returns its result, or `Err` with the message of the panic that
+  # ended it. Only the first join gets the result: later ones return
+  # `Err("thread was already joined")`.
   native fn join(self) -> Result[T, String]
+  # True once the thread has finished (returned or panicked); never waits.
   native fn is_done(self) -> Bool
 }
 
@@ -777,31 +1025,53 @@ pub class Math {
   const PI: Float = 3.141592653589793
   const E: Float = 2.718281828459045
   const INFINITY: Float = 1.0 / 0.0
+  # The square root; NaN for a negative `x` (the Math functions return NaN or an infinity outside
+  # their domain rather than panicking).
   native fn sqrt(x: Float) -> Float
+  # `x` to the power `y`, in floating point (`Math.pow(2.0, -1.0) == 0.5`). For exact integer
+  # powers use `Int.pow` or `**`.
   native fn pow(x: Float, y: Float) -> Float
+  # The sine of `x` radians (`cos` and `tan` take radians too).
   native fn sin(x: Float) -> Float
   native fn cos(x: Float) -> Float
   native fn tan(x: Float) -> Float
+  # The angle of the point `(x, y)` from the positive x axis, in radians from -π to π. Note the
+  # argument order: `y` first.
   native fn atan2(y: Float, x: Float) -> Float
   native fn exp(x: Float) -> Float
+  # The natural logarithm: `-Infinity` for 0, NaN for a negative `x`.
   native fn log(x: Float) -> Float
+  # The base-10 logarithm: `-Infinity` for 0, NaN for a negative `x`.
   native fn log10(x: Float) -> Float
+  # `sqrt(x² + y²)`, without overflow or underflow in between.
   native fn hypot(x: Float, y: Float) -> Float
   fn min_int(a: Int, b: Int) -> Int { if a < b { a } else { b } }
   fn max_int(a: Int, b: Int) -> Int { if a > b { a } else { b } }
 }
 
+# Whole-file operations. None of them panics on an I/O failure: they return `Err` with
+# `"<path>: <reason>"` (`"x.txt: No such file or directory (os error 2)"`).
 pub class File {
+  # The whole file as text. `Err` if it is missing, unreadable, a directory or not valid UTF-8
+  # (see `read_bytes`).
   native fn read(path: String) -> Result[String, String]
+  # Creates or truncates the file and writes `contents`. The directory must exist.
   native fn write(path: String, contents: String) -> Result[Nil, String]
+  # Appends `contents`, creating the file if it is missing.
   native fn append(path: String, contents: String) -> Result[Nil, String]
+  # True if `path` exists, whether file or directory (see `Dir.exists`).
   native fn exists(path: String) -> Bool
+  # Deletes a file (not a directory; see `Dir.remove`). `Err` if it is missing.
   native fn delete(path: String) -> Result[Nil, String]
+  # The file's lines without their `\n` or `\r\n` endings, as `String.lines` splits them.
   native fn read_lines(path: String) -> Result[List[String], String]
+  # Entry names (not paths) in the directory, sorted; as `Dir.list`.
   native fn list_dir(path: String) -> Result[List[String], String]
+  # Size, kind and modification time; `Err` if `path` does not exist.
   native fn metadata(path: String) -> Result[Metadata, String]
   # The file's contents as they are, for binary files (`read` needs valid UTF-8).
   native fn read_bytes(path: String) -> Result[Bytes, String]
+  # Creates or truncates the file and writes `data`.
   native fn write_bytes(path: String, data: Bytes) -> Result[Nil, String]
 }
 
@@ -811,7 +1081,7 @@ pub class File {
 # `List[Int]` and convert once with `Bytes.new`, or join pieces with `+`.
 pub frozen class Bytes {
   handle: NativeHandle
-  # Bytes with the given values, each in 0..255.
+  # Bytes with the given values, each in 0..255. Panics with an `ArgumentError` for any other.
   native fn new(values: List[Int] = []) -> Bytes
   # Parses hex digits (either case, no separators).
   native fn from_hex(text: String) -> Result[Bytes, String]
@@ -822,7 +1092,10 @@ pub frozen class Bytes {
   fn is_empty(self) -> Bool { self.length == 0 }
   # The byte at `index` (negative counts from the end); panics out of range.
   native fn [](self, index: Int) -> Int
+  # The byte at `index` (negative counts from the end), or nil if out of range.
   native fn get(self, index: Int) -> Int?
+  # Up to `len` bytes from `start` (negative counts from the end), clipped to the bytes; never
+  # panics.
   native fn slice(self, start: Int, len: Int) -> Bytes
   native fn +(self, other: Bytes) -> Bytes
   native fn ==(self, other: Bytes) -> Bool
@@ -925,6 +1198,8 @@ pub class Dir {
 pub class Path {
   # `base/part`, or `part` alone if it is absolute.
   native fn join(base: String, part: String) -> String
+  # The parts joined left to right as by `join`, so an absolute part restarts the path:
+  # `Path.join_all(["a", "/b", "c"]) == "/b/c"`; `""` for no parts.
   native fn join_all(parts: List[String]) -> String
   # The last component: `Path.basename("a/b.txt") == "b.txt"`.
   native fn basename(path: String) -> String
@@ -934,6 +1209,8 @@ pub class Path {
   native fn extension(path: String) -> String?
   # The last component without its extension.
   native fn stem(path: String) -> String
+  # True if the path starts at the root (`/a` on Unix). `~` is not expanded, so `~/a` is
+  # relative.
   native fn is_absolute(path: String) -> Bool
 }
 
@@ -1040,6 +1317,7 @@ const __NANOS_PER_SEC: Int = 1_000_000_000
 pub frozen class Duration {
   nanos: Int
 
+  # The `from_` constructors take a count of the unit, which may be negative.
   fn from_nanos(n: Int) -> Duration { Duration.new(n) }
   fn from_micros(n: Int) -> Duration { Duration.new(n * 1000) }
   fn from_millis(n: Int) -> Duration { Duration.new(n * 1_000_000) }
@@ -1047,7 +1325,7 @@ pub frozen class Duration {
   fn from_mins(n: Int) -> Duration { Duration.new(n * 60 * __NANOS_PER_SEC) }
   fn from_hours(n: Int) -> Duration { Duration.new(n * 3600 * __NANOS_PER_SEC) }
   fn from_days(n: Int) -> Duration { Duration.new(n * 86400 * __NANOS_PER_SEC) }
-  # Rounded to the nearest nanosecond.
+  # Rounded to the nearest nanosecond. Panics with a `FloatDomainError` for NaN or an infinity.
   fn from_secs_f(secs: Float) -> Duration { Duration.new((secs * 1000000000.0).round) }
 
   fn as_nanos(self) -> Int { self.nanos }
@@ -1055,6 +1333,7 @@ pub frozen class Duration {
   fn as_micros(self) -> Int { __time_trunc_div(self.nanos, 1000) }
   fn as_millis(self) -> Int { __time_trunc_div(self.nanos, 1_000_000) }
   fn as_secs(self) -> Int { __time_trunc_div(self.nanos, __NANOS_PER_SEC) }
+  # The length in seconds, with the fraction.
   fn as_secs_f(self) -> Float { self.nanos.to_f / 1000000000.0 }
   fn is_zero(self) -> Bool { self.nanos == 0 }
   fn is_negative(self) -> Bool { self.nanos < 0 }
@@ -1064,7 +1343,7 @@ pub frozen class Duration {
   fn +(self, other: Duration) -> Duration { Duration.new(self.nanos + other.nanos) }
   fn -(self, other: Duration) -> Duration { Duration.new(self.nanos - other.nanos) }
   fn *(self, k: Int) -> Duration { Duration.new(self.nanos * k) }
-  # Truncates toward zero, to whole nanoseconds.
+  # Truncates toward zero, to whole nanoseconds. Panics with a `ZeroDivisionError` if `k` is 0.
   fn /(self, k: Int) -> Duration { Duration.new(__time_trunc_div(self.nanos, k)) }
   fn <=>(self, other: Duration) -> Int { self.nanos <=> other.nanos }
   fn ==(self, other: Duration) -> Bool { self.nanos == other.nanos }
@@ -1096,6 +1375,7 @@ pub frozen class Instant {
   # Nanoseconds since the program started.
   nanos: Int
 
+  # The current reading of the monotonic clock.
   fn now() -> Instant { Instant.new(__time_mono_nanos()) }
   # The time since this instant.
   fn elapsed(self) -> Duration { Instant.now().since(self) }
@@ -1130,6 +1410,7 @@ pub frozen class DateTime {
 
   # The current time at the operating system's local offset.
   fn now() -> DateTime { DateTime.now_utc().to_local() }
+  # The current time at offset 0 (UTC).
   fn now_utc() -> DateTime {
     n = __time_wall_nanos()
     DateTime.new(n / __NANOS_PER_SEC, n % __NANOS_PER_SEC, 0)
@@ -1139,6 +1420,7 @@ pub frozen class DateTime {
     __time_check_offset(offset)
     DateTime.new(secs + nanosecond / __NANOS_PER_SEC, nanosecond % __NANOS_PER_SEC, offset)
   }
+  # The instant `ms` milliseconds after the epoch (before it if negative), at `offset`.
   fn from_unix_millis(ms: Int, offset: Int = 0) -> DateTime {
     DateTime.from_unix(ms / 1000, nanosecond: ms % 1000 * 1_000_000, offset: offset)
   }
@@ -1196,6 +1478,7 @@ pub frozen class DateTime {
     __time_check_offset(offset)
     DateTime.new(self.unix, self.nanosecond, offset)
   }
+  # The same instant at offset 0.
   fn to_utc(self) -> DateTime { DateTime.new(self.unix, self.nanosecond, 0) }
   # The same instant at the operating system's local offset for it.
   fn to_local(self) -> DateTime { DateTime.new(self.unix, self.nanosecond, __time_local_offset(self.unix)) }
@@ -1451,11 +1734,19 @@ fn __time_parse_iso(cs: List[String]) -> DateTime? {
   DateTime.new(local - off, ns, off)
 }
 
+# Pseudo-random numbers (not cryptographically secure). Each thread has its own generator,
+# seeded from the clock when the thread first uses it.
 pub class Random {
+  # Reseeds the calling thread's generator, making its later results repeatable.
   native fn seed(n: Int)
+  # A random integer from `lo` to `hi`, both inclusive. Panics with an `ArgumentError` if
+  # `hi < lo`.
   native fn int(lo: Int, hi: Int) -> Int
+  # A random Float in `[0.0, 1.0)`: 0.0 is possible, 1.0 is not.
   native fn float() -> Float
+  # A new list with the items in random order; `items` is unchanged.
   native fn shuffle[T](items: List[T]) -> List[T]
+  # A random item, or nil if the list is empty.
   native fn choice[T](items: List[T]) -> T?
 }
 
@@ -1464,12 +1755,16 @@ pub class Random {
 # environment of the `catx` process itself (that is unsound while other threads may read it), so
 # native code that reads the environment directly does not see them.
 pub class Env {
+  # The variable's value, or nil if it is not set.
   native fn get(name: String) -> String?
-  # `name` must be non-empty and contain no `=`; neither may contain a NUL character.
+  # `name` must be non-empty and contain no `=`; neither may contain a NUL character. Panics with
+  # an `ArgumentError` otherwise.
   native fn set(name: String, value: String)
+  # Unsets the variable (nothing happens if it is not set). Panics on an invalid name, as `set`.
   native fn remove(name: String)
   # Every variable, sorted by name.
   native fn all() -> Dict[String, String]
+  # The number of CPUs available to the program (at least 1).
   native fn cpu_count() -> Int
 }
 
@@ -1498,8 +1793,17 @@ pub class StdinLines {
 }
 
 pub class Json {
+  # Parses one JSON value: objects become `Dict[String, Dyn]` (keys sorted; of duplicate keys the
+  # last wins), arrays `List[Dyn]`, `null` nil, numbers an `Int` (any size) when written without
+  # a fraction or exponent, else a `Float`. `Err("invalid JSON: ... at line L column C")` for a
+  # syntax error, including text after the value.
   native fn parse(text: String) -> Result[Dyn, String]
+  # Compact JSON. Dict keys are sorted (non-string keys become their `to_s`); lists and tuples
+  # become arrays; NaN and infinities `null`. A class instance is what its `to_json` returns, or
+  # an object of its fields; other values (enum values, sets, functions) are written as their
+  # `to_s` in a string.
   native fn stringify(value: Dyn) -> String
+  # As `stringify`, indented by two spaces with one item per line.
   native fn pretty(value: Dyn) -> String
 }
 
@@ -1546,7 +1850,10 @@ pub class HttpResponse {
 # HTTP and HTTPS client requests. They run on the I/O pool, so a fiber waiting on one lets the
 # thread's other fibers run. Non-2xx statuses are responses, not errors.
 pub class Http {
+  # Sends a GET request with the extra `headers`. `Err` only when no response arrives (an
+  # invalid URL, a refused connection...).
   native fn get(url: String, headers: Dict[String, String] = [:]) -> Result[HttpResponse, String]
+  # Sends a POST request with `body` and the extra `headers`; errors as for `get`.
   native fn post(url: String, body: String, headers: Dict[String, String] = [:]) -> Result[HttpResponse, String]
 }
 

@@ -260,10 +260,13 @@ impl Checker {
 
     /// A call may change any field: drop the field-path narrowings that are not stable. It may
     /// also run a closure that assigns a local, or (on another fiber) code that does: drop the
-    /// narrowings of such locals too.
+    /// narrowings of such locals too, and of field paths rooted at them.
     pub fn clear_unstable_paths(&mut self) {
         self.path_epoch += 1;
-        self.clear_paths(|_, stable| !stable);
+        let Some(c) = self.ctxs.last() else { return };
+        let roots: FxHashSet<LocalId> =
+            c.path_narrow.iter().flat_map(|l| l.keys().map(|p| p.0)).filter(|&l| self.dies_at_calls(l)).collect();
+        self.clear_paths(|p, stable| !stable || roots.contains(&p.0));
         let Some(c) = self.ctxs.last() else { return };
         let dying: Vec<LocalId> =
             c.narrow.iter().flat_map(|l| l.keys().copied()).filter(|&l| self.dies_at_calls(l)).collect();

@@ -97,41 +97,17 @@ impl Checker {
         {
             return;
         }
-        if self.method_names.is_empty() {
-            let mut names: FxHashSet<String> = FxHashSet::default();
-            for ci in self.classes.values() {
-                names.extend(ci.methods.keys().cloned());
-            }
-            for x in &self.exts {
-                names.extend(x.methods.keys().cloned());
-            }
-            for i in &self.ifaces {
-                names.extend(i.by_name.keys().cloned());
-            }
-            self.method_names = names;
-        }
-        let mut calls = false;
+        let calls = self.block_may_call(body, None);
         let mut fields: Vec<String> = Vec::new();
         let mut locals: Vec<String> = Vec::new();
         let mut stack: Vec<&Expr> = body.stmts.iter().collect();
         while let Some(x) = stack.pop() {
-            match &x.kind {
-                ExprKind::Call { .. } => calls = true,
-                // Without parentheses, a member is a field read unless some type has a method
-                // of that name (zero-argument methods share the namespace).
-                ExprKind::Member { name, args, block, parens, .. } => {
-                    if *parens || !args.is_empty() || block.is_some() || self.method_names.contains(&name.name) {
-                        calls = true;
-                    } else if self.record_method_name_misses {
-                        self.method_name_misses.insert(name.name.clone());
-                    }
-                }
-                ExprKind::Assign { target, .. } => match &target.kind {
+            if let ExprKind::Assign { target, .. } = &x.kind {
+                match &target.kind {
                     ExprKind::Member { name, .. } => fields.push(name.name.clone()),
                     ExprKind::Ident(n) => locals.push(n.clone()),
                     _ => {}
-                },
-                _ => {}
+                }
             }
             stack.extend(crate::query::children(x));
         }
@@ -310,19 +286,6 @@ impl Checker {
             );
             self.emit(Diag::error("E0324", msg, value.span).note(note));
             return;
-        }
-    }
-
-    /// Whether evaluating `e` (just checked) runs code that could assign fields: a function,
-    /// method or closure call, a constructor, or an operator or index implemented by a method.
-    fn may_mutate(&self, e: &Expr) -> bool {
-        match &e.kind {
-            ExprKind::Call { .. } | ExprKind::Member { .. } | ExprKind::Index { .. } => matches!(
-                self.calls.get(&e.id),
-                Some(CallRes::Fn { .. } | CallRes::Closure { .. } | CallRes::Construct { .. } | CallRes::DynMember(_))
-            ),
-            ExprKind::Binary(..) => matches!(self.bins.get(&e.id), Some(BinRes::Method(..))),
-            _ => false,
         }
     }
 
@@ -1395,7 +1358,7 @@ impl Checker {
     /// Keeps the narrowings that still hold after a call (see `clear_unstable_paths`).
     fn retain_past_calls(&self, ns: &mut Vec<(NKey, TyId)>) {
         ns.retain(|(k, _)| match k {
-            NKey::Path(_, stable) => *stable,
+            NKey::Path(p, stable) => *stable && !self.dies_at_calls(p.0),
             NKey::Local(l) => !self.dies_at_calls(*l),
         });
     }

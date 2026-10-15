@@ -81,6 +81,7 @@ pub struct FieldDecl {
     pub ty: TypeExpr,
     pub default: Option<Expr>,
     pub span: Span,
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -113,6 +114,7 @@ pub struct VariantDecl {
     pub name: Ident,
     pub fields: Vec<(Option<Ident>, TypeExpr)>,
     pub span: Span,
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -151,6 +153,7 @@ pub struct ConstDecl {
     pub ty: Option<TypeExpr>,
     pub value: Expr,
     pub span: Span,
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -160,6 +163,7 @@ pub struct VarDecl {
     pub ty: TypeExpr,
     pub value: Expr,
     pub span: Span,
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug)]
