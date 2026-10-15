@@ -4,7 +4,7 @@ Syntax highlighting for Catallaxy (`.cx`) files, plus the `catx lsp` language se
 
 - diagnostics as you type
 - hover
-- go to definition, and find references and rename across every `.cx` file in the workspace folders, open or not
+- go to definition, and find references and rename across every `.cx` file in the workspace folders, open or not (a rename that would collide with an existing name, or change what any name refers to, is refused)
 - completion
 - signature help
 - inlay hints with inferred types

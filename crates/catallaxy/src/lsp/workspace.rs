@@ -64,6 +64,8 @@ pub struct Unit {
     pub fixed: FxHashMap<Symbol, (String, Option<String>)>,
     /// Declarations of the user modules, with their containers.
     pub outline: Vec<WsItem>,
+    /// The compilation's diagnostics outside the prelude: code, message and span.
+    pub diags: Vec<(&'static str, String, Span)>,
 }
 
 /// The file id of a compilation's entry document (added right after the prelude).
@@ -108,6 +110,12 @@ impl Unit {
                 outline.push(WsItem { name, kind: item.kind, container, name_span: item.name_span });
             }
         }
+        let diags = comp
+            .diags
+            .iter()
+            .filter(|d| d.span.file as usize >= PRELUDE.len())
+            .map(|d| (d.code, d.message.clone(), d.span))
+            .collect();
         let files = comp
             .sm
             .files
@@ -121,7 +129,7 @@ impl Unit {
                 })
             })
             .collect();
-        Unit { deps, files, index, decls, fixed, outline }
+        Unit { deps, files, index, decls, fixed, outline, diags }
     }
 
     pub fn file(&self, f: u32) -> Option<&FileData> {
@@ -175,6 +183,14 @@ impl Overlay {
     /// The documents' paths.
     pub fn paths(&self) -> impl Iterator<Item = &PathBuf> {
         self.texts.keys()
+    }
+
+    /// This overlay with `texts` replacing (or added to) its documents.
+    pub fn with(&self, texts: &FxHashMap<PathBuf, String>) -> Overlay {
+        let mut docs: FxHashMap<PathBuf, String> =
+            self.texts.iter().map(|(p, (t, _))| (p.clone(), t.clone())).collect();
+        docs.extend(texts.iter().map(|(p, t)| (p.clone(), t.clone())));
+        Overlay::new(docs.iter())
     }
 
     fn get(&self, p: &Path) -> Option<&(String, u64)> {
@@ -423,6 +439,11 @@ impl Workspace {
         ws
     }
 
+    /// Whether `CATX_LSP_DEBUG=1` asks for debug lines in the log.
+    pub fn debug(&self) -> bool {
+        self.debug
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -558,6 +579,15 @@ impl Workspace {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Units for `entries` compiled with `texts` overlaying the open documents and the disk, as
+    /// if those edits were made (the cache is neither used nor changed). `None` for an entry
+    /// whose compilation failed.
+    pub fn trial(&self, texts: &FxHashMap<PathBuf, String>, entries: &[PathBuf]) -> Vec<(PathBuf, Option<Unit>)> {
+        let _busy = self.busy();
+        let overlay = self.overlay().with(texts);
+        compile_all(&overlay, entries, cores()).into_iter().map(|(p, b)| (p, b.map(|(u, _)| u))).collect()
     }
 
     /// Starts compiling every workspace file and open document in the background, replacing any

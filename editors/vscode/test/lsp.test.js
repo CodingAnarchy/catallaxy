@@ -371,6 +371,26 @@ async function main() {
       assert(rejected, "renaming to `match` was accepted");
     });
 
+    await check("rename: a name already taken in scope is refused, naming the clash", async () => {
+      let err;
+      try {
+        await c.request("textDocument/rename", { ...at(shapesUri, shapes, "by_area =", 0, 1), newName: "by_perimeter" });
+      } catch (e) {
+        err = e;
+      }
+      assert(err, "renaming `by_area` to `by_perimeter` was accepted");
+      assert.strictEqual(err.code, -32803);
+      assert.match(err.message, /would conflict with the variable `by_perimeter`/);
+      // A method renamed to another method of its class.
+      err = undefined;
+      try {
+        await c.request("textDocument/rename", { ...at(shapesUri, shapes, "fn perimeter", 0, 3), newName: "area" });
+      } catch (e) {
+        err = e;
+      }
+      assert(err && err.code === -32803, `renaming \`perimeter\` to \`area\`: ${err}`);
+    });
+
     await check("signatureHelp: active parameter follows the commas", async () => {
       const s = await c.request("textDocument/signatureHelp", at(shapesUri, shapes, "Triangle.new(3.0, 4.0", 0, "Triangle.new(3.0, ".length));
       assert(s && s.signatures.length > 0, JSON.stringify(s));
