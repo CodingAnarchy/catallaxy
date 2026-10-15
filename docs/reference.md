@@ -524,12 +524,23 @@ Annotate the parameter to use any of these.
   continue`, and the process exits with status 101.
 - Running out of memory panics with a message starting `MemoryError:`, like any other panic (so on another
   thread `join` returns it as `Err`, and the program can carry on once the data is dropped):
-  - A single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,
+  - The heap has a limit: `CATX_MAX_HEAP` (bytes, with an optional `K`, `M` or `G` suffix), or by
+    default three quarters of physical memory, so that a runaway program raises a `MemoryError`
+    instead of making the machine swap. `CATX_MAX_HEAP=0` (or `off`) removes it. The default suits a
+    program that has the machine to itself; under a container memory limit the runtime still sees
+    the host's memory, so set the variable there. The limit counts live heap objects together with
+    the buffers outside the heap that lists, dicts, sets and `StringBuilder`s keep, the vectors
+    natives build their results in, and the text `Json.stringify` writes. Growing any of these past
+    it panics where it happens (after a collection and one retry, for list pushes, dict inserts and
+    `StringBuilder` pushes), with a message saying how much more would pass the limit. `Json.parse`
+    reaches a safepoint every 4,096 values, so a large document is held to the limit as a program
+    building the same values would be.
+  - A single request larger than physical memory (or than the heap limit), such as `List.filled(n, x)`,
     `s * n` or `s.ljust(n)` with a huge `n`, is refused up front.
   - When the system refuses memory for the heap, or for one of the runtime's internal buffers, the runtime
     keeps going on a small emergency reserve, collects, and if the collection frees too little, the next
-    thread to reach a safepoint (a call or a loop iteration) panics. With `CATX_MAX_HEAP` set, a
-    collection that finds more live data than the limit does the same.
+    thread to reach a safepoint (a call or a loop iteration) panics. A collection that finds more
+    live data than the heap limit does the same.
   - Building strings (`+`, interpolation, `*`, padding, `StringBuilder`) and growing a list (`push`) or a
     dict or set (`d[k] = v`, `add`) panics where the allocator refuses the memory, after a collection and
     one retry. List methods that rebuild the list (`insert`, `unshift` and the like) panic without the retry.
@@ -557,7 +568,7 @@ Annotate the parameter to use any of these.
   safepoint is reached. The retry comes from the global allocator `catallaxy_gc::Allocator`, which
   `catx` and the C API libraries use; a Rust program embedding the runtime gets it only if it opts in
   (section 11). On Linux with memory overcommit, and under memory pressure on macOS, a program that
-  grows gradually is usually killed by the OS before any allocation fails; set `CATX_MAX_HEAP` below
+  grows gradually is usually killed by the OS before any allocation fails, unless the heap limit stops it first; set `CATX_MAX_HEAP` below
   the machine's memory to turn that into a `MemoryError`.
 
 ## 8. Concurrency
