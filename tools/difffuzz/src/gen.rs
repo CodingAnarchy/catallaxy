@@ -1700,7 +1700,7 @@ impl Gen {
         self.line("}");
         emit!(self, "for t in {ts} {{ t.join() }}");
         emit!(self, "puts({a}.get())");
-        emit!(self, "puts({m}.get())");
+        emit!(self, "puts({m}.lock {{ |l| l.dup }})");
     }
 
     fn tpl_shared(&mut self) {

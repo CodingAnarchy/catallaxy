@@ -260,7 +260,7 @@ ts136 = (1..1).map { |p137|
 }
 for t in ts136 { t.join() }
 puts(atom134.get())
-puts(mtx135.get())
+puts(mtx135.lock { |l| l.dup })
 match E7.V0((acc131.length - acc131.length)) {
   .V0(p138) => {
     acc131.unshift((acc131.flat_map { |p139| [p139, 67055] }).sum())

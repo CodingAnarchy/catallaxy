@@ -1,0 +1,35 @@
+# What a `lock` block may return (issue #162): frozen values, and fresh values whose owned
+# contents are not the protected value's. Eight threads update one dict under the lock and no
+# update is lost.
+m = Mutex.new(move ["n": 0])
+ts = (1..8).to_list().map { |_i| spawn { 2000.times { m.lock { |d| d["n"] = d["n"]! + 1 } }; nil } }
+ts.each { |t| t.join() }
+puts(m.lock { |d| d["n"] })
+
+rows = Mutex.new(move [[3, 1], [2]])
+puts(rows.lock { |r| r.length })
+puts(rows.lock { |r| r.map { |x| x.sum() } })
+first = rows.lock { |r| r[0].dup }
+first.push(9)
+puts(first)
+puts(rows.lock { |r| r[0].dup })
+sorted = rows.lock { |r| r.map { |x| x.sorted() } }
+puts(sorted)
+
+words = Mutex.new(move ["b": 2, "a": 1])
+puts(words.lock { |w| w.keys.sorted() })
+snapshot = words.lock { |w| w.dup }
+snapshot["c"] = 3
+puts(words.lock { |w| w.length })
+
+# A value not taken from the protected one may be returned as it is.
+other = [7]
+same = rows.lock { |_r| other }
+puts(same == other)
+
+# Frozen and shareable values may still use `get`, `update` and `Atomic`.
+count = Mutex.new(0)
+count.update { |c| c + 5 }
+puts(count.get)
+a = Atomic.new("x")
+puts(a.get)
