@@ -1,0 +1,28 @@
+name: tmp-repro (throwaway; delete before merge)
+on: pull_request
+jobs:
+  repro:
+    strategy:
+      fail-fast: false
+      matrix:
+        rev: [HEAD, 630b635]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - name: Check out the revision under test (keep the program)
+        run: cp tmp-repro/crash.cx /tmp/crash.cx && git checkout ${{ matrix.rev }}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked -p catallaxy
+      - name: Run 300 times under GC stress
+        run: |
+          fails=0
+          for i in $(seq 1 300); do
+            CATX_GC_STRESS=1 RUST_BACKTRACE=1 ./target/release/catx run /tmp/crash.cx > out.txt 2> err.txt
+            c=$?
+            if [ $c -ne 0 ]; then
+              fails=$((fails+1)); echo "run $i exit $c (signal $((c-128)))"; tail -5 err.txt; wc -l < out.txt
+            fi
+          done
+          echo "FAILURES ${{ matrix.rev }}: $fails/300"
