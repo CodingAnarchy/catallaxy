@@ -32,7 +32,8 @@ use workspace::{Notes, Overlay, Unit, Workspace, ENTRY_FILE};
 
 pub fn cmd_lsp(_args: &[String]) -> i32 {
     let (conn, io) = Connection::stdio();
-    let code = match serve(&conn) {
+    // Requests walk syntax trees as deep as the parser allows: serve them on the compiler's stack.
+    let code = match catallaxy_compiler::util::on_compiler_stack(|| serve(&conn).map_err(|e| e.to_string())) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("catx lsp: {e}");

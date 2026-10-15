@@ -700,6 +700,13 @@ Every diagnostic has a code. `docs/errors.md` explains each one with an example 
 `catx check` (like `catx run` when a program does not compile) ends its report with a link to the
 entries for the codes it printed.
 
+`catx check` reports everything `catx run` would refuse to run, including the code generator's
+limit on live values in one function (E0900). The compiler has limits of its own instead of
+running out of stack: expressions, types and patterns may nest 1,000 levels deep, and one
+statement's syntax tree may be 10,000 levels deep (an operator or method chain of about 10,000
+links); deeper input is E0901. Chains below that, such as generated code that adds up thousands of
+strings, compile and run.
+
 Warnings never make `catx check` fail. A comment `# allow(CODE, ...)` on the warning's line, or on
 the line above it, silences those warnings there (`s += x # allow(W0004)`). The warnings are:
 

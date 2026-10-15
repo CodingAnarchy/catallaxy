@@ -67,7 +67,7 @@ struct Pending {
 /// Options for one compilation.
 #[derive(Default, Clone)]
 pub struct Options {
-    /// Stop after type checking (no bytecode).
+    /// Keep no bytecode (the program is generated, for its diagnostics, and dropped).
     pub check_only: bool,
 }
 
@@ -328,7 +328,14 @@ fn compile_entry(
     diags.extend(crate::lint::run(&ck, &sm));
     diags.append(&mut ck.diags);
     let mut program = None;
-    if !opts.check_only && !diags.iter().any(|d| d.is_error()) {
+    // `check` generates the program's code too (and drops it): the code generator's own limits
+    // (E0900) are errors `check` must report as well.
+    if opts.check_only {
+        if !diags.iter().any(|d| d.is_error()) {
+            // Module 0 is the prelude.
+            diags.extend(Codegen::new(&ck, &sm).diagnostics(1));
+        }
+    } else if !diags.iter().any(|d| d.is_error()) {
         let (p, errs) = Codegen::new(&ck, &sm).generate();
         diags.extend(errs);
         if !diags.iter().any(|d| d.is_error()) {

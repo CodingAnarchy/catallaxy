@@ -1640,9 +1640,23 @@ hand.
 ## E0900
 
 Function too large. A function needs more than 250 registers (locals and temporaries live at once).
-An example would be several hundred lines long, so there is none here.
+The error points at the function, or, for a file's top level, at the statement that went over the
+limit. `catx check` reports it as well as `catx run`. Long operator chains (`a + b + c + ...`, even
+thousands of operands) need only a few registers, but every level of nested list literals or
+nested calls holds one. An example would be several hundred lines long, so there is none here.
 
-Split the function into smaller functions.
+Split the function into smaller functions, or move top-level code into functions.
+
+## E0901
+
+Expression nested too deeply. Expressions, types and patterns may nest at most 1,000 levels deep
+(`((((x))))`, `[[[x]]]`, an `if` inside an `if`, a string interpolation inside another), and the
+syntax tree of one statement may be at most 10,000 levels deep, which an operator or method chain
+of about 10,000 links reaches. The compiler would otherwise run out of stack. Parsing stops at the
+first such expression; a statement too deep is left out, so names it defines are reported unknown.
+An example would be thousands of characters long, so there is none here.
+
+Split the expression up, for example by assigning parts of it to local variables.
 
 ## W0001
 

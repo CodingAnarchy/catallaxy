@@ -16,6 +16,11 @@ pub struct Parser<'a> {
     nesting: u32,
     /// Set once E0901 is reported, so a deep input reports it once.
     too_deep: bool,
+    /// The deepest `nesting` reached, and the longest operator or postfix chain one level built:
+    /// together they bound the tree's depth, so that [`limit_depth`] measures only trees that
+    /// might be too deep.
+    max_nesting: u32,
+    max_chain: u32,
 }
 
 /// How deeply expressions, types and patterns may nest (`((((x))))`, `[[[x]]]`, `if` in `if`).
@@ -34,7 +39,18 @@ const BLOCK_START: &str = "{";
 
 impl<'a> Parser<'a> {
     pub fn new(toks: Vec<Token>, file: u32, next_id: &'a mut u32) -> Self {
-        Parser { toks, pos: 0, file, next_id, diags: Vec::new(), no_block: false, nesting: 0, too_deep: false }
+        Parser {
+            toks,
+            pos: 0,
+            file,
+            next_id,
+            diags: Vec::new(),
+            no_block: false,
+            nesting: 0,
+            too_deep: false,
+            max_nesting: 0,
+            max_chain: 0,
+        }
     }
 
     // ---- token helpers -----------------------------------------------------------------------
@@ -106,8 +122,11 @@ impl<'a> Parser<'a> {
     }
 
     fn error<T>(&mut self, msg: impl Into<String>) -> PResult<T> {
-        let span = self.span();
-        self.diags.push(Diagnostic::error("E0100", msg, span));
+        // Past the nesting limit the parser skips to the end; what is missing there is no news.
+        if !self.too_deep {
+            let span = self.span();
+            self.diags.push(Diagnostic::error("E0100", msg, span));
+        }
         Err(())
     }
 
@@ -121,7 +140,9 @@ impl<'a> Parser<'a> {
             if s == ")" || s == "]" || s == "}" {
                 d = d.suggest(format!("insert `{s}`"), span.empty_at(), s);
             }
-            self.diags.push(d);
+            if !self.too_deep {
+                self.diags.push(d);
+            }
             Err(())
         }
     }
@@ -159,6 +180,12 @@ impl<'a> Parser<'a> {
         Expr { id: self.id(), kind, span }
     }
 
+    /// Counts one more link of an operator or postfix chain built by one parse level.
+    fn chain_link(&mut self, links: &mut u32) {
+        *links += 1;
+        self.max_chain = self.max_chain.max(*links);
+    }
+
     /// Runs `f` one nesting level deeper, or reports E0901 past [`MAX_NESTING`].
     fn nested<T>(&mut self, f: impl FnOnce(&mut Self) -> PResult<T>) -> PResult<T> {
         if self.nesting >= MAX_NESTING {
@@ -170,6 +197,7 @@ impl<'a> Parser<'a> {
             return Err(());
         }
         self.nesting += 1;
+        self.max_nesting = self.max_nesting.max(self.nesting);
         let r = f(self);
         self.nesting -= 1;
         r
@@ -177,6 +205,11 @@ impl<'a> Parser<'a> {
 
     /// Skips to a plausible statement boundary after an error. Always makes progress.
     fn recover(&mut self) {
+        if self.too_deep {
+            // Past the nesting limit the rest is unbalanced brackets and their errors: stop.
+            self.pos = self.toks.len() - 1;
+            return;
+        }
         let start = self.pos;
         self.recover_inner();
         if self.pos == start && !self.at_eof() && !self.is_sym("}") {
@@ -861,7 +894,9 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_unary()?
         };
+        let mut links = 0;
         loop {
+            self.chain_link(&mut links);
             // Ranges (precedence 6, non-associative).
             if min <= 6 && (self.is_sym("..") || self.is_sym("...")) {
                 let exclusive = self.is_sym("...");
@@ -986,7 +1021,9 @@ impl<'a> Parser<'a> {
         // `(recv.f)(x)` calls the value of `recv.f`; only an unparenthesized `recv.f(x)` is a method call.
         let mut grouped = self.is_sym("(");
         let mut e = self.parse_primary()?;
+        let mut links = 0;
         loop {
+            self.chain_link(&mut links);
             let tight = !self.toks[self.pos].space_before;
             let was_grouped = std::mem::take(&mut grouped);
             match self.tok() {
@@ -1130,7 +1167,10 @@ impl<'a> Parser<'a> {
         (sub.nesting, sub.too_deep) = (self.nesting, self.too_deep);
         sub.skip_newlines();
         let r = sub.parse_expr();
+        // (Field by field: `sub` borrows `self.next_id`.)
         self.too_deep |= sub.too_deep;
+        self.max_nesting = self.max_nesting.max(sub.max_nesting);
+        self.max_chain = self.max_chain.max(sub.max_chain);
         let colon = match sub.tok() {
             Tok::Sym(":" | "::") if r.is_ok() => Some((sub.span().start - offset) as usize),
             _ => None,
@@ -1153,7 +1193,10 @@ impl<'a> Parser<'a> {
         (sub.nesting, sub.too_deep) = (self.nesting, self.too_deep);
         sub.skip_newlines();
         let r = sub.parse_expr();
+        // (Field by field: `sub` borrows `self.next_id`.)
         self.too_deep |= sub.too_deep;
+        self.max_nesting = self.max_nesting.max(sub.max_nesting);
+        self.max_chain = self.max_chain.max(sub.max_chain);
         sub.skip_newlines();
         if r.is_ok() && !sub.at_eof() {
             let sp = sub.span();
@@ -1652,7 +1695,11 @@ pub fn parse(src: &str, file: u32, next_id: &mut u32) -> (Module, Vec<Diagnostic
     let mut p = Parser::new(toks, file, next_id);
     let mut m = p.parse_module();
     diags.extend(p.diags);
-    limit_depth(&mut m, &mut diags);
+    // Each nesting level adds its chains' links and a few nodes (a statement, `not`, unary
+    // operators, the primary) to a path through the tree.
+    if (p.max_nesting + 1).saturating_mul(p.max_chain + 8) > MAX_DEPTH {
+        limit_depth(&mut m, &mut diags);
+    }
     (m, diags)
 }
 
@@ -1674,7 +1721,7 @@ fn limit_depth(m: &mut Module, diags: &mut Vec<Diagnostic>) {
     }
     fn check(e: &mut Expr, diags: &mut Vec<Diagnostic>) {
         if depth(e) > MAX_DEPTH {
-            diags.push(too_deep(e.span, "nests", MAX_DEPTH));
+            diags.push(too_deep(e.span, "nested", MAX_DEPTH));
             let deep = std::mem::replace(&mut e.kind, ExprKind::Error);
             drop_iteratively(deep);
         }
@@ -1760,7 +1807,8 @@ fn drop_iteratively(kind: ExprKind) {
                 out.push(a.kind);
                 out.push(b.kind);
             }
-            ExprKind::Call { callee: recv, args: a, block: blk } | ExprKind::Member { recv, args: a, block: blk, .. } => {
+            ExprKind::Call { callee: recv, args: a, block: blk }
+            | ExprKind::Member { recv, args: a, block: blk, .. } => {
                 out.push(recv.kind);
                 args(a, out);
                 if let Some(b) = blk {
@@ -1782,7 +1830,9 @@ fn drop_iteratively(kind: ExprKind) {
                     out.push(e.kind);
                 }
             }
-            ExprKind::While { cond: x, body } | ExprKind::For { iter: x, body, .. } | ExprKind::WithLock { obj: x, body } => {
+            ExprKind::While { cond: x, body }
+            | ExprKind::For { iter: x, body, .. }
+            | ExprKind::WithLock { obj: x, body } => {
                 out.push(x.kind);
                 block(body, out);
             }

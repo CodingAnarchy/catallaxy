@@ -47,6 +47,9 @@ struct FnState {
     last_line: u32,
     file: u32,
     is_closure: bool,
+    /// The statement being compiled, where a function without a span of its own (a module's
+    /// top level) reports E0900.
+    stmt: Span,
 }
 
 impl<'a> Codegen<'a> {
@@ -65,6 +68,20 @@ impl<'a> Codegen<'a> {
     }
 
     /// Builds the whole program.
+    /// The code generator's diagnostics (E0900) for the functions of modules from `first` on,
+    /// without keeping their code: what `check` needs, skipping the already-correct prelude.
+    pub fn diagnostics(mut self, first: u32) -> Vec<crate::diag::Diagnostic> {
+        let ck = self.ck;
+        self.prog.funcs = vec![FuncProto::default(); ck.fns.len()];
+        for fid in 0..ck.fns.len() as FnId {
+            let f = &ck.fns[fid as usize];
+            if f.module >= first && !matches!(f.decl, DeclRef::Closure(_)) {
+                self.gen_fn(fid);
+            }
+        }
+        self.errors
+    }
+
     pub fn generate(mut self) -> (Program, Vec<crate::diag::Diagnostic>) {
         let ck = self.ck;
         self.prog.files = self.sm.files.iter().map(|f| f.path.clone()).collect();
@@ -251,6 +268,7 @@ impl<'a> Codegen<'a> {
             last_line: 0,
             file,
             is_closure: false,
+            stmt: Span::new(file, 0, 0),
         }
     }
 
@@ -655,13 +673,23 @@ impl<'a> Codegen<'a> {
             st.max = st.next;
         }
         if r >= 250 {
-            let name = self.ck.fns[st.fid as usize].name.clone();
+            let f = &self.ck.fns[st.fid as usize];
             if !self.errors.iter().any(|d| d.code == "E0900") {
-                self.errors.push(crate::diag::Diagnostic::error(
-                    "E0900",
-                    format!("function `{name}` needs too many registers; split it into smaller functions"),
-                    self.ck.fns[st.fid as usize].span,
-                ));
+                // A module's top level has no span of its own: point at the statement.
+                let d = if f.span == Span::default() {
+                    crate::diag::Diagnostic::error(
+                        "E0900",
+                        "the top level of this file needs too many registers; move code into functions",
+                        st.stmt,
+                    )
+                } else {
+                    crate::diag::Diagnostic::error(
+                        "E0900",
+                        format!("function `{}` needs too many registers; split it into smaller functions", f.name),
+                        f.span,
+                    )
+                };
+                self.errors.push(d.note("at most 250 locals and temporaries can be live at once"));
             }
             return 249;
         }
@@ -844,6 +872,12 @@ impl<'a> Codegen<'a> {
 
     fn stmt(&mut self, st: &mut FnState, e: &Expr) {
         let mark = st.next;
+        let outer = std::mem::replace(&mut st.stmt, e.span);
+        self.stmt_inner(st, e, mark);
+        st.stmt = outer;
+    }
+
+    fn stmt_inner(&mut self, st: &mut FnState, e: &Expr, mark: usize) {
         self.line(st, e.span);
         match &e.kind {
             ExprKind::Assign { .. } | ExprKind::Let { .. } => self.assign_or_let(st, e),
@@ -1191,7 +1225,7 @@ impl<'a> Codegen<'a> {
             }
             ExprKind::Unary(op, x) => {
                 let mark = st.next;
-                let r = self.expr_reg(st, x);
+                let r = self.left_operand(st, x, dst);
                 let opc = match (op, ck.bins.get(&e.id)) {
                     (UnOp::Not, _) => Op::Not,
                     (UnOp::Neg, Some(BinRes::Arith(ArithKind::Int))) => Op::NegI,
@@ -1555,6 +1589,40 @@ impl<'a> Codegen<'a> {
         }
     }
 
+    /// Evaluates a binary operator's left operand (or a unary one's operand): into `dst` itself
+    /// when it is a nested operator
+    /// and `dst` is a scratch register (not a local's, which the right operand might read), so
+    /// that a left-associative chain `a + b + c + ...` needs the same registers however long it
+    /// is; otherwise as [`Self::expr_reg`].
+    fn left_operand(&mut self, st: &mut FnState, l: &Expr, dst: u8) -> u8 {
+        if matches!(l.kind, ExprKind::Binary(..) | ExprKind::Unary(..))
+            && (dst as usize) < st.next
+            && !st.regs.values().any(|&r| r == dst)
+        {
+            self.expr_to(st, l, dst);
+            dst
+        } else {
+            self.expr_reg(st, l)
+        }
+    }
+
+    /// The operands of a left-nested chain of string concatenations, `l` first: `a + b + c` is
+    /// `[a, b, c]`.
+    fn concat_operands<'e>(&self, l: &'e Expr, r: &'e Expr) -> Vec<&'e Expr> {
+        let mut out = vec![r];
+        let mut cur = l;
+        while let ExprKind::Binary(BinOp::Add, a, b) = &cur.kind {
+            if !matches!(self.ck.bins.get(&cur.id), Some(BinRes::Concat)) || self.ck.coerce.contains_key(&cur.id) {
+                break;
+            }
+            out.push(b);
+            cur = a;
+        }
+        out.push(cur);
+        out.reverse();
+        out
+    }
+
     fn binary(&mut self, st: &mut FnState, e: &Expr, op: BinOp, l: &Expr, r: &Expr, dst: u8) {
         let ck = self.ck;
         let mark = st.next;
@@ -1576,7 +1644,7 @@ impl<'a> Codegen<'a> {
                 self.patch(st, j);
             }
             Some(BinRes::Arith(k)) => {
-                let a = self.expr_reg(st, l);
+                let a = self.left_operand(st, l, dst);
                 if k == ArithKind::Int && op == BinOp::Add || k == ArithKind::Int && op == BinOp::Sub {
                     if let ExprKind::Int(s) = &r.kind {
                         if let Ok(i) = s.parse::<i64>() {
@@ -1593,25 +1661,56 @@ impl<'a> Codegen<'a> {
                 self.emit(st, encode(arith_op(op, k), dst, a, b));
             }
             Some(BinRes::Concat) => {
-                let base = self.alloc_n(st, 2);
-                self.expr_to(st, l, base);
-                self.expr_to(st, r, base + 1);
-                self.emit(st, encode(Op::Concat, dst, base, 2));
+                // A chain `a + b + c + ...` concatenates up to CHUNK operands at a time, the
+                // first of each chunk after the first being the result so far, so it needs the
+                // same registers (and one copy per chunk, not per operand) however long it is.
+                const CHUNK: usize = 16;
+                let operands = self.concat_operands(l, r);
+                let base = self.alloc_n(st, CHUNK);
+                let mut it = operands.into_iter();
+                let mut n = 0;
+                for x in it.by_ref().take(CHUNK) {
+                    self.expr_to(st, x, base + n as u8);
+                    n += 1;
+                }
+                loop {
+                    let rest: Vec<&Expr> = it.by_ref().take(CHUNK - 1).collect();
+                    if rest.is_empty() {
+                        self.emit(st, encode(Op::Concat, dst, base, n as u8));
+                        break;
+                    }
+                    self.emit(st, encode(Op::Concat, base, base, n as u8));
+                    n = 1;
+                    for x in rest {
+                        self.expr_to(st, x, base + n as u8);
+                        n += 1;
+                    }
+                }
             }
             Some(BinRes::Compare(k)) => {
-                let a = self.expr_reg(st, l);
+                let a = self.left_operand(st, l, dst);
                 let b = self.expr_reg(st, r);
                 self.compare(st, op, k, dst, a, b);
             }
             Some(BinRes::Eq) => {
-                let a = self.expr_reg(st, l);
+                let a = self.left_operand(st, l, dst);
                 let b = self.expr_reg(st, r);
                 self.emit(st, encode(if op == BinOp::Ne { Op::Ne } else { Op::Eq }, dst, a, b));
             }
             Some(BinRes::Bitwise) => {
-                let a = self.expr_reg(st, l);
+                let a = self.left_operand(st, l, dst);
                 let b = self.expr_reg(st, r);
                 self.emit(st, encode(bit_op(op), dst, a, b));
+            }
+            Some(BinRes::Method(dispatch, false)) if matches!(l.kind, ExprKind::Binary(..)) => {
+                // As `left_operand`: the chain's result so far waits in `dst`, not in a register
+                // per link.
+                let a = self.left_operand(st, l, dst);
+                let base = self.alloc_n(st, 2);
+                self.emit(st, encode(Op::Move, base, a, 0));
+                self.expr_to(st, r, base + 1);
+                self.call_dispatch(st, &dispatch, base, 2);
+                self.emit(st, encode(Op::Move, dst, base, 0));
             }
             Some(BinRes::Method(dispatch, swapped)) => {
                 let base = self.alloc_n(st, 2);

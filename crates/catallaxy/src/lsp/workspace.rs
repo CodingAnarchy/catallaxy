@@ -567,7 +567,11 @@ impl Workspace {
         let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let ws = self.clone();
         let spawned =
-            std::thread::Builder::new().name("catx-warm".into()).spawn(move || ws.run_warm(gen, &send, progress));
+            // Indexing walks syntax trees as deep as the parser allows (see `parser::MAX_DEPTH`).
+            std::thread::Builder::new()
+                .name("catx-warm".into())
+                .stack_size(64 << 20)
+                .spawn(move || ws.run_warm(gen, &send, progress));
         let mut warmers = self.warmers.lock().unwrap_or_else(|e| e.into_inner());
         warmers.retain(|h| !h.is_finished());
         warmers.extend(spawned.ok());
