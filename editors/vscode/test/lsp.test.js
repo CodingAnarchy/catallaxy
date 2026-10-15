@@ -231,6 +231,19 @@ async function main() {
       assert.strictEqual(slice(shapes, h.range), "by_area");
     });
 
+    await check("hover: pattern bindings and block parameters show their own type", async () => {
+      for (const [needle, delta, want] of [
+        ["for s in shapes", 4, /s: Shape/],
+        ["if let big", 7, /big: ByArea/],
+        ["{ |acc, s|", 3, /acc: Float/],
+      ]) {
+        const h = await c.request("textDocument/hover", at(shapesUri, shapes, needle, 0, delta));
+        assert(h && h.contents, `${needle}: ${JSON.stringify(h)}`);
+        assert.match(h.contents.value, want);
+        assert.strictEqual(slice(shapes, h.range), want.source.split(":")[0]);
+      }
+    });
+
     await check("hover: a method call shows its signature", async () => {
       const h = await c.request("textDocument/hover", at(shapesUri, shapes, "describe()", 0, 1));
       assert(h, "no hover");

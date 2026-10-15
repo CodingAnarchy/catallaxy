@@ -4,7 +4,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::ast::{Block, ClassDecl, Expr, ExprKind, FnDecl, Item, Module, Pattern, PatternKind, StrPart};
-use crate::check::{CallRes, Checker, Dispatch, ModId, NameRes, Owner, ScopeItem};
+use crate::check::{CallRes, Checker, Dispatch, LocalId, ModId, NameRes, Owner, PatRes, ScopeItem};
 use crate::diag::Span;
 use crate::types::{Ty, TyId};
 
@@ -331,18 +331,74 @@ pub fn called_fn(ck: &Checker, e: &Expr) -> Option<u32> {
     }
 }
 
+/// The local bound by a name of pattern `p` that spans `offset`, with that name's span.
+fn pattern_binding_at(ck: &Checker, p: &Pattern, offset: u32) -> Option<(LocalId, Span)> {
+    if !contains(p.span, offset) {
+        return None;
+    }
+    match &p.kind {
+        PatternKind::Bind(n) if contains(n.span, offset) => match ck.pats.get(&p.id)? {
+            PatRes::Bind(l) => Some((*l, n.span)),
+            _ => None,
+        },
+        PatternKind::Typed { name, .. } if contains(name.span, offset) => match ck.pats.get(&p.id)? {
+            PatRes::Type { bind: Some(l), .. } | PatRes::Bind(l) => Some((*l, name.span)),
+            _ => None,
+        },
+        PatternKind::Ctor { args: ps, .. } | PatternKind::Tuple(ps) | PatternKind::Or(ps) => {
+            ps.iter().find_map(|q| pattern_binding_at(ck, q, offset))
+        }
+        _ => None,
+    }
+}
+
+/// The local declared by a binding name at `offset` that belongs to `e` itself (not to a
+/// sub-expression): a `for`, `if let`, `let` or `match` pattern, or a closure's block parameter.
+pub fn binding_at(ck: &Checker, e: &Expr, offset: u32) -> Option<(LocalId, Span)> {
+    match &e.kind {
+        ExprKind::For { pattern, .. } | ExprKind::IfLet { pattern, .. } | ExprKind::Let { pattern, .. } => {
+            pattern_binding_at(ck, pattern, offset)
+        }
+        ExprKind::Match { arms, .. } => arms.iter().find_map(|a| pattern_binding_at(ck, &a.pattern, offset)),
+        ExprKind::Closure { params, .. } => {
+            let info = ck.closures.get(&e.id)?;
+            let i = params.iter().position(|p| contains(p.name.span, offset))?;
+            Some((*info.params.get(i).filter(|_| info.params.len() == params.len())?, params[i].name.span))
+        }
+        _ => None,
+    }
+}
+
+/// The parameter of a declared function of module `m` whose name spans `offset`.
+fn param_at(ck: &Checker, m: ModId, offset: u32) -> Option<(LocalId, Span)> {
+    let file = ck.mods[m as usize].file;
+    let l = ck.locals.iter().rposition(|l| {
+        l.is_param && l.span.file == file && contains(l.span, offset) && l.span.end > l.span.start && l.name != "self"
+    })?;
+    Some((l as LocalId, ck.locals[l].span))
+}
+
+fn local_hover(ck: &Checker, l: LocalId) -> String {
+    let li = &ck.locals[l as usize];
+    with_doc(format!("{}: {}", li.name, ck.show(li.ty)), &None)
+}
+
 /// Markdown hover text for the expression at `offset` of module `m`.
 pub fn hover(ck: &Checker, m: ModId, offset: u32) -> Option<(String, Span)> {
     let ast = &ck.mods[m as usize].ast;
-    let e = expr_at(ast, offset)?;
+    let Some(e) = expr_at(ast, offset) else {
+        // Outside every expression: a function's parameter name, perhaps.
+        let (l, span) = param_at(ck, m, offset)?;
+        return Some((local_hover(ck, l), span));
+    };
+    if let Some((l, span)) = binding_at(ck, e, offset) {
+        return Some((local_hover(ck, l), span));
+    }
     let ty_line = |e: &Expr| ck.expr_ty.get(&e.id).map(|&t| ck.show(t));
     match &e.kind {
         ExprKind::Ident(name) => {
             let text = match ck.names.get(&e.id) {
-                Some(NameRes::Local(l)) => {
-                    let li = &ck.locals[*l as usize];
-                    with_doc(format!("{}: {}", li.name, ck.show(li.ty)), &None)
-                }
+                Some(NameRes::Local(l)) => local_hover(ck, *l),
                 Some(NameRes::Fn(f)) => with_doc(fn_signature(ck, *f), &ck.fns[*f as usize].doc),
                 Some(NameRes::Global(g)) => {
                     let gi = &ck.globals[*g as usize];
