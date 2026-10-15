@@ -724,8 +724,9 @@ throughout, any other with `\n`.
 `catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
 unsaved edits. It provides:
 
-- diagnostics (published on open, change and save), hover (types, signatures), go to definition,
-  completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
+- diagnostics (published on open, change and save), hover (types, signatures; on a binding name
+  in a `for`, `let`, `if let` or `match` pattern, a block parameter or a function parameter, that
+  variable's type), go to definition, completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
 - find references and rename (with prepare-rename) for locals, parameters (including named
   arguments), functions, methods (an override and the method it overrides rename together), fields,
   classes, enums, variants, interfaces and constants. An interface member renames together with the
