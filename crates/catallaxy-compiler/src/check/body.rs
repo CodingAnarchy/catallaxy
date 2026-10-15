@@ -408,15 +408,10 @@ impl Checker {
                     Diag::error("E0230", format!("recursive function `{name}` needs a return type annotation"), span)
                         .suggest("annotate the return type", span.after(), " -> T"),
                 );
-                // The result is unknown from here on: an error, which fits any use (`unify` with
-                // an error does not bind, so bind it here). Uses of the result can then no longer
-                // pin it to a type that the body's returns contradict.
-                let err = self.types.error;
-                let r = self.types.shallow_resolve(self.fns[fid as usize].ret);
-                if let Ty::Var(v) = self.types.get(r) {
-                    let v = *v;
-                    self.bind_var(v, err);
-                }
+                // The result is unknown from here on. Uses of the result can then no longer pin
+                // it to a type that the body's returns contradict.
+                let r = self.fns[fid as usize].ret;
+                self.poison(r);
             }
             return;
         }
@@ -625,9 +620,10 @@ impl Checker {
             CheckState::InProgress => {
                 let (name, span) = (self.globals[g as usize].name.clone(), self.globals[g as usize].span);
                 self.err("E0231", format!("`{name}` is defined in terms of itself"), span);
-                let err = self.types.error;
+                // The value is unknown from here on, so a later use cannot pin the type to one
+                // that the initializer then contradicts.
                 let t = self.globals[g as usize].ty;
-                self.unify(t, err);
+                self.poison(t);
                 return;
             }
             CheckState::Unchecked => {}

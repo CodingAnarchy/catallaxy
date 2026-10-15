@@ -244,6 +244,87 @@ fn path_to_uri(p: &Path) -> Option<lt::Uri> {
     lt::Uri::from_str(&out).ok()
 }
 
+// ---- the prelude on disk -------------------------------------------------------------------
+//
+// The prelude is compiled into `catx`; its source files are named `<prelude>/core.cx` and so on,
+// which no editor can open. Locations in it (go to definition of `puts`, a diagnostic's note)
+// point to a copy written once to a cache directory named after the version and the prelude's
+// content, read-only.
+
+/// The user's cache directory: `XDG_CACHE_HOME` if set, else the platform's.
+fn cache_home() -> Option<PathBuf> {
+    let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    if let Some(d) = var("XDG_CACHE_HOME") {
+        return Some(d);
+    }
+    if cfg!(windows) {
+        var("LOCALAPPDATA")
+    } else if cfg!(target_os = "macos") {
+        var("HOME").map(|h| h.join("Library/Caches"))
+    } else {
+        var("HOME").map(|h| h.join(".cache"))
+    }
+}
+
+/// The directory holding the prelude's sources, written on first use (`None` if it cannot be).
+fn prelude_dir() -> Option<&'static Path> {
+    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        PRELUDE.hash(&mut h);
+        let dir =
+            cache_home()?.join("catallaxy").join(format!("prelude-{}-{:016x}", env!("CARGO_PKG_VERSION"), h.finish()));
+        std::fs::create_dir_all(&dir).ok()?;
+        for (name, text) in PRELUDE {
+            let p = dir.join(name.rsplit('/').next()?);
+            if std::fs::read_to_string(&p).is_ok_and(|t| t == *text) {
+                continue;
+            }
+            // Written next to it and renamed, so a reader never sees half a file.
+            let tmp = dir.join(format!(".{}.{}", std::process::id(), name.rsplit('/').next()?));
+            std::fs::write(&tmp, text).ok()?;
+            let mut perm = std::fs::metadata(&tmp).ok()?.permissions();
+            perm.set_readonly(true);
+            let _ = std::fs::set_permissions(&tmp, perm);
+            if std::fs::rename(&tmp, &p).is_err() {
+                let _ = std::fs::remove_file(&tmp);
+                // Another server may have written it meanwhile.
+                if !std::fs::read_to_string(&p).is_ok_and(|t| t == *text) {
+                    return None;
+                }
+            }
+        }
+        Some(dir)
+    })
+    .as_deref()
+}
+
+/// The on-disk copy of prelude file `file` (an index into `PRELUDE`).
+fn prelude_path(file: u32) -> Option<PathBuf> {
+    let (name, _) = PRELUDE.get(file as usize)?;
+    Some(prelude_dir()?.join(name.rsplit('/').next()?))
+}
+
+/// Whether `p` is a file of the prelude's on-disk copy (opened from a location in it): it is not
+/// a program, so it gets no diagnostics and takes no part in the workspace.
+fn is_prelude_copy(p: &Path) -> bool {
+    let Some(parent) = p.parent() else { return false };
+    let Some(dir_name) = parent.file_name().and_then(|n| n.to_str()) else { return false };
+    dir_name.starts_with("prelude-")
+        && parent.parent().and_then(|g| g.file_name()) == Some(std::ffi::OsStr::new("catallaxy"))
+        && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| PRELUDE.iter().any(|(q, _)| q.ends_with(n)))
+}
+
+/// Whether a request or notification is about a document of the prelude's on-disk copy.
+fn on_prelude_copy(params: &Json) -> bool {
+    params["textDocument"]["uri"]
+        .as_str()
+        .and_then(|u| lt::Uri::from_str(u).ok())
+        .and_then(|u| uri_to_path(&u))
+        .is_some_and(|p| is_prelude_copy(&p))
+}
+
 // ---- compilation ---------------------------------------------------------------------------
 
 /// A checked document: the compilation and the file id of the document's own source.
@@ -275,7 +356,11 @@ impl Server<'_> {
             return None;
         }
         let sf = c.sm.file(span.file);
-        let uri = path_to_uri(Path::new(&sf.path))?;
+        let uri = if (span.file as usize) < PRELUDE.len() {
+            path_to_uri(&prelude_path(span.file)?)?
+        } else {
+            path_to_uri(Path::new(&sf.path))?
+        };
         Some(lt::Location::new(uri, Self::range(sf, span.start, span.end)))
     }
 
@@ -361,6 +446,10 @@ impl Server<'_> {
     // ---- notifications -----------------------------------------------------------------------
 
     fn notification(&mut self, n: Notification) {
+        // The prelude's copy, opened from a location in it, is not a program of the workspace.
+        if on_prelude_copy(&n.params) {
+            return;
+        }
         match n.method.as_str() {
             "textDocument/didOpen" => {
                 let Ok(p) = serde_json::from_value::<lt::DidOpenTextDocumentParams>(n.params) else { return };
@@ -419,6 +508,9 @@ impl Server<'_> {
 
     fn request(&mut self, req: Request) -> Response {
         let id = req.id.clone();
+        if on_prelude_copy(&req.params) {
+            return Response::new_ok(id, Json::Null);
+        }
         let result: Result<Json, (ErrorCode, String)> = match req.method.as_str() {
             "textDocument/hover" => parse(req.params).map(|p| to_json(self.hover(p))),
             "textDocument/definition" => parse(req.params).map(|p| to_json(self.definition(p))),
