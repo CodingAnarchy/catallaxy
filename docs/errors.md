@@ -1354,8 +1354,13 @@ Build the list yourself, or move the payloads out of the enum.
 
 ## E0368
 
-Type argument does not meet a bound. A generic function's type parameter is declared `T: Interface`,
-and the type at this call does not implement the interface. The message lists the missing methods.
+Type argument does not meet a bound. A type parameter of a generic function, class, enum or
+interface is declared `T: Interface`, and the type it gets does not implement the interface. The
+message lists the missing methods. For a function the type is the one at this call; for a class,
+enum or interface it is every type written as an argument (`SortedList[Blob]` in an annotation, a
+signature, a field or a superclass) and every type inferred for a construction (`SortedList.new()`
+whose elements later turn out to be `Blob`s, `Heap.Node(Blob.new(1), .Leaf)`). A type parameter
+passed on (`class Wrap[T] { s: SortedList[T] }`) needs the bound too.
 
 ```cx
 fn biggest[T: Comparable](xs: List[T]) -> T? { xs.max() }
@@ -1363,8 +1368,14 @@ class Blob { v: Int }
 biggest([Blob.new(1)])
 ```
 
+```
+class SortedList[T: Comparable] { items: List[T] = [] }
+class Blob { v: Int }
+s: SortedList[Blob] = SortedList.new()
+```
+
 Add the missing methods to the type (for `Comparable`, `fn <=>(self, o: Blob) -> Int`), or pass a
-type that has them.
+type that has them. For a type parameter passed on, bound it the same way: `class Wrap[T: Comparable]`.
 
 ## E0369
 
