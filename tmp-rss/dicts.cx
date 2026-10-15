@@ -1,0 +1,10 @@
+ds: List[Dict[Int, Int]] = []
+for i in 0...1_000_000 {
+  d: Dict[Int, Int] = [:]
+  d[i] = 1
+  d[i + 1] = 2
+  d[i + 2] = 3
+  ds.push(d)
+}
+gc()
+puts(ds.length)

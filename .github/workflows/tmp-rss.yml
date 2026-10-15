@@ -1,0 +1,21 @@
+name: tmp-rss (throwaway; delete before merge)
+on: pull_request
+jobs:
+  rss:
+    strategy:
+      fail-fast: false
+      matrix:
+        rev: [origin/main, 55c660a]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - run: cp tmp-rss/dicts.cx /tmp/dicts.cx && git fetch -q origin main gc/dict-index-buffers-145 && git checkout -q ${{ matrix.rev }}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked -p catallaxy
+      - name: Peak RSS, 1M three-entry dicts, 7 runs
+        run: |
+          for i in 1 2 3 4 5 6 7; do
+            /usr/bin/time -v ./target/release/catx run /tmp/dicts.cx 2>&1 >/dev/null | grep "Maximum resident"
+          done | sort -n -k6 | sed -n 4p | sed "s/^/MEDIAN ${{ matrix.rev }}: /"
