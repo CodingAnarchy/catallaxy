@@ -110,42 +110,86 @@ unsafe impl Send for Vm {}
 struct VmRoots {
     rs: *mut RootState,
     handles: *const Vec<Value>,
+    /// For a fiber VM: whether minor collections must scan it (`SCAN_*`).
+    scan: u8,
+}
+
+/// A fiber VM that is parked, and whose roots referenced no young object when a minor
+/// collection last scanned them. Only the fiber writes its roots, so they still reference only
+/// old objects, whose young referents the remembered set finds: minor collections skip it.
+const SCAN_CLEAN: u8 = 0;
+/// A fiber VM that ran (or was created) since a minor collection last found it clean.
+const SCAN_DIRTY: u8 = 1;
+/// The running fiber VM: its roots change under the collection's feet, so it is never clean.
+const SCAN_RUNNING: u8 = 2;
+
+impl VmRoots {
+    /// Marks this VM's own roots (not its children's). With `check`, returns whether any of them
+    /// references a young object.
+    fn trace_own(&self, t: &mut Tracer, check: bool) -> bool {
+        let mut young = false;
+        let mut mark = |t: &mut Tracer, v: Value| {
+            if v.is_ptr() {
+                let p = v.as_ptr();
+                // SAFETY: roots reference live objects.
+                young |= check && unsafe { (*p).is_young() };
+                t.mark(p);
+            }
+        };
+        // SAFETY: called only while the owning thread is stopped (or is the one collecting);
+        // both pointers are owned allocations that the thread itself also reaches only through
+        // raw pointers.
+        let rs = unsafe { &*self.rs };
+        let top = rs.frames.last().map(|f| f.top).unwrap_or(0);
+        for i in 0..top {
+            mark(t, unsafe { *rs.stack.add(i) });
+        }
+        for f in &rs.frames {
+            mark(t, f.closure);
+        }
+        for &v in unsafe { &*self.handles } {
+            mark(t, v);
+        }
+        for &v in &rs.extra_roots {
+            mark(t, v);
+        }
+        for &(_, v) in &rs.held_locks {
+            mark(t, v);
+        }
+        for &v in rs.pinned.values() {
+            mark(t, v);
+        }
+        young
+    }
 }
 
 impl RootSource for VmRoots {
     fn trace_roots(&self, t: &mut Tracer) {
-        // SAFETY: called only while the owning thread is stopped; both pointers are owned
-        // allocations that the thread itself also reaches only through raw pointers.
-        let rs = unsafe { &*self.rs };
-        let top = rs.frames.last().map(|f| f.top).unwrap_or(0);
-        for i in 0..top {
-            ops_mark(t, unsafe { *rs.stack.add(i) });
+        self.trace_own(t, false);
+        let minor = t.is_minor();
+        // SAFETY: as in `trace_own`. A minor collection runs on the owning thread itself, which
+        // is the only one to read or write the children's scan states.
+        let children = unsafe { &mut (*self.rs).children };
+        for child in children.iter_mut() {
+            if !minor {
+                child.trace_own(t, false);
+                continue;
+            }
+            match child.scan {
+                SCAN_CLEAN => {}
+                SCAN_DIRTY => {
+                    // The young objects marked here are tenured by this collection, except
+                    // large ones only roots reference, which stay young (see
+                    // `LocalHeap::sweep_young`): then the fiber stays dirty and is scanned again.
+                    if !child.trace_own(t, true) {
+                        child.scan = SCAN_CLEAN;
+                    }
+                }
+                _ => {
+                    child.trace_own(t, false);
+                }
+            }
         }
-        for f in &rs.frames {
-            ops_mark(t, f.closure);
-        }
-        for &v in unsafe { &*self.handles } {
-            ops_mark(t, v);
-        }
-        for &v in &rs.extra_roots {
-            ops_mark(t, v);
-        }
-        for &(_, v) in &rs.held_locks {
-            ops_mark(t, v);
-        }
-        for child in &rs.children {
-            child.trace_roots(t);
-        }
-        for &v in rs.pinned.values() {
-            ops_mark(t, v);
-        }
-    }
-}
-
-#[inline(always)]
-fn ops_mark(t: &mut Tracer, v: Value) {
-    if v.is_ptr() {
-        t.mark(v.as_ptr());
     }
 }
 
@@ -232,7 +276,8 @@ impl Vm {
             root_rs: rs,
             no_park: 0,
         });
-        let roots: Box<dyn RootSource> = Box::new(VmRoots { rs: vm.rs, handles: vm.m.handles_ptr() });
+        let roots: Box<dyn RootSource> =
+            Box::new(VmRoots { rs: vm.rs, handles: vm.m.handles_ptr(), scan: SCAN_RUNNING });
         let roots_ptr = Box::into_raw(roots);
         let heap_ptr = vm.m.heap_ptr();
         unsafe { catallaxy_gc::install(&vm.m.rec, roots_ptr, heap_ptr) };
@@ -264,7 +309,7 @@ impl Vm {
             root_rs: self.root_rs,
             no_park: 0,
         });
-        let roots = VmRoots { rs: vm.rs, handles: vm.m.handles_ptr() };
+        let roots = VmRoots { rs: vm.rs, handles: vm.m.handles_ptr(), scan: SCAN_DIRTY };
         // SAFETY: the root states belong to this thread, which is running (not being scanned).
         unsafe {
             let children = &mut (*self.root_rs).children;
@@ -308,6 +353,19 @@ impl Vm {
             // SAFETY: a retired stack is no longer the VM's, and the caller made sure no native
             // still reads its arguments from it.
             unsafe { free_stack(p, n) };
+        }
+    }
+
+    /// Tells minor collections that this fiber VM starts (`true`) or stops running. One that has
+    /// stopped is scanned by the next minor collection, and skipped by later ones until it runs
+    /// again if its roots then referenced no young object (issue #174). Fiber VMs only.
+    pub fn set_fiber_running(&mut self, running: bool) {
+        // SAFETY: the root states belong to this thread, which is running (not being scanned).
+        unsafe {
+            let i = (*self.rs).child_index;
+            let child = &mut (&mut (*self.root_rs).children)[i];
+            debug_assert!(std::ptr::eq(child.rs, self.rs));
+            child.scan = if running { SCAN_RUNNING } else { SCAN_DIRTY };
         }
     }
 
