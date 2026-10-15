@@ -84,3 +84,16 @@ pub fn n(i: usize) -> usize {
         i
     }
 }
+
+/// Where a reader that spins until the test's driving thread stops it, or a worker with nothing
+/// left to do, waits before its next round. Natively it does nothing. Under Miri, which runs one
+/// thread at a time, a spinning thread takes its share of the interpreter from the thread doing
+/// the work and leaves borrow tags behind on every read (see `strings.rs`); there it sleeps, in
+/// native state so that collections need not wait for it. A few rounds overlapping the writer's
+/// is what Miri needs to look for undefined behaviour; native runs and ThreadSanitizer cover the
+/// interleavings (issue #146).
+pub fn pause(rec: &catallaxy_gc::ThreadRecord) {
+    if cfg!(miri) {
+        catallaxy_gc::blocking(rec, || std::thread::sleep(std::time::Duration::from_millis(5)));
+    }
+}
