@@ -35,3 +35,20 @@ fn branches_returning_different_types_join_into_a_union() {
     let src = "fn f(c: Bool) {\n  if c { return 1 }\n  \"s\"\n}\nx: Int | String = f(true)\nputs(x)\n";
     assert!(error_codes(src).is_empty(), "{:?}", error_codes(src));
 }
+
+/// E0231 makes the global's type unknown, so a later typed use of it, or an operation on it in
+/// the initializer, does not report a second error.
+#[test]
+fn a_global_defined_in_terms_of_itself_reports_only_e0231() {
+    let progs = [
+        "const A = A + 1\nx: String = A\nputs(x)\n",
+        "const A = B\nconst B = A\nx: String = A\ny: Int = B\nputs(x)\n",
+        "const A = [B]\nconst B = A[0]\nx: String = B\nputs(x)\n",
+        "const A = fn() -> Int { x: String = A()\n  1 }\nputs(A())\n",
+        "class K {\n  const C = K.C.size\n}\nx: Bool = K.C\nputs(x)\n",
+    ];
+    for src in progs {
+        let codes = error_codes(src);
+        assert_eq!(codes, ["E0231"], "{src}");
+    }
+}

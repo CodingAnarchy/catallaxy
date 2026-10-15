@@ -28,7 +28,7 @@ threads = (1..4).map { |i|
 }
 for t in threads { t.join() }
 puts(stats.hits.get())
-puts(stats.log.get().length)
+puts(stats.log.lock { |l| l.length })
 puts(stats.total)
 
 # Frozen data can be shared freely.

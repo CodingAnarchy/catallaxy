@@ -1,0 +1,16 @@
+# expect: E0310
+# A user-defined `[]` is a call: it may run the closure that sets `x` to nil, so the nil test
+# no longer holds after `v[0]`.
+x: Int? = 5
+class V {
+  f: fn() = fn() {}
+  fn [](self, i: Int) -> Int {
+    (self.f)()
+    i
+  }
+}
+v = V.new(f: fn() { x = nil })
+if x != nil {
+  w = v[0]
+  puts(x + 1)
+}

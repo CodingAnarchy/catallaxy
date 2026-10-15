@@ -260,10 +260,13 @@ impl Checker {
 
     /// A call may change any field: drop the field-path narrowings that are not stable. It may
     /// also run a closure that assigns a local, or (on another fiber) code that does: drop the
-    /// narrowings of such locals too.
+    /// narrowings of such locals too, and of field paths rooted at them.
     pub fn clear_unstable_paths(&mut self) {
         self.path_epoch += 1;
-        self.clear_paths(|_, stable| !stable);
+        let Some(c) = self.ctxs.last() else { return };
+        let roots: FxHashSet<LocalId> =
+            c.path_narrow.iter().flat_map(|l| l.keys().map(|p| p.0)).filter(|&l| self.dies_at_calls(l)).collect();
+        self.clear_paths(|p, stable| !stable || roots.contains(&p.0));
         let Some(c) = self.ctxs.last() else { return };
         let dying: Vec<LocalId> =
             c.narrow.iter().flat_map(|l| l.keys().copied()).filter(|&l| self.dies_at_calls(l)).collect();
@@ -408,15 +411,10 @@ impl Checker {
                     Diag::error("E0230", format!("recursive function `{name}` needs a return type annotation"), span)
                         .suggest("annotate the return type", span.after(), " -> T"),
                 );
-                // The result is unknown from here on: an error, which fits any use (`unify` with
-                // an error does not bind, so bind it here). Uses of the result can then no longer
-                // pin it to a type that the body's returns contradict.
-                let err = self.types.error;
-                let r = self.types.shallow_resolve(self.fns[fid as usize].ret);
-                if let Ty::Var(v) = self.types.get(r) {
-                    let v = *v;
-                    self.bind_var(v, err);
-                }
+                // The result is unknown from here on. Uses of the result can then no longer pin
+                // it to a type that the body's returns contradict.
+                let r = self.fns[fid as usize].ret;
+                self.poison(r);
             }
             return;
         }
@@ -625,9 +623,10 @@ impl Checker {
             CheckState::InProgress => {
                 let (name, span) = (self.globals[g as usize].name.clone(), self.globals[g as usize].span);
                 self.err("E0231", format!("`{name}` is defined in terms of itself"), span);
-                let err = self.types.error;
+                // The value is unknown from here on, so a later use cannot pin the type to one
+                // that the initializer then contradicts.
                 let t = self.globals[g as usize].ty;
-                self.unify(t, err);
+                self.poison(t);
                 return;
             }
             CheckState::Unchecked => {}

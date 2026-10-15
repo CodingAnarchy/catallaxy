@@ -271,7 +271,7 @@ ts119 = (1..3).map { |p120|
 }
 for t in ts119 { t.join() }
 puts(atom117.get())
-puts(mtx118.get())
+puts(mtx118.lock { |l| l.dup })
 fz121 = freeze(([7]).dup())
 t122 = spawn { fz121.map { |x| x * 2 + 1 }.sum() + fz121.length }
 puts(t122.join().unwrap())

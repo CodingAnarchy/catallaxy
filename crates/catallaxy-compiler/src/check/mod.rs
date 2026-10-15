@@ -9,8 +9,10 @@ pub mod caps;
 pub mod collect;
 pub mod env;
 pub mod expr;
+pub mod implicit;
 pub mod lookup;
 pub mod pat;
+pub mod protect;
 pub mod rel;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -634,6 +636,16 @@ impl Checker {
     pub fn bind_var(&mut self, v: VarId, t: TyId) {
         self.types.vars[v as usize] = Some(t);
         self.binding_log.push(v);
+    }
+
+    /// Makes a still-unresolved type unknown (the error type, which fits any use), after an
+    /// error about it. `unify` with the error type succeeds without binding, so it cannot do this.
+    pub fn poison(&mut self, t: TyId) {
+        let r = self.types.shallow_resolve(t);
+        if let Ty::Var(v) = self.types.get(r) {
+            let (v, err) = (*v, self.types.error);
+            self.bind_var(v, err);
+        }
     }
 
     /// Runs `f` without recording diagnostics, rolling back bindings if it returns false.

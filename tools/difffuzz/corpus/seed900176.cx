@@ -283,7 +283,7 @@ ts156 = (1..5).map { |p157|
 }
 for t in ts156 { t.join() }
 puts(atom154.get())
-puts(mtx155.get())
+puts(mtx155.lock { |l| l.dup })
 acc114.push(chain18((-31), (match ([(-24), 8, 0o17, 1]).first() { nil => 10, p158: Int => total124 }), (acc114.par_map { |p159| v111 }).sum()).unwrap_or(total124))
 v160 = ((match E8.V3("Bar", (17).to_s()) { .V0(p161) => (acc114.sum_by { |p162| v111 }), .V1 => Set.from([2, (-31), 2, 8, 74961]).length, .V2 => K36.new("a", acc114).m40(total124), _ => (-30) }) ^ (if (["k0": (-49), "k4": 8]).has_key("k1") { (15 * (-2)) } else { acc114.length }))
 match E1.V3(("x,y,z" + "")) {

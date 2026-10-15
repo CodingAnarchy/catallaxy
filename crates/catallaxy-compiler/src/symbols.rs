@@ -604,6 +604,298 @@ pub fn is_identifier(name: &str) -> bool {
         && !query::KEYWORDS.contains(&name)
 }
 
+// ---- rename conflicts ------------------------------------------------------------------------
+
+/// `the function `dec` (line 3)`: a symbol and where it is declared, for messages.
+pub fn describe(ck: &Checker, sm: &SourceMap, sym: Symbol) -> String {
+    let name = symbol_name(ck, sm, sym).unwrap_or_default();
+    let what = match sym {
+        Symbol::Local(sp) => {
+            if ck.locals.iter().any(|l| l.span == sp && l.is_param) {
+                "the parameter"
+            } else {
+                "the variable"
+            }
+        }
+        Symbol::Fn(f) => match ck.fns.get(f as usize).map(|f| (f.owner, f.self_kind)) {
+            Some((Owner::None, _)) => "the function",
+            Some((_, crate::ast::SelfKind::None)) => "the static method",
+            _ => "the method",
+        },
+        Symbol::Class(_) => "the class",
+        Symbol::Enum(_) => "the enum",
+        Symbol::Iface(_) => "the interface",
+        Symbol::Variant(..) => "the variant",
+        Symbol::Field(..) => "the field",
+        Symbol::Global(g) => {
+            if ck.globals.get(g as usize).is_some_and(|g| g.is_const) {
+                "the constant"
+            } else {
+                "the variable"
+            }
+        }
+    };
+    let owner = match sym {
+        Symbol::Fn(f) => match ck.fns.get(f as usize).map(|f| f.owner) {
+            Some(Owner::Class(c)) => ck.classes.get(&c).map(|c| format!("{}.", c.name)),
+            Some(Owner::Enum(e)) => ck.enums.get(e as usize).map(|e| format!("{}.", e.name)),
+            Some(Owner::Iface(i)) => ck.ifaces.get(i as usize).map(|i| format!("{}.", i.name)),
+            _ => None,
+        },
+        Symbol::Field(c, _) => ck.classes.get(&c).map(|c| format!("{}.", c.name)),
+        Symbol::Variant(e, _) => ck.enums.get(e as usize).map(|e| format!("{}.", e.name)),
+        _ => None,
+    }
+    .unwrap_or_default();
+    let at = match decl_span(ck, sym) {
+        Some(sp)
+            if (sp.file as usize) < sm.files.len() && !ck.mods.iter().any(|m| m.is_prelude && m.file == sp.file) =>
+        {
+            let f = sm.file(sp.file);
+            let (line, _) = f.line_col(sp.start);
+            let file = std::path::Path::new(&f.path).file_name().map(|n| n.to_string_lossy().to_string());
+            format!(" ({}line {line})", file.map(|f| format!("{f}, ")).unwrap_or_default())
+        }
+        _ => " (from the prelude)".to_string(),
+    };
+    format!("{what} `{owner}{name}`{at}")
+}
+
+/// The scopes of a module's variables: declared functions and methods, blocks, closures, and the
+/// bindings of `for`, `if let` and `match` arms.
+struct Scopes {
+    file: u32,
+    items: Vec<Span>,
+    inner: Vec<Span>,
+}
+
+/// A scope by span, or the module's top level (`None`).
+type Scope = Option<Span>;
+
+impl Scopes {
+    fn of(ck: &Checker, file: u32) -> Option<Scopes> {
+        let md = ck.mods.iter().find(|m| m.file == file && !m.is_prelude)?;
+        let mut items = Vec::new();
+        for it in &md.ast.items {
+            match it {
+                Item::Fn(f) => items.push(f.span),
+                Item::Class(c) => items.extend(c.methods.iter().map(|f| f.span)),
+                Item::Interface(i) => items.extend(i.methods.iter().map(|f| f.span)),
+                Item::Enum(e) => items.extend(e.methods.iter().map(|f| f.span)),
+                Item::Extend(x) => items.extend(x.methods.iter().map(|f| f.span)),
+                _ => {}
+            }
+        }
+        let mut inner = Vec::new();
+        query::walk(&md.ast, &mut |e| match &e.kind {
+            ExprKind::Closure { .. } | ExprKind::Spawn { .. } | ExprKind::For { .. } | ExprKind::IfLet { .. } => {
+                inner.push(e.span);
+                if let ExprKind::IfLet { then, .. } = &e.kind {
+                    inner.push(then.span);
+                }
+            }
+            ExprKind::If { then, .. } => inner.push(then.span),
+            ExprKind::While { body, .. }
+            | ExprKind::Loop { body }
+            | ExprKind::Block(body)
+            | ExprKind::WithLock { body, .. } => inner.push(body.span),
+            ExprKind::Match { arms, .. } => inner.extend(arms.iter().map(|a| a.span)),
+            _ => {}
+        });
+        Some(Scopes { file, items, inner })
+    }
+
+    /// The scopes around `sp`, innermost first, ending with the top level unless `sp` is in a
+    /// declared function.
+    fn chain(&self, sp: Span) -> Vec<Scope> {
+        let inside = |s: &&Span| s.start <= sp.start && sp.end <= s.end;
+        let mut out: Vec<Span> = self.inner.iter().chain(&self.items).filter(inside).copied().collect();
+        out.sort_by_key(|s| s.end - s.start);
+        out.dedup();
+        let in_item = self.items.iter().any(|s| inside(&s));
+        let mut chain: Vec<Scope> = out.into_iter().map(Some).collect();
+        if !in_item {
+            chain.push(None);
+        }
+        chain
+    }
+
+    /// Whether `sp` is in scope `s` (or a scope nested in it).
+    fn within(&self, s: Scope, sp: Span) -> bool {
+        sp.file == self.file && self.chain(sp).contains(&s)
+    }
+}
+
+/// Why renaming `sym` to `new` would make some name mean something else, or clash with a
+/// declaration: the new name is taken by a member of the same type, an item visible where `sym`
+/// is declared or used, or a variable in a scope that overlaps the renamed one. `None` if no
+/// conflict is found (renaming may still change the program in ways this misses: the language
+/// server checks the renamed program as well).
+pub fn rename_conflict(ck: &Checker, sm: &SourceMap, index: &Index, sym: Symbol, new: &str) -> Option<String> {
+    if symbol_name(ck, sm, sym).as_deref() == Some(new) {
+        return None;
+    }
+    let refs: Vec<Span> = index.refs(sym).map(|o| o.span).collect();
+    let conflict = |other: Symbol| Some(format!("renaming to `{new}` would conflict with {}", describe(ck, sm, other)));
+    // Variables named `new`, with their scopes.
+    let named_locals = |file: u32, scopes: &Scopes| -> Vec<(Symbol, Scope, Span)> {
+        let mut seen = FxHashSet::default();
+        ck.locals
+            .iter()
+            .filter(|l| l.name == new && l.span.file == file && text_at(sm, l.span) == Some(new))
+            .filter(|l| seen.insert(l.span))
+            .map(|l| (Symbol::Local(l.span), scopes.chain(l.span)[0], l.span))
+            .collect()
+    };
+    match sym {
+        Symbol::Local(decl) => {
+            let scopes = Scopes::of(ck, decl.file)?;
+            let mine = scopes.chain(decl)[0];
+            for (other, theirs, at) in named_locals(decl.file, &scopes) {
+                let clash = theirs == mine
+                    // An inner variable would capture the renamed one's uses in its scope.
+                    || (scopes.within(mine, at) && refs.iter().any(|r| scopes.within(theirs, *r)))
+                    // The renamed one would capture an outer variable's uses in its scope.
+                    || (scopes.within(theirs, decl) && index.refs(other).any(|o| scopes.within(mine, o.span)));
+                if clash {
+                    return conflict(other);
+                }
+            }
+            // A function or global of that name used in the variable's scope would be hidden.
+            let m = ck.mods.iter().position(|m| m.file == decl.file && !m.is_prelude)? as ModId;
+            if let Some(other @ (Symbol::Fn(_) | Symbol::Global(_))) =
+                lookup_item(ck, m, new).and_then(|it| scope_item_sym(ck, it))
+            {
+                if index.refs(other).any(|o| scopes.within(mine, o.span)) {
+                    return conflict(other);
+                }
+            }
+            None
+        }
+        Symbol::Fn(f) if ck.fns.get(f as usize).is_some_and(|fi| fi.owner == Owner::None) => {
+            item_conflict(ck, sm, sym, &refs, new)
+        }
+        Symbol::Class(_) | Symbol::Enum(_) | Symbol::Iface(_) | Symbol::Global(_) => {
+            item_conflict(ck, sm, sym, &refs, new)
+        }
+        Symbol::Fn(f) => {
+            let fi = ck.fns.get(f as usize)?;
+            match fi.owner {
+                Owner::Class(c) => member_conflict(ck, c, new).and_then(conflict),
+                Owner::Enum(e) => {
+                    let ei = ck.enums.get(e as usize)?;
+                    if let Some(&g) = ei.methods.get(new) {
+                        return fn_sym(ck, g).and_then(conflict);
+                    }
+                    let v = ei.variants.iter().position(|v| v.name == new)?;
+                    conflict(Symbol::Variant(e, v as u32))
+                }
+                Owner::Iface(i) => {
+                    let g = *ck.ifaces.get(i as usize)?.by_name.get(new)?;
+                    fn_sym(ck, g).and_then(conflict)
+                }
+                Owner::Extend(x) => {
+                    let xi = ck.exts.get(x as usize)?;
+                    if let Some(&g) = xi.methods.get(new) {
+                        return fn_sym(ck, g).and_then(conflict);
+                    }
+                    member_conflict(ck, class_of(ck, xi.target)?, new).and_then(conflict)
+                }
+                Owner::None => None,
+            }
+        }
+        Symbol::Field(c, _) => member_conflict(ck, c, new).and_then(conflict),
+        Symbol::Variant(e, _) => {
+            let ei = ck.enums.get(e as usize)?;
+            if let Some(v) = ei.variants.iter().position(|v| v.name == new) {
+                return conflict(Symbol::Variant(e, v as u32));
+            }
+            fn_sym(ck, *ei.methods.get(new)?).and_then(conflict)
+        }
+    }
+}
+
+/// A member named `new` of class `c`, its superclasses or its subclasses: a method, a field or a
+/// constant.
+fn member_conflict(ck: &Checker, c: ClassId, new: &str) -> Option<Symbol> {
+    let mut todo = vec![c];
+    // Superclasses.
+    let mut up = ck.classes.get(&c)?.superclass.and_then(|t| class_of(ck, t));
+    while let Some(sc) = up {
+        todo.push(sc);
+        up = ck.classes.get(&sc)?.superclass.and_then(|t| class_of(ck, t));
+    }
+    // Subclasses, transitively.
+    let mut i = 0;
+    while i < todo.len() {
+        if let Some(ci) = ck.classes.get(&todo[i]) {
+            for &s in &ci.subclasses {
+                if !todo.contains(&s) {
+                    todo.push(s);
+                }
+            }
+        }
+        i += 1;
+    }
+    for k in todo {
+        let ci = ck.classes.get(&k)?;
+        if let Some(&g) = ci.methods.get(new) {
+            if let Some(s) = fn_sym(ck, g) {
+                return Some(s);
+            }
+        }
+        if let Some(f) = ci.fields.iter().find(|f| f.name == new) {
+            return Some(Symbol::Field(f.decl_class, f.decl_index as u32));
+        }
+        if let Some(&g) = ci.consts.get(new) {
+            return Some(Symbol::Global(g));
+        }
+    }
+    None
+}
+
+/// An item, import or prelude name `new` visible in a module that declares or uses the item
+/// `sym`, or a variable named `new` around one of its uses.
+fn item_conflict(ck: &Checker, sm: &SourceMap, sym: Symbol, refs: &[Span], new: &str) -> Option<String> {
+    let mut files: Vec<u32> = refs.iter().map(|r| r.file).collect();
+    files.extend(decl_span(ck, sym).map(|s| s.file));
+    files.sort_unstable();
+    files.dedup();
+    for &file in &files {
+        let Some(m) = ck.mods.iter().position(|md| md.file == file && !md.is_prelude) else { continue };
+        let md = &ck.mods[m];
+        if let Some(it) = lookup_item(ck, m as ModId, new) {
+            let other = scope_item_sym(ck, it);
+            if other != Some(sym) {
+                let what = match other {
+                    Some(o) => describe(ck, sm, o),
+                    None if matches!(it, ScopeItem::Module(_)) => format!("the imported module `{new}`"),
+                    None => format!("`{new}`"),
+                };
+                return Some(format!("renaming to `{new}` would conflict with {what}"));
+            }
+        } else if md.imported.contains_key(new) {
+            return Some(format!("renaming to `{new}` would conflict with the import `{new}`"));
+        }
+        // A variable of that name around a use would hide the item there.
+        let Some(scopes) = Scopes::of(ck, file) else { continue };
+        let mut seen = FxHashSet::default();
+        for l in ck.locals.iter().filter(|l| l.name == new && l.span.file == file && seen.insert(l.span)) {
+            if text_at(sm, l.span) != Some(new) {
+                continue;
+            }
+            let theirs = scopes.chain(l.span)[0];
+            if refs.iter().any(|r| scopes.within(theirs, *r)) {
+                return Some(format!(
+                    "renaming to `{new}` would conflict with {}",
+                    describe(ck, sm, Symbol::Local(l.span))
+                ));
+            }
+        }
+    }
+    None
+}
+
 // ---- signature help --------------------------------------------------------------------------
 
 /// A function signature for signature help: the label and each parameter's byte range in it.
@@ -644,7 +936,7 @@ pub fn fn_decl(ck: &Checker, f: FnId) -> Option<&FnDecl> {
 }
 
 /// Source text of parameter `k`'s default value (`Class.new` takes field defaults).
-fn default_text(ck: &Checker, sm: &SourceMap, f: FnId, k: usize) -> Option<String> {
+pub fn default_text(ck: &Checker, sm: &SourceMap, f: FnId, k: usize) -> Option<String> {
     let fi = &ck.fns[f as usize];
     let span = match (&fi.synth, fn_decl(ck, f)) {
         (_, Some(d)) => d.params.get(k)?.default.as_ref()?.span,

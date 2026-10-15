@@ -246,6 +246,20 @@ async function main() {
       }
     });
 
+    await check("hover and completion: documentation comments", async () => {
+      // A user class's leading comment, and a prelude method's.
+      const h = await c.request("textDocument/hover", at(shapesUri, shapes, "ByArea.new(s)", 0, 1));
+      assert.match(h.contents.value, /class ByArea/);
+      assert.match(h.contents.value, /A wrapper that orders shapes by area/);
+      const s = await c.request("textDocument/hover", at(shapesUri, shapes, "sort_with", 0, 1));
+      assert.match(s.contents.value, /A stable sort by the comparator/);
+      const r = await c.request("textDocument/completion", at(shapesUri, shapes, "puts(wrapped[1]", 0, 5));
+      const item = (Array.isArray(r) ? r : r.items).find((i) => i.label === "ByArea");
+      assert(item && item.documentation, JSON.stringify(item));
+      assert.strictEqual(item.documentation.kind, "markdown");
+      assert.match(item.documentation.value, /orders shapes by area/);
+    });
+
     await check("hover: a method call shows its signature", async () => {
       const h = await c.request("textDocument/hover", at(shapesUri, shapes, "describe()", 0, 1));
       assert(h, "no hover");
@@ -394,6 +408,26 @@ async function main() {
         rejected = true;
       }
       assert(rejected, "renaming to `match` was accepted");
+    });
+
+    await check("rename: a name already taken in scope is refused, naming the clash", async () => {
+      let err;
+      try {
+        await c.request("textDocument/rename", { ...at(shapesUri, shapes, "by_area =", 0, 1), newName: "by_perimeter" });
+      } catch (e) {
+        err = e;
+      }
+      assert(err, "renaming `by_area` to `by_perimeter` was accepted");
+      assert.strictEqual(err.code, -32803);
+      assert.match(err.message, /would conflict with the variable `by_perimeter`/);
+      // A method renamed to another method of its class.
+      err = undefined;
+      try {
+        await c.request("textDocument/rename", { ...at(shapesUri, shapes, "fn perimeter", 0, 3), newName: "area" });
+      } catch (e) {
+        err = e;
+      }
+      assert(err && err.code === -32803, `renaming \`perimeter\` to \`area\`: ${err}`);
     });
 
     await check("signatureHelp: active parameter follows the commas", async () => {

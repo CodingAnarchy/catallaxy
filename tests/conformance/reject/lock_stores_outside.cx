@@ -1,0 +1,10 @@
+# expect: E0617
+# Storing the protected value in an outer variable escapes the lock too.
+class Account {
+  history: List[Int]
+}
+acct = Account.new([])
+m = Mutex.new(move acct)
+saved: List[Int] = []
+m.lock { |a| saved = a.history; nil }
+saved.push(1)

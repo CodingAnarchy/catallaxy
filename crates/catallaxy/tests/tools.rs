@@ -400,6 +400,90 @@ fn lsp_references_and_rename() {
     lsp.finish();
 }
 
+const CLASH: &str = "x = 1
+y = 2
+puts(x + y)
+fn f(a: Int, b: Int) -> Int { a - b }
+fn inc(n: Int) -> Int { n + 1 }
+fn dec(n: Int) -> Int { n - 1 }
+class Acc {
+  total: Int
+  fn add(self, n: Int) -> Int { self.total + n }
+  fn sub(self, n: Int) -> Int { self.total - n }
+}
+a = Acc.new(1)
+puts(f(3, 1) + inc(dec(1)) + a.add(2) + a.sub(1) + a.total)
+[1].each { |k| puts(k + x) }
+fn twice(n: Int) -> Int { m = n * 2\n  m }
+";
+
+#[test]
+fn lsp_rename_refuses_conflicts() {
+    let (mut lsp, _) = Lsp::init();
+    let uri = lsp.open("clash.cx", CLASH);
+    let t = CLASH;
+    let rename = |lsp: &mut Lsp, id: i64, p: Value, new: &str| {
+        let mut params = json!({"textDocument": {"uri": uri}, "position": p});
+        params["newName"] = json!(new);
+        lsp.request(id, "textDocument/rename", params)
+    };
+    // (line, name, nth, new name, what the refusal names)
+    let refused: [(usize, &str, usize, &str, &str); 9] = [
+        (1, "y", 0, "x", "the variable `x` (clash.cx, line 1)"),
+        (3, "b", 0, "a", "the parameter `a`"),
+        (4, "inc", 0, "dec", "the function `dec`"),
+        (8, "add", 0, "sub", "the method `Acc.sub`"),
+        (7, "total", 0, "add", "the method `Acc.add`"),
+        (6, "Acc", 0, "String", "the class `String` (from the prelude)"),
+        // The block parameter would capture the use of the outer `x` in the block.
+        (13, "k", 0, "x", "the variable `x`"),
+        // The variable would hide the function `inc` used in its scope... none is: but `puts` is.
+        (0, "x", 0, "puts", "the function `puts`"),
+        (14, "m", 0, "n", "the parameter `n`"),
+    ];
+    for (i, (line, name, nth, new, what)) in refused.into_iter().enumerate() {
+        let r = rename(&mut lsp, 10 + i as i64, pos(t, line, name, nth), new);
+        assert_eq!(r["error"]["code"], -32803, "{name} -> {new}: {r}");
+        let msg = r["error"]["message"].as_str().unwrap_or_default();
+        assert!(msg.contains("would conflict with") && msg.contains(what), "{name} -> {new}: {msg}");
+    }
+    // Names that collide with nothing in scope are fine, including shadowing an unused outer
+    // name and reusing a name of an unrelated scope.
+    let fine: [(usize, &str, usize, &str); 4] =
+        [(1, "y", 0, "z"), (3, "b", 0, "c"), (13, "k", 0, "y2"), (14, "m", 0, "a")];
+    for (i, (line, name, nth, new)) in fine.into_iter().enumerate() {
+        let r = rename(&mut lsp, 30 + i as i64, pos(t, line, name, nth), new);
+        assert!(r["result"]["changes"].is_object(), "{name} -> {new}: {r}");
+    }
+    lsp.finish();
+}
+
+const CLASH_LIB: &str = "pub fn helper(n: Int) -> Int { n + 1 }\n";
+const CLASH_USER: &str = "import clash_lib.{helper}\nfn other(n: Int) -> Int { n * 2 }\nputs(helper(1) + other(2))\n";
+
+#[test]
+fn lsp_rename_rechecks_the_renamed_workspace() {
+    // The user of `helper` is not part of the library's compilation, so only checking the
+    // renamed workspace finds that it would now import a second `other`.
+    let dir = scratch_dir("rename-recheck");
+    std::fs::write(dir.join("clash_lib.cx"), CLASH_LIB).unwrap();
+    std::fs::write(dir.join("clash_user.cx"), CLASH_USER).unwrap();
+    let mut lsp = Lsp::init_workspace(&dir, &[]);
+    let lib = lsp.open_unsaved(&dir.join("clash_lib.cx"), CLASH_LIB);
+    let at = |p: Value| json!({"textDocument": {"uri": lib}, "position": p});
+    let mut p = at(pos(CLASH_LIB, 0, "helper", 0));
+    p["newName"] = json!("other");
+    let r = lsp.request(2, "textDocument/rename", p);
+    assert_eq!(r["error"]["code"], -32803, "{r}");
+    let msg = r["error"]["message"].as_str().unwrap_or_default();
+    assert!(msg.contains("clash_user.cx:"), "{msg}");
+    let mut p = at(pos(CLASH_LIB, 0, "helper", 0));
+    p["newName"] = json!("bump");
+    let r = lsp.request(3, "textDocument/rename", p);
+    assert_eq!(edit_spots(&r, "bump").len(), 3, "{r}");
+    lsp.finish();
+}
+
 const ALIAS_MAIN: &str = "import alias_geo as g
 p: g.Point = g.Point.new(1)
 puts(g.origin().sum + p.sum)
@@ -625,6 +709,100 @@ fn lsp_rename_interface_member_implemented_by_builtin() {
     p["newName"] = json!("size");
     let r = lsp.request(3, "textDocument/rename", p);
     assert!(r.get("error").is_some(), "{r}");
+    lsp.finish();
+}
+
+const DOCS: &str = "# Adds `by` to `n`.
+#
+# Wraps around on overflow.
+fn inc(n: Int, by: Int = 1) -> Int { n + by }
+# A point on the line.
+class P {
+  # Distance from zero.
+  x: Int
+  # Twice the distance.
+  fn dbl(self) -> Int { self.x * 2 }
+}
+# Primary colors.
+enum C {
+  # Warm.
+  Red
+  Blue
+}
+# The answer.
+const ANSWER = 42
+
+# Not attached: a blank line follows.
+
+fn plain() -> Int { 1 } # Not attached either.
+p = P.new(1)
+puts(inc(p.x) + p.dbl() + ANSWER + plain())
+c = C.Red
+puts(\"a,b\".split(\",\"))
+";
+
+#[test]
+fn lsp_doc_comments_in_hover_and_completion() {
+    let (mut lsp, _) = Lsp::init();
+    let uri = lsp.open("docs.cx", DOCS);
+    let t = DOCS;
+    let hover = |lsp: &mut Lsp, id: i64, p: Value| {
+        let h = lsp.request(id, "textDocument/hover", json!({"textDocument": {"uri": uri}, "position": p}));
+        h["result"]["contents"]["value"].as_str().unwrap_or_default().to_string()
+    };
+    let line = t.lines().position(|l| l.starts_with("puts(inc")).unwrap();
+    let h = hover(&mut lsp, 2, pos(t, line, "inc", 0));
+    // The declaration with its default value, then the comment block.
+    assert!(h.contains("fn inc(n: Int, by: Int = 1) -> Int"), "{h}");
+    assert!(h.contains("Adds `by` to `n`.\n\nWraps around on overflow."), "{h}");
+    for (i, (needle, nth, doc)) in
+        [(".x", 0, "Distance from zero."), ("dbl", 0, "Twice the distance."), ("ANSWER", 0, "The answer.")]
+            .into_iter()
+            .enumerate()
+    {
+        let mut p = pos(t, line, needle, nth);
+        if needle.starts_with('.') {
+            p["character"] = json!(p["character"].as_u64().unwrap() + 1);
+        }
+        let h = hover(&mut lsp, 3 + i as i64, p);
+        assert!(h.contains(doc), "{needle}: {h}");
+    }
+    let h = hover(&mut lsp, 10, pos(t, line, "plain", 0));
+    assert!(h.contains("fn plain() -> Int") && !h.contains("attached"), "{h}");
+    let cline = t.lines().position(|l| l.starts_with("c = C.Red")).unwrap();
+    let h = hover(&mut lsp, 11, pos(t, cline, "Red", 0));
+    assert!(h.contains("Warm."), "{h}");
+    assert!(hover(&mut lsp, 12, pos(t, cline, "C", 0)).contains("Primary colors."));
+    // Prelude documentation too.
+    let h = hover(&mut lsp, 13, pos(t, cline + 1, "split", 0));
+    assert!(h.contains("pieces"), "prelude doc: {h}");
+
+    // Completion items carry the documentation.
+    let probe = format!("{t}p.\nP.\n");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": probe}]
+    }}));
+    let n = t.lines().count();
+    let doc_of = |r: &Value, label: &str| {
+        let items = r["result"].as_array().unwrap_or_else(|| panic!("{r}"));
+        let it = items.iter().find(|i| i["label"] == label).unwrap_or_else(|| panic!("no {label} in {r}"));
+        it["documentation"]["value"].as_str().unwrap_or_default().to_string()
+    };
+    let r = lsp.request(
+        20,
+        "textDocument/completion",
+        json!({"textDocument": {"uri": uri}, "position": {"line": n, "character": 2}}),
+    );
+    assert_eq!(doc_of(&r, "x"), "Distance from zero.");
+    assert_eq!(doc_of(&r, "dbl"), "Twice the distance.");
+    let r = lsp.request(
+        21,
+        "textDocument/completion",
+        json!({"textDocument": {"uri": uri}, "position": {"line": n + 1, "character": 0}}),
+    );
+    assert!(doc_of(&r, "inc").starts_with("Adds `by`"));
+    assert_eq!(doc_of(&r, "P"), "A point on the line.");
+    assert_eq!(doc_of(&r, "plain"), "");
     lsp.finish();
 }
 

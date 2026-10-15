@@ -1,0 +1,5 @@
+# expect: E0617
+# An element of the protected value escapes as much as the value itself.
+m = Mutex.new(move [[1, 2], [3]])
+row = m.lock { |rows| if rows.length > 1 { rows[1] } else { [0] } }
+row.push(4)

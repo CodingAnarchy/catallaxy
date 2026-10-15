@@ -1,0 +1,6 @@
+# expect: E0616
+# `update` keeps its result (not moved) as the protected value and returns it.
+m = Mutex.new(move [1])
+extra = [2]
+m.update { |_l| extra }
+extra.push(3)
