@@ -135,8 +135,10 @@ pub interface Enumerable[T] {
     out
   }
   # Calls `f` with consecutive slices of `n` elements (the last may be shorter). Returns the
-  # slices as a `Lazy`, so without a block `xs.each_slice(2).to_list()` lists them.
+  # slices as a `Lazy`, so without a block `xs.each_slice(2).to_list()` lists them. Panics with an
+  # `ArgumentError` unless `n` is positive.
   fn each_slice(self, n: Int, f: (fn(List[T]))? = nil) -> Lazy[List[T]] {
+    if n <= 0 { panic("ArgumentError: slice size must be positive, got #{n}") }
     slices = Lazy.new({ |g: fn(List[T])|
       batch: List[T] = []
       self.each { |x|
@@ -152,8 +154,9 @@ pub interface Enumerable[T] {
     slices
   }
   # Calls `f` with each run of `n` consecutive elements. Returns the runs as a `Lazy`, as
-  # `each_slice` does.
+  # `each_slice` does. Panics with an `ArgumentError` unless `n` is positive.
   fn each_cons(self, n: Int, f: (fn(List[T]))? = nil) -> Lazy[List[T]] {
+    if n <= 0 { panic("ArgumentError: window size must be positive, got #{n}") }
     windows = Lazy.new({ |g: fn(List[T])|
       window: List[T] = []
       self.each { |x|
@@ -519,8 +522,9 @@ pub native fn assert_eq(actual: Dyn, expected: Dyn, message: String = "")
 # The value as source-like text: strings quoted and escaped, `nil` as `nil`, collections with
 # their items inspected (`["a", 1]`).
 pub native fn inspect(value: Dyn) -> String
-# -1, 0 or 1 by the natural order of two values (an `Int` and a `Float` compare numerically).
-# Panics with an `ArgumentError` if they are not comparable (different types, `nil`, NaN).
+# -1, 0 or 1 by the natural order of two values (an `Int` and a `Float` compare numerically, and
+# NaN comes after every other number, as `Float.<=>` has it). Panics with an `ArgumentError` if
+# they are not comparable (different types, `nil`).
 pub native fn compare_values(a: Dyn, b: Dyn) -> Int
 # The next line of standard input without its `\n` or `\r\n`, or nil at end of input. Flushes
 # stdout first, so a prompt written with `print` shows.

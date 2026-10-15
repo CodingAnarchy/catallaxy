@@ -70,12 +70,13 @@ entry is its documentation comment, which editors also show on hover and in comp
 - `fn each_slice(self, n: Int, f: (fn(List[T]))? = nil) -> Lazy[List[T]]`
 
   Calls `f` with consecutive slices of `n` elements (the last may be shorter). Returns the
-  slices as a `Lazy`, so without a block `xs.each_slice(2).to_list()` lists them.
+  slices as a `Lazy`, so without a block `xs.each_slice(2).to_list()` lists them. Panics with an
+  `ArgumentError` unless `n` is positive.
 
 - `fn each_cons(self, n: Int, f: (fn(List[T]))? = nil) -> Lazy[List[T]]`
 
   Calls `f` with each run of `n` consecutive elements. Returns the runs as a `Lazy`, as
-  `each_slice` does.
+  `each_slice` does. Panics with an `ArgumentError` unless `n` is positive.
 
 - `fn take(self, n: Int) -> List[T]`
 
@@ -266,8 +267,9 @@ A Lazy may be consumed more than once: each consumption runs the source again.
 
 - `fn compare_values(a: Dyn, b: Dyn) -> Int`
 
-  -1, 0 or 1 by the natural order of two values (an `Int` and a `Float` compare numerically).
-  Panics with an `ArgumentError` if they are not comparable (different types, `nil`, NaN).
+  -1, 0 or 1 by the natural order of two values (an `Int` and a `Float` compare numerically, and
+  NaN comes after every other number, as `Float.<=>` has it). Panics with an `ArgumentError` if
+  they are not comparable (different types, `nil`).
 
 - `fn read_line() -> String?`
 
@@ -399,8 +401,8 @@ that returns a `Result`: `port = env["PORT"].ok_or("PORT is not set")?`.
 
 - `fn pow(self, exp: Int) -> Int`
 
-  `self ** exp`, exact (`Int`s grow as needed; `0.pow(0)` is 1). Panics if `exp` is negative;
-  use `Float` powers for those.
+  `self ** exp`, exact (`Int`s grow as needed; `0.pow(0)` is 1). Panics with an `ArgumentError`
+  if `exp` is negative (use `Float` powers for those), or a `RangeError` if it is above 2^32 - 1.
 
 - `fn to_s_radix(self, radix: Int) -> String`
 
@@ -435,6 +437,11 @@ that returns a `Result`: `port = env["PORT"].ok_or("PORT is not set")?`.
 
 - `fn hash(self) -> Int`
 - `fn <=>(self, other: Float) -> Int`
+
+  A total order: the usual one, with NaN after every other Float (`Infinity` included) and equal
+  to itself, so sorting a list holding NaN works (`sorted` puts NaN last). `-0.0 <=> 0.0` is 0.
+  The operators `<`, `<=`, `>` and `>=` follow IEEE 754 instead: false whenever NaN is involved.
+
 - `fn to_f(self) -> Float`
 - `fn to_i(self) -> Int`
 
@@ -527,7 +534,9 @@ that returns a `Result`: `port = env["PORT"].ok_or("PORT is not set")?`.
 - `fn [](self, index: Int) -> String`
 
   The character (Unicode scalar value) at character position `index`; negative counts from the
-  end. Indexing with a range (`s[1..3]`) returns those characters, clipped to the string.
+  end. Panics with an `IndexError` if out of range, as `List` indexing does (`chars.get(i)`
+  returns nil instead). Indexing with a range (`s[1..3]`) returns those characters, clipped to the
+  string.
 
 - `fn length(self) -> Int`
 
@@ -887,8 +896,8 @@ that returns a `Result`: `port = env["PORT"].ok_or("PORT is not set")?`.
 
 - `fn chunk(self, size: Int) -> List[List[T]]`
 
-  The items in consecutive lists of `size` (the last may be shorter). `size` must be positive:
-  with 0 or less it never returns.
+  The items in consecutive lists of `size` (the last may be shorter). Panics with an
+  `ArgumentError` unless `size` is positive.
 
 - `fn sort_by_keys[K: Comparable](self, keys: List[K]) -> List[T]`
 
@@ -932,8 +941,9 @@ compared lexicographically).
 
 - `fn sorted(self) -> List[T]`
 
-  A new, stably sorted list; the list itself is unchanged. Panics with an `ArgumentError` if
-  two items cannot be compared (a NaN, for one).
+  A new, stably sorted list; the list itself is unchanged. NaN sorts after the other Floats (see
+  `Float.<=>`). Panics with an `ArgumentError` if two items cannot be compared (an `Int` and a
+  `String` in a `List[Dyn]`, say).
 
 - `fn sort_in_place(mut self)`
 
@@ -1175,8 +1185,8 @@ writes it as an array.
 
 - `fn step(self, n: Int) -> List[Int]`
 
-  Every `n`th integer from `first`: `(1..10).step(3) == [1, 4, 7, 10]`. `n` must be positive:
-  with 0 or less it never returns.
+  Every `n`th integer from `first`: `(1..10).step(3) == [1, 4, 7, 10]`. Panics with an
+  `ArgumentError` unless `n` is positive (a range does not count down).
 
 - `fn to_list(self) -> List[Int]`
 - `fn sum(self) -> Int`
@@ -1939,8 +1949,9 @@ seeded from the clock when the thread first uses it.
 
 - `fn int(lo: Int, hi: Int) -> Int`
 
-  A random integer from `lo` to `hi`, both inclusive. Panics with an `ArgumentError` if
-  `hi < lo`.
+  A random integer from `lo` to `hi`, both inclusive; any bounds within 64 bits work, up to the
+  whole range. Panics with an `ArgumentError` if `hi < lo`, or a `RangeError` if a bound does
+  not fit in 64 bits.
 
 - `fn float() -> Float`
 

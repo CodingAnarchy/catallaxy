@@ -1236,7 +1236,7 @@ impl<'a> Codegen<'a> {
                                 if self.writes_through_dyn(recv) {
                                     self.emit(st, encode(Op::CheckSet, o, k, t));
                                 }
-                                self.emit(st, encode(Op::SetIndex, o, k, t));
+                                self.emit(st, encode(Op::SetMember, o, k, t));
                             }
                             _ => {}
                         }

@@ -193,7 +193,9 @@ Assignment operators: `= += -= *= /= %= ||= ??=`. Variables are block-scoped.
   their elements are, and order lexicographically (`(1, "b") < (1, "c")`, `[1, 2] < [1, 2, 0]`). Sorting
   needs it: `sorted`, `sort`, `sort_in_place`, `min` and `max` require `Comparable` items, and `sort_by`,
   `min_by` and `max_by` a `Comparable` key (`recs.sort_by { |r| (r.last, r.first) }`). Use `sort_with`
-  for any other order.
+  for any other order. `Float`'s `<=>` is a total order that puts NaN after every other number (so a
+  list holding NaN sorts, NaN last), while `<`, `<=`, `>` and `>=` follow IEEE 754 and are false
+  whenever NaN is involved.
 
 ### 4.3 Control flow
 
@@ -342,7 +344,7 @@ fn first_big(xs: List[Int]) -> Int? {
 - `[1, 2, 3]` is a `List`; `[]` an empty list (its element type is inferred from later use).
 - `["a": 1, "b": 2]` is a `Dict`; `[:]` an empty dict. A bare identifier before `:` is a **string
   key**: `[host: "x"]` is `["host": "x"]`, even if a local named `host` exists. Use parentheses for a
-  computed key: `[(host): 1]`.
+  computed key: `[(host): 1]`. When a variable of that name is in scope, the key is warning W0005.
 - `(1, "a")` is a tuple; `(x,)` a one-element tuple.
 - Dicts and sets iterate in insertion order.
 - Dict and set keys are hashed by value, so they must not change once inserted: a `Dict` or `Set` whose
@@ -522,7 +524,7 @@ Annotate the parameter to use any of these.
 ## 7. Errors
 
 - Recoverable errors use `Result[T, E]`, `Ok(v)`, `Err(e)` and `?`. There are no exceptions.
-- `panic(msg)`, failed `assert(cond, msg)`, out-of-bounds indexing, `x!` on nil, integer division by zero
+- `panic(msg)`, failed `assert(cond, msg)`, out-of-bounds indexing (`xs[9]`, `"abc"[3]`), `x!` on nil, integer division by zero
   and ownership violations panic. A panic unwinds only the current thread. In the main thread it prints the
   message and a stack trace to stderr and exits with status 101. Trace frames name functions, `<main>`
   for the entry file's top level, `<block in f>`, `<spawn in f>` and `<parallel block in f>` (a
@@ -714,7 +716,9 @@ OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse`
 ## 9. Dyn
 
 `Dyn` values come from `Json.parse` and other dynamic sources. Any operation on `Dyn` (`d["k"]`, `d[0]`,
-`d.method(...)`, arithmetic) is checked at runtime and yields `Dyn`. As a missing object key gives `nil`, so does a list index out
+`d.method(...)`, arithmetic) is checked at runtime and yields `Dyn`. Reading a field (`d.n`) works on
+records and class instances; assigning one (`d.n = v`) works only on records (dictionaries), and on
+any other value panics with a `TypeError` saying so: convert first (`if let p = d as? P { p.n = v }`). As a missing object key gives `nil`, so does a list index out
 of range (`doc["users"][5]`). Convert with `as?`:
 `name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. JSON objects parse to records that behave exactly like `Dict[String, Dyn]` (`as? Dict[String, Dyn]` succeeds); records parsed with the same keys share a hidden class, so `d.name` is served from a per-site cache. `Json.parse` reads a number with no fraction or exponent as an `Int` of any size, so `123456789012345678901234567890` stays exact and `as? Int` succeeds; any other number (`1.5`, `1e3`) is a `Float`. `Json.stringify` writes object keys in sorted order and integers of any size (including big integers) as JSON numbers; it writes a class instance as an object of its fields, or as whatever its `to_json` method returns (`Deque` writes an array).
 
@@ -916,6 +920,11 @@ the line above it, silences those warnings there (`s += x # allow(W0004)`). The 
   appending, it cannot `return` or `?` out, and no closure elsewhere captures the local), the fix
   adds `s_sb = StringBuilder.new()` and `s_sb.push(s)` before the loop (or replaces a `s = ""` just
   before it), turns each append into `s_sb.push(x)`, and adds `s = s_sb.to_s` after the loop.
+- `W0005`: a bare-identifier dict key (`[src: 0]`, the string `"src"`) where a variable `src` is in
+  scope. Write `[(src): 0]` for the variable's value, or `["src": 0]` for the string.
+- `W0006`: `return` with a value in a block whose result is discarded (`xs.each { |x| if x > 1 {
+  return x } }`): it ends only that call of the block and drops the value. Use `for` (where `return`
+  leaves the function) or `find`.
 
 `check --json` prints `{"diagnostics": [...]}` where each diagnostic has `code`, `severity`, `message`,
 `file`, `span` (`start`/`end` as `{line, col, offset}`, 1-based lines and columns), `notes`, and `fixes`

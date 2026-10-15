@@ -1111,8 +1111,16 @@ impl Vm {
                 Op::Lt | Op::Le => {
                     let (x, y) = (r!(b_of(w)), r!(c_of(w)));
                     save!();
-                    let o = vm_call!(ops::compare_or_panic(self, x, y));
-                    let res = if Op::from_u8(op_of(w)) == Op::Lt { o.is_lt() } else { o.is_le() };
+                    let res = if ops::unordered_numbers(x, y) {
+                        false
+                    } else {
+                        let o = vm_call!(ops::compare_or_panic(self, x, y));
+                        if Op::from_u8(op_of(w)) == Op::Lt {
+                            o.is_lt()
+                        } else {
+                            o.is_le()
+                        }
+                    };
                     set!(a, Value::bool(res));
                 }
                 Op::Cmp => {
@@ -1594,6 +1602,11 @@ impl Vm {
                     let (x, i, v) = (r!(a), r!(b_of(w)), r!(c_of(w)));
                     save!();
                     vm_call!(slow::index_set(self, x, i, v));
+                }
+                Op::SetMember => {
+                    let (x, k, v) = (r!(a), r!(b_of(w)), r!(c_of(w)));
+                    save!();
+                    vm_call!(slow::dyn_set_member(self, x, k, v));
                 }
                 Op::TupleGet => {
                     let t = r!(b_of(w));

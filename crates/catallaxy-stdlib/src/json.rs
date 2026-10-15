@@ -501,7 +501,9 @@ fn close(out: &mut String, indent: Option<usize>, bracket: char) {
 /// user code (`to_json`, `to_s`) may run.
 fn write(vm: &mut Vm, v: Value, out: &mut String, indent: Option<usize>, depth: usize) -> RtResult<()> {
     if depth > MAX_WRITE_DEPTH {
-        return panic("JSON nesting too deep");
+        return panic(format!(
+            "ArgumentError: Json.stringify: nesting deeper than {MAX_WRITE_DEPTH} levels (a cycle?)"
+        ));
     }
     // The text is about to outgrow a large buffer: growing it doubles it, which must fit
     // under the heap limit (issue #158).
