@@ -990,11 +990,13 @@ unsafe fn trace_list_written(h: *const Header, t: &mut Tracer) {
         return trace_list(h, t);
     }
     let slots = WordBuf::slots(buf);
-    let r = WordBuf::take_written(buf);
-    let n = l.len.load(Ordering::Relaxed).min(r.end);
-    for s in &slots[r.start.min(n)..n] {
-        mark_value(t, Value(s.load(Ordering::Relaxed)));
-    }
+    let len = l.len.load(Ordering::Relaxed);
+    WordBuf::take_written(buf, |r| {
+        let n = len.min(r.end);
+        for s in &slots[r.start.min(n)..n] {
+            mark_value(t, Value(s.load(Ordering::Relaxed)));
+        }
+    });
 }
 unsafe fn fin_list(h: *mut Header) {
     let l = &*(h as *const ListObj);

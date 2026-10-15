@@ -216,6 +216,9 @@ impl Checker {
                         },
                     );
                     self.declare(m, &c.name, ScopeItem::Class(cid));
+                    if self.mods[m as usize].is_prelude && c.name.name == "Fiber" {
+                        self.well_known.fiber = Some(cid);
+                    }
                 }
                 Item::Enum(e) => {
                     let eid = self.enums.len() as EnumId;
