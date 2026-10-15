@@ -71,27 +71,42 @@ pub struct Options {
     pub check_only: bool,
 }
 
-/// Compiles an entry file and everything it imports.
+/// The process's checked prelude, shared by every compilation (built on first use).
+pub fn shared_prelude() -> &'static Prelude {
+    static SHARED: std::sync::OnceLock<Prelude> = std::sync::OnceLock::new();
+    SHARED.get_or_init(Prelude::new)
+}
+
+/// Compiles an entry file and everything it imports, starting from the shared checked prelude
+/// ([`shared_prelude`]).
 pub fn compile_path(path: &Path, loader: &dyn SourceLoader, opts: &Options) -> Compilation {
     let src = loader.load(path);
-    on_compiler_stack(|| compile_entry(path, src, loader, opts, None))
+    on_compiler_stack(|| compile_entry(path, src, loader, opts, shared_prelude()))
 }
 
-/// As [`compile_path`], starting from a checked prelude instead of checking it again. See
-/// [`Prelude`] for how the result compares.
+/// As [`compile_path`], starting from the given checked prelude. See [`Prelude`].
 pub fn compile_path_from(prelude: &Prelude, path: &Path, loader: &dyn SourceLoader, opts: &Options) -> Compilation {
     let src = loader.load(path);
-    on_compiler_stack(|| compile_entry(path, src, loader, opts, Some(prelude)))
+    on_compiler_stack(|| compile_entry(path, src, loader, opts, prelude))
 }
 
-/// Compiles source text as the entry module (named after `path`).
+/// As [`compile_path`], checking a prelude of its own first instead of sharing one: the result
+/// is the same (the test `shared_prelude.rs` compares them), at the cost of checking the prelude.
+pub fn compile_path_fresh(path: &Path, loader: &dyn SourceLoader, opts: &Options) -> Compilation {
+    let src = loader.load(path);
+    on_compiler_stack(|| compile_entry(path, src, loader, opts, &Prelude::new()))
+}
+
+/// Compiles source text as the entry module (named after `path`), from the shared prelude.
 pub fn compile_source(path: &Path, src: &str, opts: &Options) -> Compilation {
-    on_compiler_stack(|| compile_entry(path, Some(src.to_string()), &FsLoader, opts, None))
+    on_compiler_stack(|| compile_entry(path, Some(src.to_string()), &FsLoader, opts, shared_prelude()))
 }
 
-/// The prelude, parsed and checked on its own, for compilations to start from (see
-/// [`compile_path_from`]) instead of each checking it again, which is most of the work of
-/// checking a small program.
+/// The prelude, parsed and checked on its own, for compilations to start from instead of each
+/// checking it again, which is most of the work of checking a small program. Every compilation
+/// checks the prelude before the program, from a copy of a `Prelude`: the process's shared one
+/// ([`shared_prelude`], used by `catx` and the language server), or one of its own
+/// ([`compile_path_fresh`]).
 ///
 /// Checking a module never depends on the modules that import it: names, methods, extensions and
 /// interfaces are looked up through the importing module's imports, and the prelude imports
@@ -107,14 +122,14 @@ pub fn compile_source(path: &Path, src: &str, opts: &Options) -> Compilation {
 /// - `satisfies` caches whether a type conforms to an interface, but extensions visible to the
 ///   program can add methods, so the copy drops the negative entries.
 ///
-/// The ids differ: the prelude's types, functions and classes come first, where a compilation
-/// from scratch interleaves them with the program's. And from scratch, a prelude method's
-/// mutating flag is final only after the program's bodies are checked, so a call of a mutating
-/// prelude method on a frozen value is reported at the end, with a shorter note, where the
-/// shared prelude reports it at the call. Otherwise the result is the same: the test
-/// `shared_prelude.rs` compares the diagnostics, every expression's type, the symbol index and
-/// the outlines over every conformance program and example. The language server's workspace
-/// cache, which keeps no diagnostics, uses it; `catx` commands check the prelude themselves.
+/// Because the prelude is fully checked first, its methods' mutating flags are final when the
+/// program is checked, so a call of a mutating prelude method on a frozen value is reported at the
+/// call. (When the prelude and the program were checked together, it was reported at the end,
+/// with a shorter note.) The test `shared_prelude.rs` checks that a shared copy, reused across
+/// compilations, gives the same diagnostics (with their notes and fixes), every expression's
+/// type, the symbol index and the outlines as a fresh one, over every conformance program and
+/// example. The one exception to checking the prelude first is the loop pre-scan case above,
+/// which checks prelude and program together.
 pub struct Prelude {
     sm: SourceMap,
     ck: Checker,
@@ -213,13 +228,10 @@ fn compile_entry(
     src: Option<String>,
     loader: &dyn SourceLoader,
     opts: &Options,
-    shared: Option<&Prelude>,
+    shared: &Prelude,
 ) -> Compilation {
-    // The prelude's source files and node ids are the same whether it is checked here or shared.
-    let (mut sm, mut ck, mut diags, mut next_id) = match shared {
-        Some(p) => (p.sm.clone(), p.checker(), p.diags.clone(), p.next_id),
-        None => load_prelude(),
-    };
+    let (mut sm, mut ck, mut diags, mut next_id) =
+        (shared.sm.clone(), shared.checker(), shared.diags.clone(), shared.next_id);
 
     let Some(src) = src else {
         // The loader only says the file is not there to read; the file system says why.
@@ -314,14 +326,11 @@ fn compile_entry(
     }
 
     // The modules before `first` are checked already.
-    let mut first = 0;
-    if let Some(p) = shared {
-        let asts: Vec<&ast::Module> = pending.iter().map(|p| &p.ast).collect();
-        if p.affected_by(&asts) {
-            ck = load_prelude().1;
-        } else {
-            first = p.modules();
-        }
+    let mut first = shared.modules();
+    let asts: Vec<&ast::Module> = pending.iter().map(|p| &p.ast).collect();
+    if shared.affected_by(&asts) {
+        ck = load_prelude().1;
+        first = 0;
     }
 
     let mut module_ids: FxHashMap<String, u32> = FxHashMap::default();
