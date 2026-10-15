@@ -6,6 +6,7 @@ mod fmt_cmd;
 mod lsp;
 mod repl;
 mod run;
+mod test_cmd;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -22,7 +23,7 @@ USAGE:
     catx check [--json] <file.cx|dir>...
     catx fmt [--check] <file.cx|dir>...   (`catx fmt -` formats stdin to stdout)
     catx fix [--dry-run] <file.cx|dir>...
-    catx test [dir]
+    catx test [path...]
     catx repl
     catx lsp
     catx disasm <file.cx>
@@ -68,7 +69,7 @@ fn main() -> ExitCode {
         "fmt" => fmt_cmd::cmd_fmt(rest),
         "fix" => fix_cmd::cmd_fix(rest),
         "disasm" => run::cmd_disasm(rest),
-        "test" => run::cmd_test(rest),
+        "test" => test_cmd::cmd_test(rest),
         "repl" => repl::cmd_repl(rest),
         "lsp" => lsp::cmd_lsp(rest),
         "__repl-exec" => repl::cmd_repl_exec(rest),
