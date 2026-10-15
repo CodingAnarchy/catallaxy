@@ -46,56 +46,43 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             list_read(vm, a[0])?;
             ownership::write_list(&vm.m, a[0], |l, _| unsafe { l.pop() }.unwrap_or(Value::NIL))
         },
-        "List.shift" => |vm, a| list_write(vm, a[0], &[], |v| if v.is_empty() { Value::NIL } else { v.remove(0) }),
+        "List.shift" => |vm, a| list_remove(vm, a[0], |n| Ok((n > 0).then_some(0))),
         "List.unshift" => |vm, a| {
-            list_write(vm, a[0], &[a[1]], |v| {
-                v.insert(0, a[1]);
-                Value::NIL
-            })
+            list_insert(vm, a[0], &[a[1]], |_| Ok(0))?;
+            Ok(Value::NIL)
         },
         "List.insert" => |vm, a| {
             let i = int(a[1])?;
-            let item = a[2];
-            list_write(vm, a[0], &[item], |v| {
-                let n = v.len() as i64;
+            list_insert(vm, a[0], &[a[2]], |n| {
+                let n = n as i64;
                 let idx = if i < 0 { i + n + 1 } else { i };
                 if idx < 0 || idx > n {
                     return Err(Trap::Panic(format!("IndexError: index {i} out of range for insert into length {n}")));
                 }
-                v.insert(idx as usize, item);
-                Ok(Value::NIL)
-            })?
+                Ok(idx as usize)
+            })?;
+            Ok(Value::NIL)
         },
         "List.remove_at" => |vm, a| {
             let i = int(a[1])?;
-            list_write(vm, a[0], &[], |v| {
-                let n = v.len() as i64;
+            list_remove(vm, a[0], |n| {
+                let n = n as i64;
                 let idx = if i < 0 { i + n } else { i };
                 if idx < 0 || idx >= n {
                     return Err(Trap::Panic(format!("IndexError: index {i} out of range for length {n}")));
                 }
-                Ok(v.remove(idx as usize))
-            })?
-        },
-        "List.clear" => |vm, a| {
-            list_write(vm, a[0], &[], |v| {
-                v.clear();
-                Value::NIL
+                Ok(Some(idx as usize))
             })
         },
+        "List.clear" => |vm, a| {
+            list_truncate(vm, a[0], 0)?;
+            Ok(Value::NIL)
+        },
         "List.concat" => |vm, a| {
-            let h = &list_of(a[0])?.header;
+            // A copy of the other list's items: it may be this list.
             let other = list_items(vm, a[1])?;
-            if ownership::check_write(&vm.m, h)? == Access::Shared {
-                for &x in &other {
-                    ownership::publish_into_shared(&vm.m, x)?;
-                }
-            }
-            let grown = list_write(vm, a[0], &[], |v| v.try_reserve(other.len()).map(|_| v.extend_from_slice(&other)))?;
-            match grown {
-                Ok(()) => Ok(Value::NIL),
-                Err(_) => catallaxy_runtime::refused(format!("cannot grow a list by {} items", other.len())),
-            }
+            list_insert(vm, a[0], &other, Ok)?;
+            Ok(Value::NIL)
         },
         "List.[]" => |vm, a| slow::list_get(vm, a[0], a[1]),
         "__vacant" => |_, _| Ok(Value::NIL),
@@ -128,10 +115,9 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             new_list(vm, items)
         },
         "List.reverse_in_place" => |vm, a| {
-            list_write(vm, a[0], &[], |v| {
-                v.reverse();
-                Value::NIL
-            })
+            list_read(vm, a[0])?;
+            ownership::write_list(&vm.m, a[0], |l, _| unsafe { l.reverse() })?;
+            Ok(Value::NIL)
         },
         "List.swap" => |vm, a| {
             let (i, j) = (int(a[1])?, int(a[2])?);
@@ -153,10 +139,8 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "List.truncate" => |vm, a| {
             let n = int(a[1])?.max(0) as usize;
-            list_write(vm, a[0], &[], |v| {
-                v.truncate(n);
-                Value::NIL
-            })
+            list_truncate(vm, a[0], n)?;
+            Ok(Value::NIL)
         },
         "List.sorted" => |vm, a| {
             let items = list_items(vm, a[0])?;
@@ -166,11 +150,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "List.sort_in_place" => |vm, a| {
             let items = list_items(vm, a[0])?;
             let sorted = sort_values(vm, items)?;
-            list_write(vm, a[0], &[], |v| {
-                v.clear();
-                v.extend(sorted);
-                Value::NIL
-            })
+            // The items came from the list, so they need no publishing. A user `<=>` may have
+            // changed the list meanwhile; the sorted snapshot replaces whatever it holds now.
+            match ownership::write_list(&vm.m, a[0], |l, access| unsafe { l.try_replace(&sorted, access) })? {
+                Ok(()) => Ok(Value::NIL),
+                Err(layout) => list_refused(layout),
+            }
         },
         "List.sort_by_keys" => |vm, a| {
             let items = list_items(vm, a[0])?;
@@ -297,23 +282,61 @@ pub(crate) fn list_read<'a>(vm: &Vm, l: Value) -> RtResult<&'a ListObj> {
     ownership::read_list(&vm.m, l)
 }
 
-/// Mutates a list; `incoming` values are published first when the list is shared.
-pub(crate) fn list_write<R>(
-    vm: &Vm,
-    l: Value,
-    incoming: &[Value],
-    f: impl FnOnce(&mut Vec<Value>) -> R,
-) -> RtResult<R> {
+/// Inserts `items` into list `l` in place, at the index `at` picks given the length (read under
+/// write access, so a shared list cannot change in between). The items are published first when
+/// the list is shared. If the buffer cannot grow, collects (garbage may hold the memory) and
+/// tries once more, then raises a `MemoryError`.
+fn list_insert(vm: &Vm, l: Value, items: &[Value], at: impl Fn(usize) -> RtResult<usize>) -> RtResult<()> {
     let h = &list_of(l)?.header;
     if ownership::check_write(&vm.m, h)? == Access::Shared {
-        for &x in incoming {
+        for &x in items {
             ownership::publish_into_shared(&vm.m, x)?;
         }
     }
-    match ownership::write_list(&vm.m, l, |list, access| unsafe { list.try_modify(access, f) })? {
-        Ok(r) => Ok(r),
-        Err(layout) => catallaxy_runtime::refused(format!("cannot grow a list to {} bytes", layout.size())),
+    let insert = || {
+        ownership::write_list(&vm.m, l, |list, access| {
+            let i = at(list.len())?;
+            Ok(unsafe { list.try_splice(i, 0, items, access) })
+        })?
+    };
+    if insert()?.is_ok() {
+        return Ok(());
     }
+    catallaxy_gc::collect_to_free(&vm.m.rec);
+    match insert()? {
+        Ok(()) => Ok(()),
+        Err(layout) => list_refused(layout),
+    }
+}
+
+/// Removes and returns the item at the index `at` picks given the length (read under write
+/// access); nil if it picks none.
+fn list_remove(vm: &Vm, l: Value, at: impl FnOnce(usize) -> RtResult<Option<usize>>) -> RtResult<Value> {
+    list_read(vm, l)?;
+    ownership::write_list(&vm.m, l, |list, access| {
+        let Some(i) = at(list.len())? else { return Ok(Value::NIL) };
+        let v = list.get_local(i).unwrap_or(Value::NIL);
+        // Removing never grows the buffer, so it is never refused.
+        let _ = unsafe { list.try_splice(i, 1, &[], access) };
+        Ok(v)
+    })?
+}
+
+/// Shortens list `l` to at most `n` items in place.
+fn list_truncate(vm: &Vm, l: Value, n: usize) -> RtResult<()> {
+    list_read(vm, l)?;
+    ownership::write_list(&vm.m, l, |list, access| {
+        let len = list.len();
+        if n < len {
+            // Shrinking never grows the buffer, so it is never refused.
+            let _ = unsafe { list.try_splice(n, len - n, &[], access) };
+        }
+    })
+}
+
+#[cold]
+fn list_refused<T>(layout: std::alloc::Layout) -> RtResult<T> {
+    catallaxy_runtime::refused(format!("cannot grow a list to {} bytes", layout.size()))
 }
 
 fn dict_read<R>(vm: &Vm, d: Value, f: impl Fn(&DictTable) -> R) -> RtResult<R> {

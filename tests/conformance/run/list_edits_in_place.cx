@@ -1,0 +1,64 @@
+# List edits that work on the buffer in place (#172): small (inline) lists, lists that spill out
+# of line while edited, large lists, a list concatenated with itself, and errors.
+xs = [1, 2, 3]
+xs.unshift(0)
+xs.insert(2, 9)
+xs.insert(-1, 8)
+xs.insert(xs.length, 7)
+puts(xs)
+puts(xs.shift())
+puts(xs.remove_at(1))
+puts(xs.remove_at(-1))
+puts(xs)
+xs.concat([4, 5, 6, 7, 8, 9, 10])
+puts(xs)
+xs.concat(xs)
+puts(xs.length)
+puts(xs)
+xs.truncate(20)
+puts(xs.length)
+xs.truncate(5)
+puts(xs)
+xs.reverse_in_place()
+puts(xs)
+xs.truncate(-3)
+puts(xs)
+xs.clear()
+puts(xs)
+puts(xs.shift())
+xs.concat([])
+puts(xs.length)
+
+# Out-of-range indices panic.
+bad = [
+  spawn { [1, 2, 3].insert(5, 0) },
+  spawn { [1, 2, 3].insert(-5, 0) },
+  spawn { [1, 2, 3].remove_at(3) },
+  spawn { [1, 2, 3].remove_at(-4) },
+  spawn { [1, 2, 3, 4, 5, 6, 7, 8, 9].remove_at(9) },
+]
+for t in bad {
+  match t.join() {
+    Ok(_) => puts("no error")
+    Err(e) => puts(e)
+  }
+}
+
+# A large list.
+big: List[Int] = []
+for i in 0...2000 { big.push(i) }
+for i in 0...300 { big.insert(i * 3, -i) }
+for i in 0...200 { big.remove_at(i * 2) }
+for i in 0...100 { big.shift() }
+big.concat((0...50).to_list)
+big.truncate(big.length - 25)
+sum = 0
+for x in big { sum += x }
+puts("#{big.length} #{sum} #{big[0]} #{big[big.length - 1]}")
+
+# Strings (heap objects) moved by edits survive collections.
+names: List[String] = []
+for i in 0...500 { names.unshift("n#{i}") }
+for i in 0...250 { names.remove_at(names.length / 2) }
+names.reverse_in_place()
+puts("#{names.length} #{names[0]} #{names[names.length - 1]}")
