@@ -173,7 +173,9 @@ $ catx test .
 A failing test prints a diff of the expected and actual output, with invisible characters such
 as trailing spaces made visible. `assert` and `panic` make a program exit
 with status 101, which fails the test. Each program gets 120 seconds (`CATX_TEST_TIMEOUT`
-changes this). The repository's own `examples/` and `tests/conformance/` directories use this
+changes this). `catx test -j 8` runs eight tests at a time, `--filter greeting` runs only the
+tests whose path contains `greeting`, `-v` lists every test with its time, and `--json` prints a
+machine-readable report. The repository's own `examples/` and `tests/conformance/` directories use this
 layout.
 
 Line endings do not matter to `catx test`, which reads `\r\n` as `\n`, or to `catx fmt`, which

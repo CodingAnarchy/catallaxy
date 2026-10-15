@@ -712,6 +712,19 @@ trailing spaces as `·`, and a missing final newline noted. A program still runn
 `CATX_TEST_TIMEOUT` seconds (default 120) is killed and fails with its output so far. The exit
 status is 1 if anything failed.
 
+Options of `catx test`:
+
+- `-j N` (`--jobs N`) runs N tests at a time (default 1). Results are still reported in path
+  order, each as soon as it and the ones before it are done, so the output does not depend on N.
+- `--filter TEXT` runs only the tests whose path (with `/` separators) contains `TEXT`; given
+  more than once, a test matching any of them runs. A filter that matches nothing is an error
+  (status 2), like a path with no tests.
+- `-v` (`--verbose`) lists every test with its time (`ok   path (12 ms)`); failures always show
+  theirs (`FAIL path (12 ms)`).
+- `--json` prints one JSON document on standard output instead of the human report:
+  `{"tests": [...], "passed": N, "failed": M}`, each test with `path`, `kind` (`"run"` or
+  `"expect"`), `passed`, `time_ms` and, if it failed, `failure` (the report text).
+
 `catx fmt` rewrites files in place (`catx fmt -` filters stdin to stdout). It keeps comments and the
 program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
 `{ ... }` block across lines when its line would exceed 100 columns. `--check` lists the files that
@@ -724,12 +737,14 @@ throughout, any other with `\n`.
 `catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
 unsaved edits. It provides:
 
-- diagnostics (published on open, change and save), hover (types, signatures), go to definition
-  (a prelude function, class or method opens a read-only copy of the prelude's source, which the
-  server writes to `catallaxy/prelude-<version>-<hash>/` in the user's cache directory:
-  `$XDG_CACHE_HOME` if set, else `~/Library/Caches` on macOS, `~/.cache` on other Unix systems and
-  `%LOCALAPPDATA%` on Windows; that copy is not checked or indexed, and if it cannot be written the
-  definition is empty), completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
+- diagnostics (published on open, change and save), hover (types, signatures; on a binding name
+  in a `for`, `let`, `if let` or `match` pattern, a block parameter or a function parameter, that
+  variable's type), go to definition (a prelude function, class or method opens a read-only copy
+  of the prelude's source, which the server writes to `catallaxy/prelude-<version>-<hash>/` in the
+  user's cache directory: `$XDG_CACHE_HOME` if set, else `~/Library/Caches` on macOS, `~/.cache`
+  on other Unix systems and `%LOCALAPPDATA%` on Windows; that copy is not checked or indexed, and
+  if it cannot be written the definition is empty), completion (members after `.`, names in
+  scope, keywords) and document formatting (as `catx fmt`);
 - find references and rename (with prepare-rename) for locals, parameters (including named
   arguments), functions, methods (an override and the method it overrides rename together), fields,
   classes, enums, variants, interfaces and constants. An interface member renames together with the
