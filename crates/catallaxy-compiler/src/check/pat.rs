@@ -37,6 +37,13 @@ impl Checker {
 
     /// Checks `p` against a subject of type `ty`, declaring its bindings in the current scope.
     pub fn check_pattern(&mut self, p: &Pattern, ty: TyId, irrefutable_ctx: bool) {
+        let mut names = Vec::new();
+        pattern_bindings(p, &mut names);
+        self.check_unique_names(names, "variable");
+        self.check_pattern_in(p, ty, irrefutable_ctx);
+    }
+
+    fn check_pattern_in(&mut self, p: &Pattern, ty: TyId, irrefutable_ctx: bool) {
         let ty = self.types.shallow_resolve(ty);
         self.pattern_subjects.insert(p.id, ty);
         match &p.kind {
@@ -71,13 +78,13 @@ impl Checker {
             PatternKind::Tuple(ps) => match self.tuple_in(ty, ps.len()) {
                 Some(ts) => {
                     for (sp, t) in ps.iter().zip(ts) {
-                        self.check_pattern(sp, t, irrefutable_ctx);
+                        self.check_pattern_in(sp, t, irrefutable_ctx);
                     }
                     self.pats.insert(p.id, PatRes::Wildcard);
                 }
                 None if matches!(self.types.get(ty), Ty::Dyn | Ty::Error) => {
                     for sp in ps {
-                        self.check_pattern(sp, ty, irrefutable_ctx);
+                        self.check_pattern_in(sp, ty, irrefutable_ctx);
                     }
                     self.pats.insert(p.id, PatRes::Wildcard);
                 }
@@ -98,7 +105,7 @@ impl Checker {
             PatternKind::Or(alts) => {
                 for a in alts {
                     let before = self.ctx().scopes.last().unwrap().len();
-                    self.check_pattern(a, ty, irrefutable_ctx);
+                    self.check_pattern_in(a, ty, irrefutable_ctx);
                     if self.ctx().scopes.last().unwrap().len() != before {
                         self.err("E0363", "alternatives in an `|` pattern cannot bind variables", a.span);
                     }
@@ -175,7 +182,7 @@ impl Checker {
                     }
                     None => self.types.error,
                 };
-                self.check_pattern(a, ft, irr);
+                self.check_pattern_in(a, ft, irr);
             }
             if !self.subject_has_enum(ty, en) {
                 let msg = format!("pattern `{}` can never match `{}`", v.name, self.show(ty));
@@ -903,6 +910,17 @@ impl Checker {
             d = d.note("or give each case its own class, or its own enum variant, and test for that");
         }
         self.emit(d);
+    }
+}
+
+/// The names a pattern binds, in source order.
+fn pattern_bindings<'a>(p: &'a Pattern, out: &mut Vec<&'a ast::Ident>) {
+    match &p.kind {
+        PatternKind::Bind(n) | PatternKind::Typed { name: n, .. } => out.push(n),
+        PatternKind::Tuple(ps) | PatternKind::Or(ps) | PatternKind::Ctor { args: ps, .. } => {
+            ps.iter().for_each(|q| pattern_bindings(q, out))
+        }
+        PatternKind::Wildcard | PatternKind::Literal(_) | PatternKind::Range { .. } => {}
     }
 }
 
