@@ -214,6 +214,16 @@ pub enum Op {
     JEqIK,
     /// R[A] = R[B].field[d & 0xffff]; R[A+1] = R[C].field[d >> 16] (two `GetField`s, fused)
     GetField2,
+    /// Tags the collections in R[A] (and in its tuple components) with the element types of
+    /// the run-time type d, where they have no tag yet: R[A] is converted from that static type
+    /// to `Dyn`, so later writes through `Dyn` can be checked (see `ListObj::elem_tag`).
+    TagElems,
+    /// Checks the arguments R[B .. B+C] of a call that writes into the collection R[A] against
+    /// its element tags, per write check d (`Program::write_checks`); a `TypeError` if one does
+    /// not fit.
+    CheckArgs,
+    /// Checks `R[A][R[B]] = R[C]` against the element tags of the collection R[A].
+    CheckSet,
     /// R[A] = R[B] formatted per the spec packed in two data words (`fmtspec::FormatSpec::encode`)
     Format,
 }
@@ -268,6 +278,8 @@ impl Op {
                 | Op::Is
                 | Op::IsIface
                 | Op::AsCast
+                | Op::TagElems
+                | Op::CheckArgs
         )
     }
 }
@@ -407,7 +419,23 @@ pub enum RtType {
     Fn,
     /// Interface: the value's class is one of those listed in `Program::ifaces`.
     Iface(u32),
+    /// In a write check (`Program::write_checks`): the element type of the collection written
+    /// to (0: a list's or set's elements, a dict's keys; 1: a dict's values), from its tags.
+    Elem(u8),
 }
+
+/// The element types of a collection method's arguments, for checking a call that writes
+/// through `Dyn` (`Op::CheckArgs`): for each receiver kind that has the method, one run-time
+/// type id per argument (`NO_CHECK` for none). Empty when that kind has no such method.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WriteCheck {
+    pub list: Vec<u32>,
+    pub dict: Vec<u32>,
+    pub set: Vec<u32>,
+}
+
+/// A `WriteCheck` argument that is not checked.
+pub const NO_CHECK: u32 = u32::MAX;
 
 #[derive(Clone, Debug)]
 pub struct GlobalProto {
@@ -427,6 +455,12 @@ pub struct Program {
     pub natives: Vec<String>,
     pub globals: Vec<GlobalProto>,
     pub rt_types: Vec<RtType>,
+    /// For each run-time type: the ids of its direct parts (a list's element type, a dict's key
+    /// and value types, a tuple's components, an optional's inner type, a union's members), so
+    /// the VM can name a collection's element type by id (`ListObj::elem_tag`).
+    pub rt_parts: Vec<Vec<u32>>,
+    /// Argument checks for calls that write into a collection through `Dyn` (`Op::CheckArgs`).
+    pub write_checks: Vec<WriteCheck>,
     /// Interfaces for runtime checks: for each, the sorted ids of the classes whose methods
     /// satisfy it (the checker decides, with the rules of a static conversion).
     pub ifaces: Vec<Vec<u32>>,

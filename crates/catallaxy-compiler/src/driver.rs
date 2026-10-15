@@ -380,6 +380,7 @@ pub fn run_phases(ck: &mut Checker, module_ids: &FxHashMap<String, u32>, first: 
     ck.check_all_bodies();
     ck.check_overrides();
     ck.finish_mutating();
+    ck.finish_tag_elems();
     ck.finish_rt_ifaces();
 }
 

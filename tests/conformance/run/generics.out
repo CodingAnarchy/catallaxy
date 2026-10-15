@@ -20,5 +20,5 @@ v=42
 [5: 1, 7: 1, 6: 2, 9: 1]
 apple
 [1, 2, 3]
-["apple", "avocado"]["banana", "cherry"]["cranberry"]nil
+["apple", "avocado"]["banana", "cherry"]["cranberry"]#<Lazy>
 [("apple", 1), ("avocado", 2), ("banana", 3)]

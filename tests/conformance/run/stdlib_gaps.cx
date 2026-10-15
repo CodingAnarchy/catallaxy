@@ -1,0 +1,65 @@
+# Collection and string methods added for #168.
+xs = [3, 1, 4, 1, 5, 9, 2, 6]
+
+# filter_map: map and keep the non-nil results; also on Lazy.
+puts(xs.filter_map { |x| if x % 2 == 0 { x * 10 } else { nil } })
+puts((1..10).filter_map { |x| if x > 7 { "n#{x}" } else { nil } })
+puts(Lazy.iterate(1) { |n|
+  n + 1
+}.filter_map { |n| if n % 3 == 0 { n } else { nil } }.take(3).to_list())
+words = ["1", "x", "22", ""]
+puts(words.filter_map { |w| w.to_i() })
+
+# tally, take_last, count without a block, sum_by_float.
+puts(["a", "b", "a", "c", "a"].tally())
+puts(xs.tally()[1])
+puts(xs.take_last(3))
+puts(xs.take_last(0))
+puts(xs.take_last(20).length)
+puts(Set.from([1, 2, 3]).take_last(2).length)
+puts(xs.count())
+puts(xs.count { |x| x > 3 })
+puts((1..5).count())
+puts("banana".count("an"))
+puts(xs.sum_by_float { |x| x * 1.5 })
+puts(xs.sum_by { |x| x * 2 })
+
+# join on any elements, through to_s.
+puts([1, 2, 3].join(", "))
+puts([1.5, nil, true].join("|"))
+puts(["a", "b"].join())
+empty: List[Int] = []
+puts(empty.join(","))
+puts((1..3).join("-"))
+
+# split with a limit, and by a Regex.
+puts("a,b,c,d".split(",", 2))
+puts("a,b,c,d".split(",", 10))
+puts("a,b,c,d".split(",", 0))
+puts("  one  two three  ".split())
+puts("  one  two three  ".split("", 2))
+puts("  one  two three  ".split(" ", 3))
+re = Regex.new("[,;]\\s*").unwrap()
+puts("a, b;c,  d".split(re))
+puts("a, b;c,  d".split(re, 3))
+
+# each_slice, each_cons and each_char without a block.
+puts(xs.each_slice(3).to_list())
+puts(xs.each_cons(7).to_list())
+puts((1..4).each_cons(2).map { |p| p[0] * p[1] }.to_list())
+puts("héllo".each_char())
+seen: List[String] = []
+r = "abc".each_char { |c| seen.push(c.upcase) }
+puts("#{seen} #{r}")
+batches: List[Int] = []
+xs.each_slice(4) { |b| batches.push(b.length) }
+puts(batches)
+
+# A user function with an optional block parameter: the block is typed by it.
+fn apply_or(x: Int, f: (fn(Int) -> Int)? = nil) -> Int {
+  if let g = f { return g(x) }
+  x
+}
+puts(apply_or(3))
+puts(apply_or(3) { |v| v * 7 })
+puts(apply_or(3) { it + 1 })

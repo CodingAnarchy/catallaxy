@@ -38,8 +38,9 @@ Everything here is available in every module without an import.
 - `fn select(self, f: fn(T) -> Bool) -> List[T]`
 - `fn filter(self, f: fn(T) -> Bool) -> List[T]`
 - `fn reject(self, f: fn(T) -> Bool) -> List[T]`
+- `fn filter_map[U](self, f: fn(T) -> U?) -> List[U]`
 - `fn reduce[U](self, init: U, f: fn(U, T) -> U) -> U`
-- `fn count(self, f: fn(T) -> Bool) -> Int`
+- `fn count(self, f: (fn(T) -> Bool)? = nil) -> Int`
 - `fn size(self) -> Int`
 - `fn any(self, f: fn(T) -> Bool) -> Bool`
 - `fn all(self, f: fn(T) -> Bool) -> Bool`
@@ -50,19 +51,23 @@ Everything here is available in every module without an import.
 - `fn first(self) -> T?`
 - `fn each_with_index(self, f: fn(T, Int))`
 - `fn with_index(self) -> List[(T, Int)]`
-- `fn each_slice(self, n: Int, f: fn(List[T]))`
-- `fn each_cons(self, n: Int, f: fn(List[T]))`
+- `fn each_slice(self, n: Int, f: (fn(List[T]))? = nil) -> Lazy[List[T]]`
+- `fn each_cons(self, n: Int, f: (fn(List[T]))? = nil) -> Lazy[List[T]]`
 - `fn take(self, n: Int) -> List[T]`
 - `fn take_while(self, f: fn(T) -> Bool) -> List[T]`
 - `fn drop(self, n: Int) -> List[T]`
 - `fn drop_while(self, f: fn(T) -> Bool) -> List[T]`
 - `fn group_by[K](self, f: fn(T) -> K) -> Dict[K, List[T]]`
 - `fn partition(self, f: fn(T) -> Bool) -> (List[T], List[T])`
+- `fn tally(self) -> Dict[T, Int]`
 - `fn tally_by[K](self, f: fn(T) -> K) -> Dict[K, Int]`
 - `fn sort_by[K: Comparable](self, f: fn(T) -> K) -> List[T]`
 - `fn min_by[K: Comparable](self, f: fn(T) -> K) -> T?`
 - `fn max_by[K: Comparable](self, f: fn(T) -> K) -> T?`
 - `fn sum_by(self, f: fn(T) -> Int) -> Int`
+- `fn sum_by_float(self, f: fn(T) -> Float) -> Float`
+- `fn take_last(self, n: Int) -> List[T]`
+- `fn join(self, sep: String = "") -> String`
 - `fn zip[U](self, other: List[U]) -> List[(T, U)]`
 - `fn uniq(self) -> List[T]`
 - `fn contains(self, item: T) -> Bool`
@@ -82,6 +87,7 @@ Everything here is available in every module without an import.
 - `fn select(self, f: fn(T) -> Bool) -> Lazy[T]`
 - `fn filter(self, f: fn(T) -> Bool) -> Lazy[T]`
 - `fn reject(self, f: fn(T) -> Bool) -> Lazy[T]`
+- `fn filter_map[U](self, f: fn(T) -> U?) -> Lazy[U]`
 - `fn take(self, n: Int) -> Lazy[T]`
 - `fn take_while(self, f: fn(T) -> Bool) -> Lazy[T]`
 - `fn drop(self, n: Int) -> Lazy[T]`
@@ -90,6 +96,7 @@ Everything here is available in every module without an import.
 - `fn zip[U](self, other: List[U]) -> Lazy[(T, U)]`
 - `fn uniq(self) -> Lazy[T]`
 - `fn force(self) -> List[T]`
+- `fn to_s(self) -> String`
 
 ## Enumerable[T] (where T: Comparable)
 
@@ -107,10 +114,6 @@ Everything here is available in every module without an import.
 
 - `fn sum(self) -> Float`
 - `fn product(self) -> Float`
-
-## Enumerable[String]
-
-- `fn join(self, sep: String = "") -> String`
 
 ## Global functions
 
@@ -242,7 +245,7 @@ Everything here is available in every module without an import.
 - `fn rstrip(self) -> String`
 - `fn trim(self) -> String`
 - `fn chomp(self) -> String`
-- `fn split(self, sep: String = "") -> List[String]`
+- `fn split(self, sep: String | Regex = "", limit: Int = 0) -> List[String]`
 - `fn lines(self) -> List[String]`
 - `fn chars(self) -> List[String]`
 - `fn bytes(self) -> List[Int]`
@@ -278,7 +281,7 @@ Everything here is available in every module without an import.
 - `fn delete_suffix(self, suffix: String) -> String`
 - `fn squeeze(self) -> String`
 - `fn tr(self, from: String, to: String) -> String`
-- `fn each_char(self, f: fn(String))`
+- `fn each_char(self, f: (fn(String))? = nil) -> List[String]`
 - `fn repeat(self, n: Int) -> String`
 - `fn matches(self, re: Regex) -> Bool`
 - `fn scan(self, re: Regex) -> List[String]`
@@ -314,6 +317,7 @@ Everything here is available in every module without an import.
 - `fn +(self, other: List[T]) -> List[T]`
 - `fn first(self) -> T?`
 - `fn last(self) -> T?`
+- `fn take_last(self, n: Int) -> List[T]`
 - `fn each(self, f: fn(T))`
 - `fn each_with_index(self, f: fn(T, Int))`
 - `fn each_index(self, f: fn(Int))`
@@ -579,6 +583,8 @@ Everything here is available in every module without an import.
 - `fn remove(path: String, recursive: Bool = false) -> Result[Nil, String]`
 - `fn exists(path: String) -> Bool`
 - `fn current() -> String`
+- `fn walk(path: String) -> Result[List[String], String]`
+- `fn glob(pattern: String) -> Result[List[String], String]`
 
 ## Path
 
