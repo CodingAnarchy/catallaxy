@@ -483,13 +483,62 @@ pub fn has_iface(v: Value, id: u32) -> bool {
     program::iface(id).binary_search(&class_id_of(v)).is_ok()
 }
 
-/// Checks `v` against runtime type `id` (deeply for containers).
+/// Checks `v` against runtime type `id`: deeply for containers, except that a collection tagged
+/// with its element type (`ListObj::elem_tag`) is checked by its tag.
 pub fn conforms(vm: &mut Vm, v: Value, id: u32) -> RtResult<bool> {
-    conforms_ty(vm, v, program::rt_type(id))
+    conforms_id(vm, v, id, (0, 0))
 }
 
-fn conforms_ty(vm: &mut Vm, v: Value, t: &RtType) -> RtResult<bool> {
-    Ok(match t {
+/// The element tags of `v` (0 for none), for a list, set or dict.
+fn tags_of(v: Value) -> (u32, u32) {
+    match kind_of(v) {
+        // SAFETY: the kind was just checked.
+        ObjKind::List => (unsafe { as_list(v) }.elem_tag(), 0),
+        ObjKind::Dict | ObjKind::Set => unsafe { as_dict(v) }.tags(),
+        _ => (0, 0),
+    }
+}
+
+/// Whether `v` is a collection with element tags other than `Dyn` (writes through `Dyn` into
+/// it are checked).
+#[inline]
+pub fn is_tagged(v: Value) -> bool {
+    let (a, b) = tags_of(v);
+    let typed = |t: u32| t != 0 && !is_any(t - 1);
+    typed(a) || typed(b)
+}
+
+/// Whether a collection whose element type is `have` may be seen as one whose element type is
+/// `want` (both run-time type ids): the same type, except that `want` may have `Dyn` (`Any`)
+/// anywhere. (A `List[Int]` is a `List[Dyn]` for reading; writes through the `List[Dyn]` are
+/// checked against the tag.)
+fn rt_compat(have: u32, want: u32) -> bool {
+    if have == want {
+        return true;
+    }
+    let (h, w) = (program::rt_type(have), program::rt_type(want));
+    match (h, w) {
+        (_, RtType::Any) => true,
+        (RtType::List(_), RtType::List(_))
+        | (RtType::Set(_), RtType::Set(_))
+        | (RtType::Dict(..), RtType::Dict(..))
+        | (RtType::Optional(_), RtType::Optional(_))
+        | (RtType::Tuple(_), RtType::Tuple(_)) => {
+            let (hp, wp) = (program::rt_parts(have), program::rt_parts(want));
+            hp.len() == wp.len() && hp.iter().zip(wp).all(|(&a, &b)| rt_compat(a, b))
+        }
+        _ => false,
+    }
+}
+
+fn is_any(id: u32) -> bool {
+    *program::rt_type(id) == RtType::Any
+}
+
+/// `conforms` for type `id`, where `RtType::Elem` means the element types in `env` (tags).
+fn conforms_id(vm: &mut Vm, v: Value, id: u32, env: (u32, u32)) -> RtResult<bool> {
+    let parts = program::rt_parts(id);
+    Ok(match program::rt_type(id) {
         RtType::Any => true,
         RtType::Int => ops::is_int(v),
         RtType::Float => v.is_float(),
@@ -506,69 +555,213 @@ fn conforms_ty(vm: &mut Vm, v: Value, t: &RtType) -> RtResult<bool> {
             }
         }
         RtType::Enum(eid) => v.is_ptr() && unsafe { heap_class(v.as_ptr()) }.enum_id == Some(*eid),
-        RtType::Optional(inner) => v.is_nil() || conforms_ty(vm, v, inner)?,
-        RtType::Union(ts) => {
-            for t in ts {
-                if conforms_ty(vm, v, t)? {
+        RtType::Elem(k) => {
+            let tag = if *k == 0 { env.0 } else { env.1 };
+            tag == 0 || conforms_id(vm, v, tag - 1, (0, 0))?
+        }
+        RtType::Optional(_) => v.is_nil() || conforms_id(vm, v, parts[0], env)?,
+        RtType::Union(_) => {
+            for &t in parts {
+                if conforms_id(vm, v, t, env)? {
                     return Ok(true);
                 }
             }
             false
         }
         RtType::Iface(id) => has_iface(v, *id),
-        RtType::Tuple(ts) => {
+        RtType::Tuple(_) => {
             if kind_of(v) != ObjKind::Tuple {
                 return Ok(false);
             }
             // SAFETY: checked to be a tuple just above.
             let elems = unsafe { as_tuple(v) }.elems().to_vec();
-            if elems.len() != ts.len() {
+            if elems.len() != parts.len() {
                 return Ok(false);
             }
-            for (e, t) in elems.into_iter().zip(ts) {
-                if !conforms_ty(vm, e, t)? {
+            for (e, &t) in elems.into_iter().zip(parts) {
+                if !conforms_id(vm, e, t, env)? {
                     return Ok(false);
                 }
             }
             true
         }
-        RtType::List(et) | RtType::Set(et) => {
-            let want = if matches!(t, RtType::List(_)) { ObjKind::List } else { ObjKind::Set };
+        RtType::List(_) | RtType::Set(_) | RtType::Dict(..) => {
+            let want = match program::rt_type(id) {
+                RtType::List(_) => ObjKind::List,
+                RtType::Set(_) => ObjKind::Set,
+                _ => ObjKind::Dict,
+            };
             if kind_of(v) != want {
                 return Ok(false);
             }
-            if **et == RtType::Any {
+            let tags = tags_of(v);
+            let n = parts.len();
+            let tag_ids = [tags.0, tags.1];
+            // A collection created with known element types is checked by its tags, which also
+            // covers elements added later (an empty `List[String]` is no `List[Int]`). One whose
+            // element types are `Dyn` (or unknown) is checked element by element, and if it
+            // passes and was tagged `Dyn`, its tags narrow to the tested types: from then on,
+            // writes through `Dyn` must fit them, as the typed view the test returns expects.
+            if (0..n).all(|i| tag_ids[i] != 0) && !(0..n).any(|i| is_any(tag_ids[i] - 1)) {
+                return Ok((0..n).all(|i| rt_compat(tag_ids[i] - 1, parts[i])));
+            }
+            if (0..n).all(|i| is_any(parts[i])) {
                 return Ok(true);
             }
-            let items: Vec<Value> = if want == ObjKind::List {
-                ownership::read_list(&vm.m, v)?.to_vec()
-            } else {
-                ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| e.key).collect())?
+            let ok = match want {
+                ObjKind::List => {
+                    let items = ownership::read_list(&vm.m, v)?.to_vec();
+                    let mut ok = true;
+                    for x in items {
+                        if !conforms_id(vm, x, parts[0], env)? {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    ok
+                }
+                ObjKind::Set => {
+                    let items: Vec<Value> = ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| e.key).collect())?;
+                    let mut ok = true;
+                    for x in items {
+                        if !conforms_id(vm, x, parts[0], env)? {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    ok
+                }
+                _ => {
+                    let entries: Vec<(Value, Value)> =
+                        ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| (e.key, e.value)).collect())?;
+                    let mut ok = true;
+                    for (k, x) in entries {
+                        if !conforms_id(vm, k, parts[0], env)? || !conforms_id(vm, x, parts[1], env)? {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    ok
+                }
             };
-            for x in items {
-                if !conforms_ty(vm, x, et)? {
-                    return Ok(false);
+            if ok && (0..n).all(|i| tag_ids[i] != 0) {
+                let to: Vec<u32> =
+                    (0..n).map(|i| if is_any(tag_ids[i] - 1) { parts[i] + 1 } else { tag_ids[i] }).collect();
+                match want {
+                    // SAFETY: the kinds were checked above.
+                    ObjKind::List => {
+                        unsafe { as_list(v) }.set_elem_tag(tags.0, to[0]);
+                    }
+                    ObjKind::Set => {
+                        unsafe { as_dict(v) }.set_tags(tags, (to[0], 0));
+                    }
+                    _ => {
+                        unsafe { as_dict(v) }.set_tags(tags, (to[0], to[1]));
+                    }
                 }
             }
-            true
-        }
-        RtType::Dict(kt, vt) => {
-            if kind_of(v) != ObjKind::Dict {
-                return Ok(false);
-            }
-            if **kt == RtType::Any && **vt == RtType::Any {
-                return Ok(true);
-            }
-            let entries: Vec<(Value, Value)> =
-                ownership::read_dict(&vm.m, v, |t| t.iter().map(|e| (e.key, e.value)).collect())?;
-            for (k, x) in entries {
-                if !conforms_ty(vm, k, kt)? || !conforms_ty(vm, x, vt)? {
-                    return Ok(false);
-                }
-            }
-            true
+            ok
         }
     })
+}
+
+/// Tags the collections in `v` with the element types of run-time type `id`, the static type
+/// `v` had where it was converted to `Dyn` (`Op::TagElems`). Collections that have a tag keep
+/// it; tuple components and an optional's value are tagged too.
+pub fn tag_elems(v: Value, id: u32) {
+    let parts = program::rt_parts(id);
+    match (program::rt_type(id), kind_of(v)) {
+        // SAFETY: the kinds were matched.
+        (RtType::List(_), ObjKind::List) => {
+            unsafe { as_list(v) }.set_elem_tag(0, parts[0] + 1);
+        }
+        (RtType::Set(_), ObjKind::Set) => {
+            unsafe { as_dict(v) }.set_tags((0, 0), (parts[0] + 1, 0));
+        }
+        (RtType::Dict(..), ObjKind::Dict) => {
+            unsafe { as_dict(v) }.set_tags((0, 0), (parts[0] + 1, parts[1] + 1));
+        }
+        (RtType::Tuple(_), ObjKind::Tuple) => {
+            // SAFETY: a tuple, matched above.
+            let elems = unsafe { as_tuple(v) }.elems().to_vec();
+            for (e, &t) in elems.into_iter().zip(parts) {
+                tag_elems(e, t);
+            }
+        }
+        (RtType::Optional(_), _) if !v.is_nil() => tag_elems(v, parts[0]),
+        _ => {}
+    }
+}
+
+/// The name of run-time type `id`, for messages.
+fn rt_type_name(id: u32) -> String {
+    let parts = program::rt_parts(id);
+    let names = |ps: &[u32]| ps.iter().map(|&p| rt_type_name(p)).collect::<Vec<_>>();
+    match program::rt_type(id) {
+        RtType::Any => "Dyn".into(),
+        RtType::Int => "Int".into(),
+        RtType::Float => "Float".into(),
+        RtType::Bool => "Bool".into(),
+        RtType::Nil => "Nil".into(),
+        RtType::Str => "String".into(),
+        RtType::Fn => "function".into(),
+        RtType::Class(cid) => catallaxy_runtime::class::class_by_id(*cid).name.to_string(),
+        RtType::Enum(_) | RtType::Iface(_) | RtType::Elem(_) => "value".into(),
+        RtType::List(_) => format!("List[{}]", names(parts).join(", ")),
+        RtType::Set(_) => format!("Set[{}]", names(parts).join(", ")),
+        RtType::Dict(..) => format!("Dict[{}]", names(parts).join(", ")),
+        RtType::Tuple(_) => format!("({})", names(parts).join(", ")),
+        RtType::Optional(_) => format!("{}?", names(parts).join("")),
+        RtType::Union(_) => names(parts).join(" | "),
+    }
+}
+
+/// The error for a write of `v` that does not fit the element type tagged on collection `c`.
+#[cold]
+#[inline(never)]
+fn write_mismatch(c: Value, v: Value) -> Trap {
+    let (t0, t1) = tags_of(c);
+    let name = |t: u32| if t == 0 { "Dyn".to_string() } else { rt_type_name(t - 1) };
+    let ty = match kind_of(c) {
+        ObjKind::List => format!("List[{}]", name(t0)),
+        ObjKind::Set => format!("Set[{}]", name(t0)),
+        _ => format!("Dict[{}, {}]", name(t0), name(t1)),
+    };
+    Trap::Panic(format!("TypeError: cannot store a value of type {} in a {ty} through Dyn", type_name(v)))
+}
+
+/// `Op::CheckArgs`: the arguments of a call that writes into collection `c` (through `Dyn`, or
+/// through a static type with `Dyn` elements) must fit its element tags.
+pub fn check_args(vm: &mut Vm, c: Value, args: &[Value], check: u32) -> RtResult<()> {
+    let tags = tags_of(c);
+    if tags == (0, 0) {
+        return Ok(());
+    }
+    let wc = program::write_check(check);
+    let ids = match kind_of(c) {
+        ObjKind::List => &wc.list,
+        ObjKind::Set => &wc.set,
+        ObjKind::Dict => &wc.dict,
+        _ => return Ok(()),
+    };
+    for (&a, &t) in args.iter().zip(ids.iter()) {
+        if t != crate::bytecode::NO_CHECK && !conforms_id(vm, a, t, tags)? {
+            return Err(write_mismatch(c, a));
+        }
+    }
+    Ok(())
+}
+
+/// `Op::CheckSet`: `c[k] = v` must fit the element tags of collection `c`.
+pub fn check_set(vm: &mut Vm, c: Value, k: Value, v: Value) -> RtResult<()> {
+    let (t0, t1) = tags_of(c);
+    let fits = |vm: &mut Vm, x: Value, t: u32| -> RtResult<bool> { Ok(t == 0 || conforms_id(vm, x, t - 1, (0, 0))?) };
+    match kind_of(c) {
+        ObjKind::List if !fits(vm, v, t0)? => Err(write_mismatch(c, v)),
+        ObjKind::Dict if !fits(vm, k, t0)? => Err(write_mismatch(c, k)),
+        ObjKind::Dict if !fits(vm, v, t1)? => Err(write_mismatch(c, v)),
+        _ => Ok(()),
+    }
 }
 
 /// Builds `Ok(v)` / `Err(v)` values of the prelude's `Result`.

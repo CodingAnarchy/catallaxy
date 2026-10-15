@@ -15,11 +15,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::ownership::{Access, PROMOTE_ON_ACCESS};
 
 /// A capacity word followed by `cap` atomic slots.
+///
+/// The capacity is the low half of the word. A buffer embedded in a container's own object may
+/// keep a tag in the high half (a list's element type, see [`WordBuf::tag`]); buffers this module
+/// allocates have none.
 #[repr(C)]
 pub struct WordBuf {
-    cap: usize,
+    cap: AtomicU64,
     slots: [AtomicU64; 0],
 }
+
+/// The capacity bits of the capacity word.
+const CAP_MASK: u64 = u32::MAX as u64;
 
 /// A buffer with its written-range word in front, as this module allocates them.
 #[repr(C)]
@@ -39,7 +46,8 @@ const WRITTEN_ALL: u64 = u32::MAX as u64;
 const WRITTEN_NONE: u64 = (u32::MAX as u64) << 32;
 
 /// The buffer of every container with no capacity. Never written, never freed.
-static EMPTY: Prefixed = Prefixed { written: AtomicU64::new(WRITTEN_ALL), buf: WordBuf { cap: 0, slots: [] } };
+static EMPTY: Prefixed =
+    Prefixed { written: AtomicU64::new(WRITTEN_ALL), buf: WordBuf { cap: AtomicU64::new(0), slots: [] } };
 
 impl WordBuf {
     fn layout(cap: usize) -> Layout {
@@ -78,9 +86,11 @@ impl WordBuf {
         if cap == 0 {
             return Ok(Self::empty());
         }
-        // A size past `isize::MAX` is refused like any other.
-        let layout = cap
-            .checked_add(1 + PREFIX)
+        // A size past `isize::MAX`, or a capacity that does not fit the capacity bits, is
+        // refused like any other.
+        let layout = Some(cap)
+            .filter(|&c| c as u64 <= CAP_MASK)
+            .and_then(|c| c.checked_add(1 + PREFIX))
             .and_then(|n| Layout::array::<u64>(n).ok())
             .ok_or_else(|| Layout::from_size_align(isize::MAX as usize & !7, 8).unwrap())?;
         unsafe {
@@ -105,7 +115,8 @@ impl WordBuf {
     /// # Safety
     /// `p` must be valid for writes of `8 * (cap + 1)` bytes, 8-aligned, and unpublished.
     pub unsafe fn init_in_place(p: *mut WordBuf, cap: usize, prefix: impl IntoIterator<Item = u64>, fill: u64) {
-        std::ptr::addr_of_mut!((*p).cap).write(cap);
+        debug_assert!(cap as u64 <= CAP_MASK);
+        std::ptr::addr_of_mut!((*p).cap).write(AtomicU64::new(cap as u64));
         let slots = Self::slots_ptr(p);
         let mut n = 0;
         for w in prefix.into_iter().take(cap) {
@@ -138,7 +149,9 @@ impl WordBuf {
             // the same alignment and the header words more, so `realloc` may grow it in place.
             let old = Layout::array::<u64>(cap).expect("container too large");
             // A vector's allocation is at most `isize::MAX` bytes; the header words may not fit.
-            let Some(new) = cap.checked_add(1 + PREFIX).and_then(|n| Layout::array::<u64>(n).ok()) else {
+            let fits = cap as u64 <= CAP_MASK;
+            let Some(new) = cap.checked_add(1 + PREFIX).and_then(|n| Layout::array::<u64>(n).ok()).filter(|_| fits)
+            else {
                 std::alloc::dealloc(ptr as *mut u8, old);
                 return Err(old);
             };
@@ -152,7 +165,7 @@ impl WordBuf {
             std::ptr::copy(words, words.add(1 + PREFIX), len);
             std::ptr::addr_of_mut!((*base).written).write(AtomicU64::new(WRITTEN_ALL));
             let p = std::ptr::addr_of_mut!((*base).buf);
-            std::ptr::addr_of_mut!((*p).cap).write(cap);
+            std::ptr::addr_of_mut!((*p).cap).write(AtomicU64::new(cap as u64));
             let slots = Self::slots_ptr(p);
             for i in len..cap {
                 slots.add(i).write(AtomicU64::new(fill));
@@ -166,7 +179,7 @@ impl WordBuf {
     /// `p` must come from [`WordBuf::alloc`] and be unreachable by any reader.
     pub unsafe fn free(p: *mut u8) {
         let b = p as *mut WordBuf;
-        let cap = (*b).cap;
+        let cap = Self::cap(b);
         if cap > 0 {
             std::alloc::dealloc(p.sub(8 * PREFIX), Self::layout(cap));
         }
@@ -182,14 +195,45 @@ impl WordBuf {
     /// not be held across a safepoint.
     #[inline(always)]
     pub unsafe fn slots<'a>(p: *const WordBuf) -> &'a [AtomicU64] {
-        std::slice::from_raw_parts(Self::slots_ptr(p), (*p).cap)
+        std::slice::from_raw_parts(Self::slots_ptr(p), Self::cap(p))
     }
 
     /// # Safety
     /// As for [`WordBuf::slots`].
     #[inline(always)]
     pub unsafe fn cap(p: *const WordBuf) -> usize {
-        (*p).cap
+        ((*p).cap.load(Ordering::Relaxed) & CAP_MASK) as usize
+    }
+
+    /// The tag kept in the high half of an embedded buffer's capacity word (0: none).
+    ///
+    /// # Safety
+    /// `p` must be a live buffer.
+    #[inline(always)]
+    pub unsafe fn tag(p: *const WordBuf) -> u32 {
+        ((*p).cap.load(Ordering::Relaxed) >> 32) as u32
+    }
+
+    /// Replaces the tag `from` with `to`; false if the tag was not `from`. Readers of the
+    /// capacity are not disturbed: the capacity bits are kept.
+    ///
+    /// # Safety
+    /// `p` must be a buffer embedded in a live container object (not one this module allocated,
+    /// which may be freed while the container lives).
+    #[inline]
+    pub unsafe fn set_tag(p: *const WordBuf, from: u32, to: u32) -> bool {
+        let word = &(*p).cap;
+        let mut w = word.load(Ordering::Relaxed);
+        loop {
+            if (w >> 32) as u32 != from {
+                return false;
+            }
+            let new = (w & CAP_MASK) | ((to as u64) << 32);
+            match word.compare_exchange_weak(w, new, Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(_) => return true,
+                Err(cur) => w = cur,
+            }
+        }
     }
 
     // ---- written ranges ----
@@ -260,7 +304,7 @@ impl WordBuf {
     /// As for [`WordBuf::note_written`], for both buffers.
     #[inline]
     pub unsafe fn copy_written(from: *const WordBuf, to: *const WordBuf) {
-        if (*to).cap > 0 {
+        if Self::cap(to) > 0 {
             Self::written_word(to).store(Self::written_word(from).load(Ordering::Relaxed), Ordering::Relaxed);
         }
     }
@@ -272,7 +316,7 @@ impl WordBuf {
     #[inline]
     pub unsafe fn take_written(p: *const WordBuf) -> std::ops::Range<usize> {
         let r = Self::written(p);
-        if (*p).cap > 0 {
+        if Self::cap(p) > 0 {
             Self::written_word(p).store(WRITTEN_NONE, Ordering::Relaxed);
         }
         r
@@ -284,7 +328,7 @@ impl WordBuf {
     /// As for [`WordBuf::note_written`].
     #[inline]
     pub unsafe fn written(p: *const WordBuf) -> std::ops::Range<usize> {
-        let cap = (*p).cap;
+        let cap = Self::cap(p);
         if cap == 0 {
             return 0..0;
         }

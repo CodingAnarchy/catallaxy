@@ -1,0 +1,113 @@
+# A typed list, dict or set converted to `Dyn` keeps its element types as run-time tags, and a
+# write through `Dyn` (or through a type test's `List[Dyn]` view) that does not fit them is a
+# TypeError at the write, not far away where the value is read (#160).
+fn attempt(name: String, f: fn() -> Dyn) {
+  t = spawn move { f() }
+  match t.join() {
+    Ok(v) => puts("#{name}: ok #{v}")
+    Err(e) => puts("#{name}: #{e}")
+  }
+}
+
+# The issue's reproductions.
+attempt("push") {
+  xs: List[String] = []
+  d: Dyn = xs
+  d.push(5)
+  xs[0].length
+}
+attempt("dict set") {
+  counts: Dict[String, Int] = ["a": 1]
+  e: Dyn = counts
+  e["b"] = "two"
+  counts.values.sum
+}
+attempt("set add") {
+  s: Set[Int] = Set.new()
+  d: Dyn = s
+  d.add("x")
+  s.length
+}
+attempt("alias") {
+  xs: List[Int] = [1, 2, 3]
+  d: Dyn = xs
+  if let ys = d as? List[Int] {
+    (d as? List[Dyn])!.push("str")
+    ys[2] + 1
+  } else {
+    0
+  }
+}
+
+# Other writes: index, insert, concat, a record-style key.
+attempt("index") {
+  xs: List[Int] = [1]
+  d: Dyn = xs
+  d[0] = "a"
+  xs
+}
+attempt("insert") {
+  xs: List[Int] = [1]
+  d: Dyn = xs
+  d.insert(0, nil)
+  xs
+}
+attempt("concat") {
+  xs: List[Int] = [1]
+  d: Dyn = xs
+  d.concat(["a"])
+  xs
+}
+attempt("key") {
+  m: Dict[String, Int] = [:]
+  d: Dyn = m
+  d.name = "v"
+  m
+}
+
+# Writes that fit go through, and are seen by the typed list.
+attempt("fits") {
+  xs: List[Int] = [1]
+  d: Dyn = xs
+  d.push(2)
+  d.insert(0, 0)
+  d.concat([3])
+  d[1] = 5
+  m: Dict[String, Int] = [:]
+  dm: Dyn = m
+  dm["a"] = 1
+  dm.b = 2
+  "#{xs} #{m}"
+}
+
+# Type tests read the tags: an empty `List[String]` is no `List[Int]`, and any list is a
+# `List[Dyn]` (whose writes are checked).
+attempt("tests") {
+  empty: List[String] = []
+  d: Dyn = empty
+  ints: List[Int] = [1]
+  di: Dyn = ints
+  "#{d is List[Int]} #{d is List[String]} #{d is List[Dyn]} #{di as? List[String]} #{di is List[Int?]}"
+}
+
+# A `List[Dyn]` takes anything, until a test narrows it: then it holds `Int`s only.
+attempt("narrowed") {
+  ds: List[Dyn] = [1, 2]
+  d: Dyn = ds
+  ds.push("ok")
+  ds.pop()
+  if let ns = d as? List[Int] {
+    ds.push("no")
+    ns.length
+  } else {
+    0
+  }
+}
+
+# A list in a tuple converted to `Dyn` is tagged too.
+attempt("tuple") {
+  xs: List[Int] = []
+  t: Dyn = (xs, "label")
+  (t as? (List[Dyn], String))!.0.push("s")
+  xs
+}

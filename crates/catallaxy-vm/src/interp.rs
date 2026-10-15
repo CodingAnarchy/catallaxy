@@ -1424,6 +1424,27 @@ impl Vm {
                     let ok = tri!(slow::conforms(self, x, d));
                     set!(a, if ok { x } else { Value::NIL });
                 }
+                Op::TagElems => {
+                    let d = data!();
+                    slow::tag_elems(r!(a), d);
+                }
+                Op::CheckArgs => {
+                    let d = data!();
+                    let c = r!(a);
+                    if slow::is_tagged(c) {
+                        let (b, n) = (b_of(w), c_of(w));
+                        // SAFETY: the registers are live for the frame; checking allocates no
+                        // heap objects and runs no code, so they stay valid and unchanged.
+                        let args: &[Value] = unsafe { std::slice::from_raw_parts(regs.add(b), n) };
+                        save!();
+                        tri!(slow::check_args(self, c, args, d));
+                    }
+                }
+                Op::CheckSet => {
+                    let (k, v) = (r!(b_of(w)), r!(c_of(w)));
+                    save!();
+                    tri!(slow::check_set(self, r!(a), k, v));
+                }
                 Op::FrameId => {
                     let next = self.next_serial;
                     let f = frames!().last_mut().unwrap();

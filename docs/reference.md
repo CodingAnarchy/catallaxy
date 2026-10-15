@@ -640,11 +640,23 @@ OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse`
 of range (`doc["users"][5]`). Convert with `as?`:
 `name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. JSON objects parse to records that behave exactly like `Dict[String, Dyn]` (`as? Dict[String, Dyn]` succeeds); records parsed with the same keys share a hidden class, so `d.name` is served from a per-site cache. `Json.parse` reads a number with no fraction or exponent as an `Int` of any size, so `123456789012345678901234567890` stays exact and `as? Int` succeeds; any other number (`1.5`, `1e3`) is a `Float`. `Json.stringify` writes object keys in sorted order and integers of any size (including big integers) as JSON numbers; it writes a class instance as an object of its fields, or as whatever its `to_json` method returns (`Deque` writes an array).
 
-Generic types are erased at runtime, so a call through `Dyn` can put a value of the wrong type into
-typed data: `d: Dyn = xs` then `d.push(5)` adds an `Int` to a `List[String]`. Such a value is caught
-where it is used as its static type (a standard-library method's receiver or argument, a field
-access, a list or tuple access, a method call), with a `TypeError` panic that names the
-expected and actual types: `xs[0].length` panics with `TypeError: expected String, got Int`.
+A `List`, `Set` or `Dict` converted to `Dyn` where its static type is known (`d: Dyn = xs` with
+`xs: List[String]`, an argument or element of type `Dyn`; also inside a tuple or an optional) keeps its
+element types: a write through `Dyn` that does not fit them (`d.push(5)`, `d[0] = 5`, `d.insert(0, 5)`,
+`d.concat([5])`, `d["k"] = 5`, `d.k = 5`, `set.add(5)`, and the other mutating methods) panics at the
+write with `TypeError: cannot store a value of type Int in a List[String] through Dyn`. So does a write
+through the `List[Dyn]` (or `Dict[String, Dyn]`, ...) a type test returns. Type tests check such a
+collection by its element types, not its current elements: an empty `List[String]` is no `List[Int]`,
+and any list is a `List[Dyn]`. A `List[Dyn]` converted to `Dyn` takes any element until a test such as
+`d as? List[Int]` succeeds; from then on its elements must be `Int`s, as the typed view expects.
+
+Generic types are otherwise erased at runtime, so a value of the wrong type can still reach typed data
+through `Dyn` where the element types are not known: a collection that reached `Dyn` inside generic code
+(where its element type is a type parameter), one nested in another collection, one from `Json.parse`
+narrowed by a test, or an instance of a generic class (#219). Such a value is caught where it is used as its
+static type (a standard-library method's receiver or argument, a field access, a list or tuple access, a
+method call), with a `TypeError` panic that names the expected and actual types:
+`xs[0].length` panics with `TypeError: expected String, got Int`.
 
 ## 10. Tooling
 
