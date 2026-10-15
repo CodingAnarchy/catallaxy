@@ -717,13 +717,19 @@ struct AtSymbol {
 
 /// Everything a rename of the symbol under a cursor rewrites, across compilations.
 struct Gathered {
-    /// Each occurrence once: its location and whether it declares its symbol.
-    occs: Vec<(lt::Location, bool)>,
+    /// Each occurrence once: its location, whether it declares its symbol, and its position as a
+    /// key (canonical path and byte range).
+    occs: Vec<(lt::Location, bool, Key)>,
     /// Why the rename must be refused, if it must.
     refusal: Option<String>,
+    /// The units searched, by entry path; the cursor's document's first.
+    units: Vec<(PathBuf, Arc<Unit>)>,
 }
 
 type Key = (PathBuf, u32, u32);
+
+/// A file a rename edits: its path as loaded, its text, and the byte ranges replaced.
+type EditedFile = (PathBuf, String, Vec<(u32, u32)>);
 
 impl Server<'_> {
     /// The units of `first` and then, with `all`, of the open documents and the workspace files.
@@ -759,9 +765,10 @@ impl Server<'_> {
     /// Symbols are matched across compilations by their declarations.
     fn gather(&self, at: AtSymbol) -> Gathered {
         let AtSymbol { path, sym, .. } = at;
-        let units: Vec<Arc<Unit>> = self.units(Some(&path), true).into_iter().map(|(_, u)| u).collect();
+        let entries = self.units(Some(&path), true);
+        let units: Vec<Arc<Unit>> = entries.iter().map(|(_, u)| u.clone()).collect();
         if units.is_empty() {
-            return Gathered { occs: Vec::new(), refusal: None };
+            return Gathered { occs: Vec::new(), refusal: None, units: entries };
         }
         // The symbols of the rename in each unit.
         let mut syms: Vec<Vec<Symbol>> = vec![Vec::new(); units.len()];
@@ -826,18 +833,18 @@ impl Server<'_> {
             }
             for o in u.index.occs.iter().filter(|o| syms[i].contains(&o.sym)) {
                 let (Some(k), Some(loc)) = (u.key(o.span), Self::unit_location(u, o.span)) else { continue };
-                if seen.insert(k) {
-                    occs.push((loc, o.is_decl));
+                if seen.insert(k.clone()) {
+                    occs.push((loc, o.is_decl, k));
                 }
             }
         }
-        Gathered { occs, refusal }
+        Gathered { occs, refusal, units: entries }
     }
 
     fn references(&self, p: lt::ReferenceParams) -> Option<Vec<lt::Location>> {
         let at = self.symbol_at(&p.text_document_position)?;
         let with_decl = p.context.include_declaration;
-        Some(self.gather(at).occs.into_iter().filter(|(_, d)| with_decl || !d).map(|(l, _)| l).collect())
+        Some(self.gather(at).occs.into_iter().filter(|(_, d, _)| with_decl || !d).map(|(l, ..)| l).collect())
     }
 
     fn prepare_rename(&self, p: lt::TextDocumentPositionParams) -> Result<Option<lt::PrepareRenameResponse>, String> {
@@ -858,15 +865,155 @@ impl Server<'_> {
             return Err(format!("`{new_name}` is not a valid name"));
         }
         let Some(at) = self.symbol_at(&p.text_document_position) else { return Ok(None) };
+        // The new name must not collide with a name visible where the symbol is declared or used.
+        let (path, offset) = (at.path.clone(), at.span.start);
+        if let Some(why) = self.scope_conflict(&path, offset, new_name) {
+            return Err(why);
+        }
         let g = self.gather(at);
         if let Some(why) = g.refusal {
             return Err(why);
         }
+        // And, to catch what that misses, the renamed program must check as the original did.
+        if let Some(why) = self.recheck(&g, new_name) {
+            return Err(why);
+        }
         let mut changes: std::collections::HashMap<lt::Uri, Vec<lt::TextEdit>> = Default::default();
-        for (loc, _) in g.occs {
+        for (loc, ..) in g.occs {
             changes.entry(loc.uri).or_default().push(lt::TextEdit { range: loc.range, new_text: new_name.into() });
         }
         Ok(Some(lt::WorkspaceEdit { changes: Some(changes), ..Default::default() }))
+    }
+
+    /// Why renaming the symbol at `offset` of the document at `path` to `new` would clash with an
+    /// existing name (see `symbols::rename_conflict`), checked in that document's compilation.
+    fn scope_conflict(&self, path: &Path, offset: u32, new: &str) -> Option<String> {
+        let c = self.compile(path, None);
+        let (ck, sm) = (&c.comp.ck, &c.comp.sm);
+        let index = symbols::Index::build(ck, sm);
+        let occ = index.at(c.file, offset)?;
+        index.family(occ.sym).into_iter().find_map(|s| symbols::rename_conflict(ck, sm, &index, s, new))
+    }
+
+    /// Checks the program with the rename applied: every compilation that includes an edited file
+    /// must report no diagnostic the original did not, and the renamed occurrences must be
+    /// exactly the occurrences of their symbols (no other name now means the renamed thing, and
+    /// no renamed occurrence now means something else). Why not, if it fails.
+    fn recheck(&self, g: &Gathered, new: &str) -> Option<String> {
+        if g.occs.is_empty() {
+            return None;
+        }
+        // Each edited file's text (as the compilations saw it) and its edits, by canonical path.
+        let mut by_file: FxHashMap<PathBuf, EditedFile> = FxHashMap::default();
+        for (_, _, (canon, start, end)) in &g.occs {
+            if !by_file.contains_key(canon) {
+                let Some(f) = g.units.iter().find_map(|(_, u)| u.files.iter().flatten().find(|f| &f.canon == canon))
+                else {
+                    continue;
+                };
+                by_file.insert(canon.clone(), (PathBuf::from(&f.sf.path), f.sf.text.clone(), Vec::new()));
+            }
+            if let Some(e) = by_file.get_mut(canon) {
+                e.2.push((*start, *end));
+            }
+        }
+        let mut texts: FxHashMap<PathBuf, String> = FxHashMap::default();
+        let mut renamed: rustc_hash::FxHashSet<Key> = Default::default();
+        let mut old_name = String::new();
+        for (canon, (path, text, edits)) in &mut by_file {
+            edits.sort_unstable();
+            edits.dedup();
+            let mut out = String::with_capacity(text.len());
+            let mut last = 0usize;
+            for &(a, b) in edits.iter() {
+                let (a, b) = (a as usize, b as usize);
+                if a < last || b > text.len() {
+                    return Some("the rename's edits overlap".into());
+                }
+                if old_name.is_empty() {
+                    old_name = text[a..b].to_string();
+                }
+                out.push_str(&text[last..a]);
+                let start = out.len() as u32;
+                out.push_str(new);
+                renamed.insert((canon.clone(), start, out.len() as u32));
+                last = b;
+            }
+            out.push_str(&text[last..]);
+            texts.insert(path.clone(), out);
+        }
+        // The compilations that include an edited file.
+        let entries: Vec<PathBuf> = g
+            .units
+            .iter()
+            .filter(|(_, u)| u.files.iter().flatten().any(|f| by_file.contains_key(&f.canon)))
+            .map(|(p, _)| p.clone())
+            .collect();
+        let before: FxHashMap<&PathBuf, &Arc<Unit>> = g.units.iter().map(|(p, u)| (p, u)).collect();
+        let place = |u: &Unit, file: u32, offset: u32| match u.file(file) {
+            Some(f) => {
+                let (line, _) = f.sf.line_col(offset);
+                let name = Path::new(&f.sf.path).file_name().map(|n| n.to_string_lossy().to_string());
+                format!("{}:{line}", name.unwrap_or_default())
+            }
+            None => "?".into(),
+        };
+        let mut compiled = 0;
+        for (entry, after) in self.ws.trial(&texts, &entries) {
+            compiled += 1;
+            let Some(after) = after else {
+                return Some(format!("renaming to `{new}` could not be checked: compiling {} failed", entry.display()));
+            };
+            let Some(old) = before.get(&entry) else { continue };
+            // New diagnostics: a code reported more often than before.
+            let mut counts: FxHashMap<&str, i64> = FxHashMap::default();
+            for (code, ..) in &old.diags {
+                *counts.entry(code).or_default() += 1;
+            }
+            for (code, msg, sp) in &after.diags {
+                let n = counts.entry(code).or_default();
+                *n -= 1;
+                if *n < 0 {
+                    let kind = if code.starts_with('W') { "warning" } else { "error" };
+                    let at = place(&after, sp.file, sp.start);
+                    return Some(format!("renaming `{old_name}` to `{new}` would cause {kind}[{code}] at {at}: {msg}"));
+                }
+            }
+            // The renamed occurrences, and every occurrence of their symbols.
+            let files: rustc_hash::FxHashSet<&PathBuf> = after.files.iter().flatten().map(|f| &f.canon).collect();
+            let mut syms: Vec<Symbol> = Vec::new();
+            let mut found: rustc_hash::FxHashSet<Key> = Default::default();
+            for o in &after.index.occs {
+                if let Some(k) = after.key(o.span).filter(|k| renamed.contains(k)) {
+                    if !syms.contains(&o.sym) {
+                        syms.push(o.sym);
+                    }
+                    found.insert(k);
+                }
+            }
+            if let Some(k) = renamed.iter().find(|k| files.contains(&k.0) && !found.contains(*k)) {
+                let file = after.files.iter().position(|f| f.as_ref().is_some_and(|f| f.canon == k.0)).unwrap_or(0);
+                let at = place(&after, file as u32, k.1);
+                return Some(format!(
+                    "renaming `{old_name}` to `{new}` would leave the `{new}` at {at} naming nothing"
+                ));
+            }
+            // Several symbols may be renamed together (an interface member and its
+            // implementations, which one compilation may not link): each must keep to the edits.
+            for o in after.index.occs.iter().filter(|o| syms.contains(&o.sym)) {
+                if after.key(o.span).is_some_and(|k| !renamed.contains(&k)) {
+                    let at = place(&after, o.span.file, o.span.start);
+                    return Some(format!(
+                        "renaming `{old_name}` to `{new}` would change what the `{new}` at {at} refers to"
+                    ));
+                }
+            }
+        }
+        if self.ws.debug() {
+            let line = format!("catx lsp: checking the rename compiled {compiled} files");
+            self.log(Notes { debug: vec![line], ..Default::default() });
+        }
+        None
     }
 
     fn signature_help(&self, p: lt::SignatureHelpParams) -> Option<lt::SignatureHelp> {

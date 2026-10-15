@@ -4,7 +4,7 @@ Syntax highlighting for Catallaxy (`.cx`) files, plus the `catx lsp` language se
 
 - diagnostics as you type
 - hover: types (including pattern bindings and block parameters), signatures with default values, and documentation comments
-- go to definition (into a read-only copy of the prelude for built-in functions and types), and find references and rename across every `.cx` file in the workspace folders, open or not
+- go to definition (into a read-only copy of the prelude for built-in functions and types), and find references and rename across every `.cx` file in the workspace folders, open or not (a rename that would collide with an existing name, or change what any name refers to, is refused)
 - completion, with documentation comments
 - signature help
 - inlay hints with inferred types

@@ -1,0 +1,14 @@
+# Issue #178: a chain-shaped heap. A 5M-node linked list holding strings, 2M small lists and a
+# 1M-entry dict; then a few major collections.
+class Node {
+  value: String
+  next: Node?
+}
+head: Node? = nil
+for i in 0...5_000_000 { head = Node.new("s#{i % 1000}", head) }
+lists: List[List[Int]] = []
+for i in 0...2_000_000 { lists.push([i, i + 1]) }
+d: Dict[Int, Int] = [:]
+for i in 0...1_000_000 { d[i] = i }
+for r in 0...5 { gc() }
+puts(lists.length + d.length + head!.value.length)
