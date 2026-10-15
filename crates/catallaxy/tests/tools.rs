@@ -704,14 +704,65 @@ fn lsp_doc_comments_in_hover_and_completion() {
         let it = items.iter().find(|i| i["label"] == label).unwrap_or_else(|| panic!("no {label} in {r}"));
         it["documentation"]["value"].as_str().unwrap_or_default().to_string()
     };
-    let r = lsp.request(20, "textDocument/completion", json!({"textDocument": {"uri": uri}, "position": {"line": n, "character": 2}}));
+    let r = lsp.request(
+        20,
+        "textDocument/completion",
+        json!({"textDocument": {"uri": uri}, "position": {"line": n, "character": 2}}),
+    );
     assert_eq!(doc_of(&r, "x"), "Distance from zero.");
     assert_eq!(doc_of(&r, "dbl"), "Twice the distance.");
-    let r =
-        lsp.request(21, "textDocument/completion", json!({"textDocument": {"uri": uri}, "position": {"line": n + 1, "character": 0}}));
+    let r = lsp.request(
+        21,
+        "textDocument/completion",
+        json!({"textDocument": {"uri": uri}, "position": {"line": n + 1, "character": 0}}),
+    );
     assert!(doc_of(&r, "inc").starts_with("Adds `by`"));
     assert_eq!(doc_of(&r, "P"), "A point on the line.");
     assert_eq!(doc_of(&r, "plain"), "");
+    lsp.finish();
+}
+
+const BINDINGS: &str = "xs = [1, 2]
+for x in xs { puts(x) }
+for (y, i) in xs.with_index() { puts(i + y) }
+o: Int? = 3
+if let v = o { puts(v) }
+r: Result[Int, String] = Ok(1)
+match r { Ok(w) => puts(w), Err(e) => puts(e) }
+ys = xs.map { |z| z + 1 }
+fn half(n: Int, s: String) -> Int { n / 2 }
+match o { k: Int => puts(k), _ => {} }
+";
+
+#[test]
+fn lsp_hover_pattern_bindings() {
+    let (mut lsp, _) = Lsp::init();
+    let uri = lsp.open("bindings.cx", BINDINGS);
+    let t = BINDINGS;
+    // (line, name, nth occurrence on the line, expected hover)
+    let cases: [(usize, &str, usize, &str); 11] = [
+        (1, "x", 0, "x: Int"),
+        (2, "i", 0, "i: Int"),
+        (2, "y", 0, "y: Int"),
+        (4, "v", 0, "v: Int"),
+        (6, "w", 0, "w: Int"),
+        (6, "e", 0, "e: String"),
+        (7, "z", 0, "z: Int"),
+        (7, "z", 1, "z: Int"),
+        (8, "n", 1, "n: Int"),
+        (8, "s", 0, "s: String"),
+        (9, "k", 0, "k: Int"),
+    ];
+    for (i, (line, name, nth, want)) in cases.into_iter().enumerate() {
+        let p = pos(t, line, name, nth);
+        let h = lsp.request(10 + i as i64, "textDocument/hover", json!({"textDocument": {"uri": uri}, "position": p}));
+        let value = h["result"]["contents"]["value"].as_str().unwrap_or_default();
+        assert!(value.contains(want), "{name} on line {line}: {h}");
+        // The range is the name's own.
+        assert_eq!(h["result"]["range"]["start"], p, "{name} on line {line}: {h}");
+        let width = h["result"]["range"]["end"]["character"].as_u64().unwrap() - p["character"].as_u64().unwrap();
+        assert_eq!(width, name.len() as u64, "{name} on line {line}: {h}");
+    }
     lsp.finish();
 }
 

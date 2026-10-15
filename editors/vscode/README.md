@@ -3,7 +3,7 @@
 Syntax highlighting for Catallaxy (`.cx`) files, plus the `catx lsp` language server:
 
 - diagnostics as you type
-- hover
+- hover: types (including pattern bindings and block parameters) and signatures
 - go to definition, and find references and rename across every `.cx` file in the workspace folders, open or not
 - completion
 - signature help
