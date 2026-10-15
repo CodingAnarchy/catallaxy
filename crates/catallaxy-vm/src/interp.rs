@@ -24,6 +24,11 @@ pub const UNWIND_BREAK: u8 = 0;
 pub const UNWIND_RETURN: u8 = 1;
 
 const MAX_FRAMES: usize = 200_000;
+/// How deeply `with lock` may nest on one object. The object's lock counts up to
+/// [`catallaxy_gc::Header::MAX_LOCK_NESTING`] acquisitions; the rest is left for the runtime's
+/// own short-lived locking of the same object inside the block.
+pub const MAX_WITH_LOCK_NESTING: u32 = 1000;
+const _: () = assert!(MAX_WITH_LOCK_NESTING + 16 <= catallaxy_gc::Header::MAX_LOCK_NESTING);
 
 #[derive(Clone, Copy)]
 pub struct Frame {
@@ -441,6 +446,21 @@ impl Vm {
                 h.unlock();
             }
         }
+    }
+
+    /// Restores this VM after a Rust panic unwound through it (an internal error): pops every
+    /// frame, releasing the object locks they held, and returns the Catallaxy backtrace at the
+    /// point of the panic. The thread is left in the running state. Native guards (`Mutex`
+    /// closures, the runtime's own object locks) were released by the unwind itself.
+    pub fn recover_from_internal_panic(&mut self) -> Vec<String> {
+        let trace = self.backtrace();
+        self.unwind_to(0);
+        self.panic_trace = None;
+        self.no_park = 0;
+        if self.m.rec.state() != catallaxy_gc::ThreadState::Running {
+            catallaxy_gc::leave_native(&self.m.rec);
+        }
+        trace
     }
 
     /// Number of active frames on this VM's stack.
@@ -1430,6 +1450,11 @@ impl Vm {
                     if let Some(h) = o.header() {
                         if h.state() == ObjState::Shared {
                             save!();
+                            if h.is_locked_by(tid) && h.lock_depth() >= MAX_WITH_LOCK_NESTING {
+                                return Err(Trap::Panic(format!(
+                                    "LockError: `with lock` nested more than {MAX_WITH_LOCK_NESTING} deep on one object"
+                                )));
+                            }
                             if !h.try_lock(tid) {
                                 catallaxy_gc::enter_native(&self.m.rec);
                                 h.lock(tid);
