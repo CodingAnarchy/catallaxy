@@ -28,7 +28,8 @@ fn heap_limit_panics_with_a_trace() {
     let src = "fn grow() -> Int {\n  xs: List[List[Int]] = []\n  for i in 0...50_000_000 { xs.push([i]) }\n  xs.length\n}\nputs(grow())\n";
     let (code, err) = run("limit.cx", src, &[("CATX_MAX_HEAP", "32M")]);
     assert_eq!(code, 101, "{err}");
-    assert!(err.contains("panic: MemoryError:") && err.contains("over the CATX_MAX_HEAP limit"), "{err}");
+    // Either a collection finds too much live data, or growing the list would pass the cap.
+    assert!(err.contains("panic: MemoryError:") && err.contains("the CATX_MAX_HEAP limit of 33.6 MB"), "{err}");
     assert!(err.contains("    at grow (") && err.contains("limit.cx:3)"), "{err}");
 }
 
