@@ -433,3 +433,46 @@ fn storing_numbers_and_old_objects_records_nothing() {
     assert_eq!(list(l).written_range(), 7..8);
     h.finish();
 }
+
+/// A list of at least `CARD_MIN` slots records writes per card (issue #144): young items
+/// stored far apart are found by minor collections, which scan only their cards.
+#[test]
+fn large_lists_record_scattered_writes_per_card() {
+    use catallaxy_runtime::buf::{CARD, CARD_MIN};
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let len = CARD_MIN + 3 * CARD;
+    let l = h.m.alloc_list((0..len).map(|i| Value::small_int(i as i64)).collect());
+    let hl = h.m.root(l);
+    h.gc();
+    let l = h.m.get(hl);
+    assert!(!young(l));
+    let spots = [7, 2 * CARD + 5, len / 2, len - 1];
+    for round in 0..3 {
+        for (k, &i) in spots.iter().enumerate() {
+            let s = h.m.alloc_str(&format!("r{round}-{k}"));
+            set(&mut h, l, i, s);
+        }
+        // With cards, the span from the first written card to the end of the last.
+        assert_eq!(list(l).written_range(), 0..len);
+        churn(&mut h);
+        assert_eq!(list(l).written_range(), 0..0);
+        for (k, &i) in spots.iter().enumerate() {
+            let v = list(l).get(i).unwrap();
+            assert!(!young(v));
+            assert_eq!(str_of(v), Some(format!("r{round}-{k}").as_str()));
+        }
+        assert_eq!(list(l).get(1), Some(Value::small_int(1)));
+    }
+    // Growing keeps the cards: a push past the capacity, then a young item near the front.
+    let s = h.m.alloc_str("tail");
+    push(&mut h, l, s);
+    let s = h.m.alloc_str("far");
+    set(&mut h, l, 3, s);
+    churn(&mut h);
+    let all = unsafe { as_list(l) }.to_vec();
+    assert_eq!(str_of(all[3]), Some("far"));
+    assert_eq!(str_of(all[len]), Some("tail"));
+    h.gc();
+    h.finish();
+}

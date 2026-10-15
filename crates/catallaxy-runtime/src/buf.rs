@@ -392,6 +392,17 @@ impl WordBuf {
     #[cold]
     #[inline(never)]
     pub unsafe fn widen_written(p: *const WordBuf, lo: usize, hi: usize) {
+        if Self::range_word(p) == CARDED {
+            if hi == lo + 1 {
+                return Self::mark_card(p, lo);
+            }
+            if hi - lo <= CARD {
+                // At most two cards (a dict entry's words).
+                Self::mark_card(p, lo);
+                Self::mark_card(p, hi - 1);
+                return;
+            }
+        }
         let cards = Self::cards(p);
         if !cards.is_empty() {
             let n = Self::cap(p).div_ceil(CARD);
@@ -554,6 +565,60 @@ mod tests {
             let words: Vec<u64> = WordBuf::slots(b).iter().map(|s| s.load(Ordering::Relaxed)).collect();
             assert_eq!(words, [1, 2, 9, 9]);
             WordBuf::free(b as *mut u8);
+        }
+    }
+
+    fn runs(p: *const WordBuf) -> Vec<std::ops::Range<usize>> {
+        let mut v = Vec::new();
+        // SAFETY: the tests' buffers are live and private.
+        unsafe { WordBuf::take_written(p, |r| v.push(r)) };
+        v
+    }
+
+    /// Buffers of at least `CARD_MIN` slots record writes per card (issue #144).
+    #[test]
+    fn large_buffers_record_written_cards() {
+        let cap = 70 * CARD + 77; // a partial last card, and cards in two words of the table
+        let n = cap.div_ceil(CARD);
+        let b = WordBuf::try_alloc(cap, 0).unwrap();
+        // SAFETY: just allocated, never published.
+        unsafe {
+            assert_eq!(WordBuf::range_word(b), CARDED);
+            // New: every card, once, as one run.
+            assert_eq!(WordBuf::written(b), 0..cap);
+            assert_eq!(runs(b), [0..cap]);
+            assert_eq!(runs(b), []);
+            assert_eq!(WordBuf::written(b), 0..0);
+            // Scattered slots, a range over two cards, adjacent cards merged into one run,
+            // and the partial last card.
+            for i in [5, 3 * CARD + 1, 64 * CARD - 1, 64 * CARD, cap - 1] {
+                WordBuf::note_written(b, i, i + 1);
+            }
+            WordBuf::note_written(b, 10 * CARD - 2, 10 * CARD + 1);
+            assert_eq!(WordBuf::written(b), 0..cap);
+            assert_eq!(
+                runs(b),
+                [0..CARD, 3 * CARD..4 * CARD, 9 * CARD..11 * CARD, 63 * CARD..65 * CARD, (n - 1) * CARD..cap]
+            );
+            assert_eq!(runs(b), []);
+            // A larger buffer taking over the items keeps the cards; a small one gets the span.
+            WordBuf::note_written(b, 69 * CARD + 3, 69 * CARD + 4);
+            let big = WordBuf::try_alloc(cap * 2, 0).unwrap();
+            WordBuf::copy_written(b, big);
+            assert_eq!(runs(big), [69 * CARD..70 * CARD]);
+            let small = WordBuf::try_alloc(16, 0).unwrap();
+            WordBuf::copy_written(big, small);
+            assert_eq!(runs(small), []);
+            WordBuf::note_written(b, 2, 3);
+            WordBuf::copy_written(b, small);
+            assert_eq!(runs(small), [0..16]);
+            // A small buffer's range moving into a large one marks the cards it spans.
+            WordBuf::note_written(small, 3, 9);
+            WordBuf::copy_written(small, big);
+            assert_eq!(runs(big), [0..CARD]);
+            for p in [b, big, small] {
+                WordBuf::free(p as *mut u8);
+            }
         }
     }
 }
