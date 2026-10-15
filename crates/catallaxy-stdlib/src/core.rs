@@ -500,7 +500,8 @@ fn eputs(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
         None => String::new(),
     };
     flush();
-    eprintln!("{text}");
+    // Like `puts`, never fail the program over a closed stream (`eprintln!` would panic).
+    let _ = std::io::Write::write_all(&mut std::io::stderr(), format!("{text}\n").as_bytes());
     Ok(Value::NIL)
 }
 

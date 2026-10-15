@@ -654,6 +654,17 @@ expected and actual types: `xs[0].length` panics with `TypeError: expected Strin
 `catx lsp`, `catx test [paths...]`. `check` and `fmt` take files and directories; a directory stands for
 every `*.cx` file under it, skipping hidden directories and `target/`.
 
+A program's standard output (`puts`, `print`) is buffered: it is written when 64 KB have collected,
+when the program ends, before it reads standard input, sleeps or waits for I/O, and before anything
+is written to standard error. When standard output is a terminal it is also written at
+the end of each line, so progress output shows up while the program runs. If the reader of
+standard output goes away (`catx run prog.cx | head -2`), the program ends quietly with exit status
+141 at its next write (or at its end), as a process killed by `SIGPIPE` would; it does not keep
+running. `SIGINT` (Ctrl-C), `SIGTERM` and `SIGHUP` write out the buffered output before the program
+dies of the signal, so nothing printed is lost and the exit status still names the signal (a shell
+shows 130, 143 or 129). Signals the program inherited as ignored (`nohup`, background jobs) stay
+ignored. On Windows, Ctrl-C, Ctrl-Break and closing the console also write the buffer out first.
+
 `catx test paths...` runs each named `*.cx` file, and every `*.cx` file under each named directory
 (skipping hidden directories, `target/`, and `lib/` directories, which hold modules for tests to
 import), each in its own process. With no path it runs the tests under the current directory. A

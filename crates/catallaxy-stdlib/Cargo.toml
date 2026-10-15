@@ -32,6 +32,10 @@ ureq = "3"
 ring = "0.17"
 base64 = "0.23"
 
+[target.'cfg(windows)'.dependencies]
+# Already in the tree (through mio and others); flushes output on Ctrl-C (src/out.rs).
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+
 [lints.rust]
 # `catx_tsan`: ThreadSanitizer fiber annotations (src/fiber.rs, the `tsan-suite` CI job).
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(catx_tsan)"] }
