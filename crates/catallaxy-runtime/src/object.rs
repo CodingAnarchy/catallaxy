@@ -401,6 +401,19 @@ impl ListObj {
         std::ptr::addr_of!(self.inline) as *mut WordBuf
     }
 
+    /// The list's element-type tag: the program's run-time type id of the element type plus
+    /// one, set when a list of a known static type is converted to `Dyn`; 0 when unknown.
+    /// Kept in the high half of the inline buffer's capacity word, which no write moves.
+    #[inline(always)]
+    pub fn elem_tag(&self) -> u32 {
+        unsafe { WordBuf::tag(&self.inline) }
+    }
+
+    /// Replaces the element tag `from` with `to`; false if the tag was not `from`.
+    pub fn set_elem_tag(&self, from: u32, to: u32) -> bool {
+        unsafe { WordBuf::set_tag(&self.inline, from, to) }
+    }
+
     /// Whether the elements are currently stored in the object itself.
     pub fn is_inline(&self) -> bool {
         self.buf.load(Ordering::Acquire) == self.inline_addr()
@@ -762,9 +775,32 @@ unsafe fn move_slots(slots: &[AtomicU64], from: usize, to: usize, count: usize, 
 pub struct DictObj {
     pub header: Header,
     pub table: DictTable,
+    /// Key (low half) and value (high half) type tags, as for [`ListObj::elem_tag`]; a set
+    /// uses the key half for its elements.
+    tags: AtomicU64,
 }
 
 impl DictObj {
+    /// # Safety
+    /// `p` must point to freshly allocated, unpublished dict memory.
+    pub(crate) unsafe fn init(p: *mut DictObj, table: DictTable) {
+        std::ptr::addr_of_mut!((*p).table).write(table);
+        std::ptr::addr_of_mut!((*p).tags).write(AtomicU64::new(0));
+    }
+
+    /// The key and value type tags (0: unknown).
+    #[inline(always)]
+    pub fn tags(&self) -> (u32, u32) {
+        let w = self.tags.load(Ordering::Relaxed);
+        (w as u32, (w >> 32) as u32)
+    }
+
+    /// Replaces the tags `from` with `to`; false if they were not `from`.
+    pub fn set_tags(&self, from: (u32, u32), to: (u32, u32)) -> bool {
+        let pack = |(k, v): (u32, u32)| k as u64 | ((v as u64) << 32);
+        self.tags.compare_exchange(pack(from), pack(to), Ordering::Relaxed, Ordering::Relaxed).is_ok()
+    }
+
     /// The table. Reads are safe under any race (see [`DictTable`]); writes need write access.
     #[inline(always)]
     pub fn table(&self) -> &DictTable {
@@ -1104,7 +1140,9 @@ pub(crate) fn vtable_for(kind: ObjKind) -> GcVTable {
         ObjKind::Dict | ObjKind::Set => Some(trace_dict_written),
         _ => None,
     };
-    GcVTable { trace, finalize, size, trace_remembered }
+    let leaf =
+        matches!(kind, ObjKind::Immediate | ObjKind::Str | ObjKind::BigInt | ObjKind::StringBuilder | ObjKind::Native);
+    GcVTable { trace, finalize, size, trace_remembered, leaf }
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,0 +1,12 @@
+push: TypeError: cannot store a value of type Int in a List[String] through Dyn
+dict set: TypeError: cannot store a value of type String in a Dict[String, Int] through Dyn
+set add: TypeError: cannot store a value of type String in a Set[Int] through Dyn
+alias: TypeError: cannot store a value of type String in a List[Int] through Dyn
+index: TypeError: cannot store a value of type String in a List[Int] through Dyn
+insert: TypeError: cannot store a value of type Nil in a List[Int] through Dyn
+concat: TypeError: cannot store a value of type List in a List[Int] through Dyn
+key: TypeError: cannot store a value of type String in a Dict[String, Int] through Dyn
+fits: ok [0, 5, 2, 3] ["a": 1, "b": 2]
+tests: ok false true true nil false
+narrowed: TypeError: cannot store a value of type String in a List[Int] through Dyn
+tuple: TypeError: cannot store a value of type String in a List[Int] through Dyn

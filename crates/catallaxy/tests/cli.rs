@@ -57,6 +57,33 @@ fn check_json_merges_several_files_and_directories() {
     std::fs::remove_dir_all(&other).ok();
 }
 
+/// `fmt` keeps a file's line endings (#184).
+#[test]
+fn fmt_keeps_crlf_line_endings() {
+    let dir = scratch_dir("fmt-crlf");
+    let tidy = dir.join("tidy.cx");
+    std::fs::write(&tidy, "x = 1\r\nputs(x) # one\r\n").unwrap();
+    let (code, out, err) = catx(&[OsStr::new("fmt"), OsStr::new("--check"), tidy.as_os_str()]);
+    assert_eq!(code, 0, "an already formatted CRLF file is formatted: {out}{err}");
+    let messy = dir.join("messy.cx");
+    std::fs::write(&messy, "x=1\r\nif x>0 {\r\nputs( x )\r\n}\r\n").unwrap();
+    let (code, out, err) = catx(&[OsStr::new("fmt"), messy.as_os_str()]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(std::fs::read_to_string(&messy).unwrap(), "x = 1\r\nif x > 0 {\r\n  puts(x)\r\n}\r\n");
+    // A file with `\n` endings keeps them.
+    let lf = dir.join("lf.cx");
+    std::fs::write(&lf, "x=1\n").unwrap();
+    catx(&[OsStr::new("fmt"), lf.as_os_str()]);
+    assert_eq!(std::fs::read_to_string(&lf).unwrap(), "x = 1\n");
+    // A syntax error in a CRLF file is reported at its real position.
+    let bad = dir.join("bad.cx");
+    std::fs::write(&bad, "x = 1\r\ny = (\r\n").unwrap();
+    let (code, _, err) = catx(&[OsStr::new("fmt"), OsStr::new("--check"), bad.as_os_str()]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("bad.cx:2:") || err.contains("bad.cx:3:"), "{err}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// Long operator chains run; nesting past the limit is a diagnostic from `check` and `run`
 /// alike, never a stack overflow (#156).
 #[test]

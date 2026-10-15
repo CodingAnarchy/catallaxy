@@ -2,7 +2,8 @@
 //!
 //! The list of natives is generated from the prelude's `native fn` declarations, so a new native
 //! is covered without touching this file. For each one, a value of the wrong type reaches it the
-//! way a program can make one: pushed through a `Dyn` alias into a typed list, then read back
+//! way a program can make one: pushed through a `Dyn` alias into a typed list (one that reaches
+//! `Dyn` in generic code, so it has no element tag; see #160), then read back
 //! with its static type. Each call runs in its own `catx` process, so a crash fails the test
 //! (naming the native) instead of taking the test runner down.
 //!
@@ -220,9 +221,14 @@ fn wrong_values(ty: &str) -> Vec<&'static str> {
         .collect()
 }
 
-/// Program lines making `var` a value `wrong` that has static type `ty`.
+/// Program lines making `var` a value `wrong` that has static type `ty`. The list reaches `Dyn`
+/// inside generic code, where its element type is not known, so it gets no element tag and the
+/// push through `Dyn` is not checked (#160 checks it for a list converted where its type is known).
 fn poison(var: &str, ty: &str, wrong: &str) -> String {
-    format!("{var}_l: List[{ty}] = []\n{var}_d: Dyn = {var}_l\n{var}_d.push({wrong})\n{var} = {var}_l[0]\n")
+    format!(
+        "fn {var}_launder[T](x: T) -> Dyn {{ x }}\n{var}_l: List[{ty}] = []\n{var}_d: Dyn = {var}_launder({var}_l)\n\
+         {var}_d.push({wrong})\n{var} = {var}_l[0]\n"
+    )
 }
 
 struct Case {

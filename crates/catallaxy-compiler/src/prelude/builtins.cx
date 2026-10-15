@@ -175,7 +175,10 @@ extend String {
   native fn rstrip(self) -> String
   fn trim(self) -> String { self.strip }
   native fn chomp(self) -> String
-  native fn split(self, sep: String = "") -> List[String]
+  # The pieces between occurrences of `sep` (a string or a `Regex`); with the default `""`, the
+  # words between runs of whitespace. With a positive `limit`, at most `limit` pieces: the last
+  # holds the rest of the text.
+  native fn split(self, sep: String | Regex = "", limit: Int = 0) -> List[String]
   native fn lines(self) -> List[String]
   native fn chars(self) -> List[String]
   native fn bytes(self) -> List[Int]
@@ -217,8 +220,11 @@ extend String {
   native fn delete_suffix(self, suffix: String) -> String
   native fn squeeze(self) -> String
   native fn tr(self, from: String, to: String) -> String
-  fn each_char(self, f: fn(String)) {
-    for c in self.chars { f(c) }
+  # Calls `f` with each character; returns the characters (so without a block, `chars`).
+  fn each_char(self, f: (fn(String))? = nil) -> List[String] {
+    cs = self.chars
+    if let g = f { for c in cs { g(c) } }
+    cs
   }
   fn repeat(self, n: Int) -> String { self * n }
   # Regex conveniences: `re.matches(self)`, the texts of `re.find_all(self)`, `re.replace(self, r)`
@@ -264,6 +270,11 @@ extend List[T] {
   }
   fn first(self) -> T? { self.get(0) }
   fn last(self) -> T? { self.get(-1) }
+  fn take_last(self, n: Int) -> List[T] {
+    if n <= 0 { return [] }
+    k = if n < self.length { n } else { self.length }
+    self.slice(self.length - k, k)
+  }
   fn each(self, f: fn(T)) {
     i = 0
     while i < self.length {
@@ -898,6 +909,15 @@ pub class Dir {
   native fn remove(path: String, recursive: Bool = false) -> Result[Nil, String]
   native fn exists(path: String) -> Bool
   native fn current() -> String
+  # Every file and directory under `path`, recursively, as paths that start with `path`, sorted.
+  # Symbolic links are listed but not followed.
+  native fn walk(path: String) -> Result[List[String], String]
+  # The paths matching `pattern`, sorted. In each `/`-separated component, `*` matches any run of
+  # characters, `?` one character and `[abc]` / `[a-z]` / `[!abc]` one of a set; a `**` component
+  # matches any number of directories (at the end, everything beneath, and the directory itself).
+  # Names starting with `.` match only a pattern component that starts with `.`. A relative
+  # pattern is relative to the current directory.
+  native fn glob(pattern: String) -> Result[List[String], String]
 }
 
 # Path strings. `join` uses `/`, which every supported OS accepts; the others accept the host

@@ -18,6 +18,8 @@ pub struct Codegen<'a> {
     /// Internal natives used by generated code.
     internal: FxHashMap<&'static str, u32>,
     pub errors: Vec<crate::diag::Diagnostic>,
+    /// `Program::write_checks` index for each collection method name (`None`: no check).
+    write_check_ids: FxHashMap<String, Option<u32>>,
 }
 
 struct LoopLabels {
@@ -54,7 +56,14 @@ struct FnState {
 
 impl<'a> Codegen<'a> {
     pub fn new(ck: &'a Checker, sm: &'a SourceMap) -> Self {
-        Codegen { ck, sm, prog: Program::default(), internal: FxHashMap::default(), errors: Vec::new() }
+        Codegen {
+            ck,
+            sm,
+            prog: Program::default(),
+            internal: FxHashMap::default(),
+            errors: Vec::new(),
+            write_check_ids: FxHashMap::default(),
+        }
     }
 
     fn internal_native(&mut self, name: &'static str) -> u32 {
@@ -100,7 +109,173 @@ impl<'a> Codegen<'a> {
         self.prog.globals =
             ck.globals.iter().map(|g| GlobalProto { name: g.name.clone(), is_const: g.is_const }).collect();
         self.prog.entry = ck.mods.iter().map(|m| m.main_fn).collect();
+        self.finish_rt_parts();
         (self.prog, self.errors)
+    }
+
+    /// Fills `rt_parts` for every run-time type, interning parts that are not in the table yet.
+    fn finish_rt_parts(&mut self) {
+        let mut i = 0;
+        while i < self.prog.rt_types.len() {
+            let parts: Vec<RtType> = match self.prog.rt_types[i].clone() {
+                RtType::List(e) | RtType::Set(e) | RtType::Optional(e) => vec![*e],
+                RtType::Dict(k, v) => vec![*k, *v],
+                RtType::Tuple(ts) | RtType::Union(ts) => ts,
+                _ => Vec::new(),
+            };
+            let ids = parts.into_iter().map(|t| self.rt_index(t)).collect();
+            self.prog.rt_parts.push(ids);
+            i += 1;
+        }
+    }
+
+    // ---- writes through `Dyn` ----------------------------------------------------------------
+
+    /// Whether writes into the collection `recv` evaluates to must be checked against its element
+    /// tags: its static type is `Dyn`, or a collection type with `Dyn` in its element types (as
+    /// a type test returns). A typed receiver (`List[Int]`) needs no check.
+    fn writes_through_dyn(&self, recv: &Expr) -> bool {
+        let ck = self.ck;
+        fn has_dyn(ck: &Checker, t: TyId) -> bool {
+            match ck.types.get(ck.types.shallow_resolve(t)) {
+                Ty::Dyn => true,
+                Ty::Class(_, a) | Ty::Enum(_, a) | Ty::Iface(_, a) => a.iter().any(|&x| has_dyn(ck, x)),
+                Ty::Tuple(ts) | Ty::Union(ts) => ts.iter().any(|&x| has_dyn(ck, x)),
+                _ => false,
+            }
+        }
+        match ck.types.get(ck.types.shallow_resolve(ck.ty_of(recv.id))) {
+            Ty::Dyn => true,
+            Ty::Class(builtin::LIST | builtin::SET | builtin::DICT, args) => args.iter().any(|&a| has_dyn(ck, a)),
+            _ => false,
+        }
+    }
+
+    /// The write check for collection method `name`: for each of `List`, `Dict` and `Set`
+    /// that has a mutating method of that name, the element-type template of each parameter.
+    fn write_check(&mut self, name: &str) -> Option<u32> {
+        if let Some(&c) = self.write_check_ids.get(name) {
+            return c;
+        }
+        let ck = self.ck;
+        let mut wc = WriteCheck::default();
+        for cid in [builtin::LIST, builtin::DICT, builtin::SET] {
+            // The class's own methods (the prelude's `extend List[T]`) and other extensions.
+            let mut found: Option<(FnId, Vec<(ParamId, u8)>)> = None;
+            if let Some(ci) = ck.classes.get(&cid) {
+                if let Some(&f) = ci.methods.get(name) {
+                    found = Some((f, ci.params.iter().enumerate().map(|(i, &p)| (p, i as u8)).collect()));
+                }
+            }
+            if found.is_none() {
+                for ext in &ck.exts {
+                    if let (Ty::Class(c, args), Some(&f)) = (ck.types.get(ext.target), ext.methods.get(name)) {
+                        if *c == cid {
+                            let slots = args
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, &a)| match ck.types.get(a) {
+                                    Ty::Param(p) => Some((*p, i as u8)),
+                                    _ => None,
+                                })
+                                .collect();
+                            found = Some((f, slots));
+                            break;
+                        }
+                    }
+                }
+            }
+            let Some((f, slots)) = found else { continue };
+            let func = &ck.fns[f as usize];
+            if func.self_kind != ast::SelfKind::Mut {
+                continue;
+            }
+            let params: Vec<TyId> = func.params.iter().map(|p| p.ty).collect();
+            let ids: Vec<u32> = params
+                .into_iter()
+                .map(|t| match self.elem_template(t, &slots) {
+                    Some(rt) => self.rt_index(rt),
+                    None => NO_CHECK,
+                })
+                .collect();
+            if ids.iter().all(|&i| i == NO_CHECK) {
+                continue;
+            }
+            match cid {
+                builtin::LIST => wc.list = ids,
+                builtin::DICT => wc.dict = ids,
+                _ => wc.set = ids,
+            }
+        }
+        let id = if wc == WriteCheck::default() {
+            None
+        } else {
+            self.prog.write_checks.push(wc);
+            Some(self.prog.write_checks.len() as u32 - 1)
+        };
+        self.write_check_ids.insert(name.to_string(), id);
+        id
+    }
+
+    /// The run-time type a parameter of type `t` of a collection method must have, with the
+    /// collection's type parameters (`slots`) as `RtType::Elem`; `None` if it does not involve
+    /// them (nothing to check beyond what the method checks itself) or is a function.
+    fn elem_template(&self, t: TyId, slots: &[(ParamId, u8)]) -> Option<RtType> {
+        fn conv(ck: &Checker, t: TyId, slots: &[(ParamId, u8)], uses: &mut bool) -> Option<RtType> {
+            let t = ck.types.shallow_resolve(t);
+            Some(match ck.types.get(t).clone() {
+                Ty::Param(p) => match slots.iter().find(|s| s.0 == p) {
+                    Some(&(_, k)) => {
+                        *uses = true;
+                        RtType::Elem(k)
+                    }
+                    None => RtType::Any,
+                },
+                Ty::Class(c, args) => match c {
+                    builtin::INT => RtType::Int,
+                    builtin::FLOAT => RtType::Float,
+                    builtin::BOOL => RtType::Bool,
+                    builtin::NIL => RtType::Nil,
+                    builtin::STRING => RtType::Str,
+                    builtin::LIST => RtType::List(Box::new(conv(ck, args[0], slots, uses)?)),
+                    builtin::SET => RtType::Set(Box::new(conv(ck, args[0], slots, uses)?)),
+                    builtin::DICT => RtType::Dict(
+                        Box::new(conv(ck, args[0], slots, uses)?),
+                        Box::new(conv(ck, args[1], slots, uses)?),
+                    ),
+                    _ => RtType::Class(c),
+                },
+                Ty::Enum(e, _) => RtType::Enum(e),
+                Ty::Tuple(ts) => RtType::Tuple(ts.iter().map(|&x| conv(ck, x, slots, uses)).collect::<Option<_>>()?),
+                Ty::Union(ts) => {
+                    let nil = ck.types.nil;
+                    if ts.len() == 2 && ts.contains(&nil) {
+                        let other = if ts[0] == nil { ts[1] } else { ts[0] };
+                        RtType::Optional(Box::new(conv(ck, other, slots, uses)?))
+                    } else {
+                        RtType::Union(ts.iter().map(|&x| conv(ck, x, slots, uses)).collect::<Option<_>>()?)
+                    }
+                }
+                Ty::Frozen(inner) => conv(ck, inner, slots, uses)?,
+                Ty::Fn(..) => return None,
+                _ => RtType::Any,
+            })
+        }
+        let mut uses = false;
+        let rt = conv(self.ck, t, slots, &mut uses)?;
+        uses.then_some(rt)
+    }
+
+    /// Before a call of method `name` on `recv` (registers `base`, then `n - 1` arguments) that
+    /// may write into a collection through `Dyn`: check the arguments against its tags.
+    fn check_dyn_write(&mut self, st: &mut FnState, recv: &Expr, name: &str, base: u8, n: usize) {
+        if n < 2 || !self.writes_through_dyn(recv) {
+            return;
+        }
+        if let Some(wc) = self.write_check(name) {
+            self.emit(st, encode(Op::CheckArgs, base, base + 1, (n - 1) as u8));
+            self.emit(st, wc);
+        }
     }
 
     // ---- classes -----------------------------------------------------------------------------
@@ -856,6 +1031,7 @@ impl<'a> Codegen<'a> {
                 if !self.ck.locals[*l as usize].is_cell()
                     && !st.caps.contains_key(l)
                     && !self.ck.coerce.contains_key(&e.id)
+                    && !self.ck.tag_elems.contains_key(&e.id)
                 {
                     if let Some(&r) = st.regs.get(l) {
                         return r;
@@ -1028,6 +1204,7 @@ impl<'a> Codegen<'a> {
                                 self.combine_into(st, e, *op, base + 2, value);
                             }
                         }
+                        self.check_dyn_write(st, recv, "[]=", base, 3);
                         self.call_dispatch(st, &dispatch, base, 3);
                     }
                     AssignRes::IndexGeneric => {
@@ -1043,6 +1220,9 @@ impl<'a> Codegen<'a> {
                                         self.combine_into(st, e, *op, t, value);
                                     }
                                 }
+                                if self.writes_through_dyn(recv) {
+                                    self.emit(st, encode(Op::CheckSet, o, i, t));
+                                }
                                 self.emit(st, encode(Op::SetIndex, o, i, t));
                             }
                             ExprKind::Member { recv, name, .. } => {
@@ -1053,6 +1233,9 @@ impl<'a> Codegen<'a> {
                                 self.emit(st, encode_bx(Op::LoadK, k, kc));
                                 let t = self.alloc(st);
                                 self.expr_to(st, value, t);
+                                if self.writes_through_dyn(recv) {
+                                    self.emit(st, encode(Op::CheckSet, o, k, t));
+                                }
                                 self.emit(st, encode(Op::SetIndex, o, k, t));
                             }
                             _ => {}
@@ -1152,6 +1335,11 @@ impl<'a> Codegen<'a> {
         self.expr_inner(st, e, dst);
         if self.ck.coerce.get(&e.id) == Some(&Coercion::IntToFloat) {
             self.emit(st, encode(Op::IToF, dst, dst, 0));
+        }
+        if let Some(rt) = self.ck.tag_elems.get(&e.id) {
+            let id = self.rt_index(rt.clone());
+            self.emit(st, encode(Op::TagElems, dst, 0, 0));
+            self.emit(st, id);
         }
     }
 
@@ -1957,6 +2145,13 @@ impl<'a> Codegen<'a> {
                     }
                 }
                 self.fill_args(st, base + has_recv as u8, &vals);
+                if let (true, Some(rv)) = (has_recv, recv) {
+                    let name = match &dispatch {
+                        Dispatch::Dynamic(name, _) => name.clone(),
+                        Dispatch::Static(f) | Dispatch::Virtual(f, _) => ck.fns[*f as usize].name.clone(),
+                    };
+                    self.check_dyn_write(st, rv, &name, base, n);
+                }
                 self.call_dispatch(st, &dispatch, base, n);
                 if let Some(j) = skip {
                     self.patch(st, j);

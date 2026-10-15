@@ -477,7 +477,7 @@ impl Mutator {
 
     fn alloc_table(&mut self, table: DictTable, cls: &'static Class) -> Value {
         let h = self.alloc_raw(std::mem::size_of::<DictObj>(), cls);
-        unsafe { std::ptr::write(std::ptr::addr_of_mut!((*(h as *mut DictObj)).table), table) };
+        unsafe { DictObj::init(h as *mut DictObj, table) };
         Value::from_ptr(h)
     }
 

@@ -290,7 +290,9 @@ Calls always use parentheses, except that a zero-argument method may be called a
 (`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. `obj.f(x)` calls the
 method `f`; to call a function stored in a field, wrap the callee in parentheses: `(obj.f)(x)`. Any
 parenthesized callee (`(xs[0])(x)`, `(make())(x)`) is evaluated first and then called. Closures capture
-variables by reference.
+variables by reference. A block passed for an optional function parameter
+(`f: (fn(T) -> Bool)? = nil`) is typed by that function type, so its parameters need no annotations;
+`xs.count` and `xs.each_slice(2)` take such optional blocks.
 
 The names in one parameter list, block parameter list, type parameter list or pattern must differ
 (E0228); only `_` may repeat.
@@ -549,9 +551,9 @@ Annotate the parameter to use any of these.
 - What is not covered: other allocations inside the runtime get one retry with the headroom released
   and then a `MemoryError` at the next safepoint. If that retry fails too, the process aborts
   (`memory allocation of N bytes failed`). These include the scratch buffer of a stable sort (which
-  `sorted` checks can be had just before), the text `Json.stringify` and `Csv.format` build, the keys
-  of a parsed JSON object, and the collector's mark stack, which needs 8 bytes for each object in
-  the longest list it marks (a list of 100,000 strings: 800 KB). The same happens when the reserve is used up before a
+  `sorted` checks can be had just before), the text `Json.stringify` and `Csv.format` build, and the keys
+  of a parsed JSON object. (The collector's own marking does not abort: when its mark stack cannot
+  grow, it rescans instead.) The same happens when the reserve is used up before a
   safepoint is reached. The retry comes from the global allocator `catallaxy_gc::Allocator`, which
   `catx` and the C API libraries use; a Rust program embedding the runtime gets it only if it opts in
   (section 11). On Linux with memory overcommit, and under memory pressure on macOS, a program that
@@ -640,11 +642,23 @@ OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse`
 of range (`doc["users"][5]`). Convert with `as?`:
 `name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. JSON objects parse to records that behave exactly like `Dict[String, Dyn]` (`as? Dict[String, Dyn]` succeeds); records parsed with the same keys share a hidden class, so `d.name` is served from a per-site cache. `Json.parse` reads a number with no fraction or exponent as an `Int` of any size, so `123456789012345678901234567890` stays exact and `as? Int` succeeds; any other number (`1.5`, `1e3`) is a `Float`. `Json.stringify` writes object keys in sorted order and integers of any size (including big integers) as JSON numbers; it writes a class instance as an object of its fields, or as whatever its `to_json` method returns (`Deque` writes an array).
 
-Generic types are erased at runtime, so a call through `Dyn` can put a value of the wrong type into
-typed data: `d: Dyn = xs` then `d.push(5)` adds an `Int` to a `List[String]`. Such a value is caught
-where it is used as its static type (a standard-library method's receiver or argument, a field
-access, a list or tuple access, a method call), with a `TypeError` panic that names the
-expected and actual types: `xs[0].length` panics with `TypeError: expected String, got Int`.
+A `List`, `Set` or `Dict` converted to `Dyn` where its static type is known (`d: Dyn = xs` with
+`xs: List[String]`, an argument or element of type `Dyn`; also inside a tuple or an optional) keeps its
+element types: a write through `Dyn` that does not fit them (`d.push(5)`, `d[0] = 5`, `d.insert(0, 5)`,
+`d.concat([5])`, `d["k"] = 5`, `d.k = 5`, `set.add(5)`, and the other mutating methods) panics at the
+write with `TypeError: cannot store a value of type Int in a List[String] through Dyn`. So does a write
+through the `List[Dyn]` (or `Dict[String, Dyn]`, ...) a type test returns. Type tests check such a
+collection by its element types, not its current elements: an empty `List[String]` is no `List[Int]`,
+and any list is a `List[Dyn]`. A `List[Dyn]` converted to `Dyn` takes any element until a test such as
+`d as? List[Int]` succeeds; from then on its elements must be `Int`s, as the typed view expects.
+
+Generic types are otherwise erased at runtime, so a value of the wrong type can still reach typed data
+through `Dyn` where the element types are not known: a collection that reached `Dyn` inside generic code
+(where its element type is a type parameter), one nested in another collection, one from `Json.parse`
+narrowed by a test, or an instance of a generic class (#219). Such a value is caught where it is used as its
+static type (a standard-library method's receiver or argument, a field access, a list or tuple access, a
+method call), with a `TypeError` panic that names the expected and actual types:
+`xs[0].length` panics with `TypeError: expected String, got Int`.
 
 ## 10. Tooling
 
@@ -670,9 +684,12 @@ path that does not exist is an error (exit status 2), and so is finding no tests
 must fail `catx check` with those diagnostic codes (if every code is a warning, `W...`, it need only
 report them). Any other file must run with standard output
 equal to its `.out` file and exit with status 0, or with the status given by a `# exit: N` line; a
-`.in` file next to it is fed to standard input. A program still running after `CATX_TEST_TIMEOUT`
-seconds (default 120) is killed and fails with its output so far. The exit status is 1 if anything
-failed.
+`.in` file next to it is fed to standard input. Line endings are not compared (`\r\n` in the `.out`
+file or the output counts as `\n`). A difference is shown as a unified diff of the expected and
+actual output, with tabs as `→`, carriage returns as `␍`, other control characters as `\u{..}` and
+trailing spaces as `·`, and a missing final newline noted. A program still running after
+`CATX_TEST_TIMEOUT` seconds (default 120) is killed and fails with its output so far. The exit
+status is 1 if anything failed.
 
 `catx fmt` rewrites files in place (`catx fmt -` filters stdin to stdout). It keeps comments and the
 program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
@@ -680,6 +697,8 @@ program's line structure; it re-indents with two spaces, normalizes spacing betw
 would change and exits with status 1 if there are any. Files with syntax errors are left untouched and
 reported (exit status 2). When walking a directory, `fmt` skips `reject/` directories, whose
 conformance programs are meant to be wrong; a file named on the command line is always formatted.
+A file keeps its line endings: one whose first line ends in `\r\n` is written with `\r\n`
+throughout, any other with `\n`.
 
 `catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
 unsaved edits. It provides:

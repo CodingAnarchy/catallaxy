@@ -81,6 +81,30 @@ A `spawn` or `par_map` block that captures an owned value by reference is a comp
 
 **`Dyn` escape hatch.** Parsed JSON, plugin data and FFI results can be typed `Dyn`. Operations on `Dyn` are checked at runtime, and turning a `Dyn` into a typed value takes `as?` or a decoder. Using `Dyn` is always visible in the source.
 
+**Writes through `Dyn` (issue #160).** Generics are erased, so a typed collection converted to `Dyn` could be filled with values of the wrong type: `xs: List[String] = []; d: Dyn = xs; d.push(5)`. Typed code then failed far from the cause, with a `TypeError` where it read the `Int` back. A type test had the same hole: `d as? List[Int]` returned an alias that a later `(d as? List[Dyn])!.push("s")` broke, and an empty list passed a test for any element type. We considered three fixes:
+
+1. **Run-time element tags.** A collection records its element types, and a write through `Dyn` is checked against them.
+2. **Read-only `Dyn` views.** A typed collection can't be written through `Dyn` at all.
+3. **Copy on conversion.** Converting to `Dyn` copies the collection, so no alias exists.
+
+We chose tags. Read-only views would also need per-object state, to tell a `List[Dyn]` (which `Dyn` code must be able to write) from a `List[Int]`. They would reject correct `Dyn` code, and they don't fix type tests. Copying breaks identity: mutations through `Dyn` would be lost. It costs O(n) at every conversion, and it would need deep copies for nested collections.
+
+How the tags work:
+
+- **Storage.** A list keeps its tag in the high half of its embedded buffer's capacity word. That word is written once per list and never moves, so list objects keep their size classes, and capacity reads mask off the tag. A dict or set keeps two tags (key and value) in one extra word. A tag is a run-time type id plus one; 0 means unknown.
+- **When a tag is set.** Only where a value is converted to `Dyn` and its static collection type is fully known (`d: Dyn = xs`, an argument or element of type `Dyn`). The checker records those conversions, and the code generator emits a `TagElems` instruction there. Tuple components and optional values are tagged too. Typed code never sets, reads or checks a tag: creating, pushing to or indexing a `List[Int]` runs the same instructions as before.
+- **Which writes are checked.** Calls that may write: `push`, `insert`, `[]=`, `concat`, `add`, and every other mutating `List`, `Dict` or `Set` method with an element-typed parameter, plus `d[k] = v` and `d.key = v`. They are checked (`CheckArgs`, `CheckSet`) only when the receiver's static type is `Dyn`, or a collection type with `Dyn` in its element types, which is what a type test like `as? List[Dyn]` returns. A write that doesn't fit is a `TypeError` naming the value's type and the collection's.
+- **Type tests.** A tagged collection is tested by its tags, without walking the elements. An empty `List[String]` is no `List[Int]`, and a `List[Int]` is no `List[Int?]` (generic types are invariant). A collection tagged `Dyn` (a `List[Dyn]` converted to `Dyn`) is tested element by element. If it passes, its tags narrow to the tested types, so the typed view the test returned stays valid.
+
+**Cost.** Typed code paths gain no checks; their only extra work is the mask on capacity reads, and dicts and sets are one word larger. Measured on `bench/` and a typed list, dict and set micro-benchmark: within noise (numbers in the PR that closed #160). `Dyn` paths pay a tag store at conversion and a tag load (plus a type check when tagged) per checked write.
+
+**Not covered yet (#219).**
+- Collections that reach `Dyn` inside generic code, where the element type is a type parameter. They stay untagged and their `Dyn` writes stay unchecked, as before.
+- Collections nested inside a tagged collection.
+- Collections that reach `Dyn` through an interface value.
+- Untagged collections from natives such as `Json.parse`, which a type test can't narrow.
+- Instances of user generic classes (`Box[Int]` through `Dyn` and back as `Box`). These need type-argument tags of their own.
+
 **Tooling for people and agents.** `check --json` emits diagnostics with exact spans, error codes and machine-applicable fix suggestions. An LSP server, a deterministic formatter, and `check` fast enough to run on every save (target: under 200 ms for 10k lines) are part of the language, not afterthoughts.
 
 ## Concurrency model
@@ -152,8 +176,8 @@ v1 uses a non-moving, parallel, stop-the-world mark-sweep collector with thread-
 **Collection cycle.**
 
 1. The requesting thread sets `gc_requested` and waits until every thread is parked or `in_native`.
-2. All parked threads become mark workers, sharing a work-stealing deque (crossbeam). Roots are split per thread.
-3. Marking flips the mark bit with an atomic `fetch_or`; whoever sets it pushes the object.
+2. All parked threads, and the collector's helper threads, become mark workers. Each one works from a private stack and every 32 objects moves up to 16 entries to its small crossbeam deque, if that deque is empty, for idle workers to steal. The collecting thread starts with what the roots reach.
+3. Marking sets the mark color with an atomic compare-and-swap, and whoever sets it pushes the object. Objects that hold no references (strings, big integers, builders, native handles: `GcVTable::leaf`) are only marked, never pushed. Marking runs when memory is short, so it must not abort for want of memory. A mark stack grows only by a fallible reservation, and if that fails the object is left unmarked and the worker records an overflow. Once the workers are done, the collector traces the roots and every marked object again, alone, until a pass ends without overflow; each pass marks at least what its stack held. A minor collection does the same with its roots, its remembered set (traced in full, since the written-range scan forgets what it visited) and its minor-marked young objects. `CATX_GC_STRESS` caps mark stacks at 64 entries so that the stress runs exercise this path.
 4. Threads resume immediately. Sweeping happens lazily: a page is swept the next time a thread wants to allocate from it.
 5. Any page still unswept is swept at the start of the next collection. At that point every wholly empty segment is known, and the collector returns them to the OS (`munmap`, or `VirtualFree` on Windows). It keeps enough empty pages for the allocation budget until the following collection, so a program in a steady state does not unmap segments only to map them again.
 

@@ -1,0 +1,15 @@
+[".env", ".git", ".git/HEAD", "a.cx", "b.txt", "docs", "docs/x1.md", "docs/x2.md", "docs/y.md", "src", "src/lib", "src/lib/notes.md", "src/lib/util.cx", "src/main.cx"]
+true
+["a.cx"]
+["a.cx", "src/lib/util.cx", "src/main.cx"]
+["docs/x1.md", "docs/x2.md", "docs/y.md", "src/lib/notes.md"]
+["docs/x1.md", "docs/x2.md"]
+["docs/x1.md", "docs/x2.md"]
+["docs/y.md"]
+["a.cx", "b.txt", "docs", "src"]
+[".env", ".git"]
+["src/lib"]
+["", "a.cx", "b.txt", "docs", "docs/x1.md", "docs/x2.md", "docs/y.md", "src", "src/lib", "src/lib/notes.md", "src/lib/util.cx", "src/main.cx"]
+[]
+true
+false

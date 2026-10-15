@@ -97,3 +97,22 @@ fn unknown_options_are_rejected() {
     assert!(err.contains("unknown option `--frobnicate`"), "{err}");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn crlf_out_files_pass_and_failures_show_a_unified_diff() {
+    let dir = scratch_dir("crlf");
+    // A checkout with `core.autocrlf` turns the expected output's `\n` into `\r\n`.
+    std::fs::write(dir.join("hi.cx"), "puts(\"hi\")\r\nputs(\"there\")\r\n").unwrap();
+    std::fs::write(dir.join("hi.out"), "hi\r\nthere\r\n").unwrap();
+    let (code, out, err) = catx_test(&dir, &["hi.cx"]);
+    assert_eq!(code, 0, "{out}{err}");
+
+    // A real difference is a unified diff, with the invisible trailing space made visible.
+    std::fs::write(dir.join("space.cx"), "puts(\"a\")\nputs(\"b \")\nputs(\"c\")\n").unwrap();
+    std::fs::write(dir.join("space.out"), "a\nb\nc\n").unwrap();
+    let (code, out, err) = catx_test(&dir, &["space.cx"]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(out.contains("--- ") && out.contains("space.out\n+++ output\n"), "{out}");
+    assert!(out.contains("@@ -1,3 +1,3 @@\n a\n-b\n+b·\n c\n"), "{out}");
+    std::fs::remove_dir_all(&dir).ok();
+}

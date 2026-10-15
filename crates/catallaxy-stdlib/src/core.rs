@@ -351,18 +351,50 @@ fn str_index_of(_: &mut Vm, a: &[Value]) -> RtResult<Value> {
     })
 }
 
+/// `s.split(sep = "", limit = 0)`: `sep` is a string (empty: runs of whitespace) or a `Regex`;
+/// a positive `limit` caps the number of pieces, the last holding the rest of the text.
 fn str_split(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let x = s(a[0])?;
-    let sep = match arg(a, 1) {
+    let limit = match arg(a, 2) {
+        Some(v) => usize::try_from(int(v)?).ok().filter(|&n| n > 0),
+        None => None,
+    };
+    vm.m.collect_if_refused();
+    let sep = arg(a, 1);
+    if let Some(re) = sep.filter(|&v| str_of(v).is_none()) {
+        let re = crate::script::regex_of(re)?;
+        return match limit {
+            Some(n) => new_str_list(vm, re.splitn(x, n)),
+            None => new_str_list(vm, re.split(x)),
+        };
+    }
+    let sep = match sep {
         Some(v) => s(v)?,
         None => "",
     };
-    vm.m.collect_if_refused();
-    if sep.is_empty() {
-        new_str_list(vm, x.split_whitespace())
-    } else {
-        new_str_list(vm, x.split(sep))
+    match (sep.is_empty(), limit) {
+        (true, None) => new_str_list(vm, x.split_whitespace()),
+        (true, Some(n)) => new_str_list(vm, split_whitespace_n(x, n)),
+        (false, None) => new_str_list(vm, x.split(sep)),
+        (false, Some(n)) => new_str_list(vm, x.splitn(n, sep)),
     }
+}
+
+/// The words of `x` between runs of whitespace, at most `n` of them: the last is the rest of the
+/// text from its first character on (trailing whitespace included).
+fn split_whitespace_n(x: &str, n: usize) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = x.trim_start();
+    while !rest.is_empty() {
+        if out.len() + 1 == n {
+            out.push(rest);
+            break;
+        }
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        out.push(&rest[..end]);
+        rest = rest[end..].trim_start();
+    }
+    out
 }
 
 fn hash(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
