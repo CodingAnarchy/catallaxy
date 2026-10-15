@@ -153,12 +153,12 @@ fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
         let closure = child.extra_roots()[0];
         // A Rust panic in the runtime (an internal error) must not end the OS thread silently:
         // joiners would wait forever, and the collector would wait for a thread that is gone.
-        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let run = crate::catch_internal(|| {
             let result = child.call_value(closure, &[]);
             // Fibers the thread started finish before the thread does.
             crate::fiber::drain(&mut child);
             result
-        }));
+        });
         let failed = |msg: String, trace: &[String]| {
             // `join` hands the message to the program; a thread nobody joins is
             // reported (with its trace) when the program ends.
@@ -181,9 +181,12 @@ fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
             Ok(Err(Trap::Unwind { .. })) => ThreadOutcome::Panicked("internal error: stray non-local exit".into()),
             Err(payload) => {
                 // Release the object locks the thread's frames held, so other threads can go on.
-                let trace = child.recover_from_internal_panic();
+                let mut trace = child.recover_from_internal_panic();
                 crate::fiber::abandon();
                 let msg = internal_error_message(&*payload).unwrap_or_else(|| "internal error".into());
+                if let Some(loc) = crate::take_rust_location() {
+                    trace.insert(0, format!("{loc} (Rust)"));
+                }
                 failed(msg, &trace)
             }
         };
@@ -519,6 +522,12 @@ impl RootSource for JobRoots {
     }
 }
 
+/// Parallel jobs in the pool's roots: started and not yet finished (tests).
+#[doc(hidden)]
+pub fn pending_parallel_jobs() -> usize {
+    POOL.jobs.lock().len()
+}
+
 fn mark(t: &mut Tracer, v: Value) {
     if v.is_ptr() {
         t.mark(v.as_ptr());
@@ -538,7 +547,7 @@ fn worker_main() {
         };
         // `worker_loop` returns only by unwinding; the task's job already has its error and its
         // count (see `run_task`).
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker_loop(&mut vm)));
+        let _ = crate::catch_internal(|| worker_loop(&mut vm));
         vm.recover_from_internal_panic();
         crate::fiber::abandon();
         vm.extra_roots().clear();
@@ -578,11 +587,13 @@ fn run_task(vm: &mut Vm, task: Task) {
     let mut internal = None;
     if !failed {
         let depth = vm.frame_depth();
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_range(vm, job, task.start, task.end, task.chunk)
-        }));
+        let r = crate::catch_internal(|| run_range(vm, job, task.start, task.end, task.chunk));
         let r = r.unwrap_or_else(|payload| {
-            vm.panic_trace = Some(vm.backtrace());
+            let mut trace = vm.backtrace();
+            if let Some(loc) = crate::take_rust_location() {
+                trace.insert(0, format!("{loc} (Rust)"));
+            }
+            vm.panic_trace = Some(trace);
             let msg = internal_error_message(&*payload).unwrap_or_else(|| "internal error".into());
             internal = Some(payload);
             Err(Trap::Panic(msg))
@@ -602,14 +613,65 @@ fn run_task(vm: &mut Vm, task: Task) {
             }
         }
     }
-    let n = task.end - task.start;
+    task_done(&task);
+    if let Some(payload) = internal {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+/// Counts a task of its job done.
+fn task_done(task: &Task) {
+    let (job, n) = (&task.job, task.end - task.start);
     if job.remaining.fetch_sub(n, Ordering::AcqRel) == n {
         let (m, cv) = &job.done;
         *m.lock() = true;
         cv.notify_all();
     }
-    if let Some(payload) = internal {
-        std::panic::resume_unwind(payload);
+}
+
+/// Keeps a job in the pool's roots until it is finished, and takes it out however `run_job`
+/// ends, including by a Rust panic (an internal error) unwinding out of a task the calling
+/// thread ran (issue #198): left there, the job would be a leak and keep its values alive.
+struct JobInPool {
+    job: Arc<Job>,
+    rec: Arc<catallaxy_gc::ThreadRecord>,
+}
+
+impl Drop for JobInPool {
+    fn drop(&mut self) {
+        let job = &self.job;
+        if job.remaining.load(Ordering::Acquire) != 0 {
+            // Unwinding with tasks of the job outstanding. Workers may still be running some,
+            // reading the job's values, so it stays rooted until they finish. Failing the job
+            // makes the rest quick to skip. This thread's VM is not trusted any more, so it runs
+            // no tasks: it counts its job's queued tasks done unrun (or a failed job's, as
+            // `run_task` would), puts others back for the workers, and waits in native state.
+            {
+                let mut e = job.error.lock();
+                if e.is_none() {
+                    *e = Some(("internal error on the calling thread".into(), Vec::new()));
+                }
+            }
+            while job.remaining.load(Ordering::Acquire) != 0 {
+                match POOL.injector.steal() {
+                    Steal::Success(t) if Arc::ptr_eq(&t.job, job) || t.job.error.lock().is_some() => task_done(&t),
+                    Steal::Success(t) => {
+                        POOL.injector.push(t);
+                        let _g = POOL.signal.0.lock();
+                        POOL.signal.1.notify_all();
+                    }
+                    Steal::Retry => {}
+                    Steal::Empty => catallaxy_gc::blocking(&self.rec, || {
+                        let (m, cv) = &job.done;
+                        let mut d = m.lock();
+                        if !*d {
+                            cv.wait_for(&mut d, std::time::Duration::from_millis(1));
+                        }
+                    }),
+                }
+            }
+        }
+        POOL.jobs.lock().retain(|j| !Arc::ptr_eq(j, job));
     }
 }
 
@@ -695,6 +757,7 @@ fn run_job(vm: &mut Vm, kind: ParKind, f: Value, items: Vec<Value>, identity: Va
         done: (Mutex::new(n == 0), Condvar::new()),
     });
     pool.jobs.lock().push(job.clone());
+    let in_pool = JobInPool { job: job.clone(), rec: vm.m.rec.clone() };
     for c in 0..nchunks {
         let start = c * chunk_size;
         let end = ((c + 1) * chunk_size).min(n);
@@ -738,7 +801,7 @@ fn run_job(vm: &mut Vm, kind: ParKind, f: Value, items: Vec<Value>, identity: Va
             }
         }
     }
-    pool.jobs.lock().retain(|j| !Arc::ptr_eq(j, &job));
+    drop(in_pool);
     if let Some((msg, mut trace)) = job.error.lock().take() {
         // The trace reads the same whichever thread ran the failing element.
         trace.extend(vm.backtrace());
