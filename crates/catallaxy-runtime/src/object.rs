@@ -524,11 +524,17 @@ impl ListObj {
     /// nothing (a slot that held a young reference before is still in the range).
     #[inline(always)]
     unsafe fn note_store(&self, buf: *mut WordBuf, i: usize, v: Value) {
-        if v.header().is_some_and(|h| h.is_young())
-            && !self.header.is_young()
-            && !WordBuf::range_covers(WordBuf::range_word(buf), i, i + 1)
-        {
-            self.widen_written(buf, i, i + 1);
+        if v.header().is_some_and(|h| h.is_young()) && !self.header.is_young() {
+            let r = WordBuf::range_word(buf);
+            if !WordBuf::range_covers(r, i, i + 1) {
+                // A buffer with cards: mark the slot's card inline. (Only out-of-line buffers
+                // have cards; the word before the inline buffer is the length, never `CARDED`.)
+                if r == crate::buf::CARDED {
+                    WordBuf::mark_card(buf, i);
+                } else {
+                    self.widen_written(buf, i, i + 1);
+                }
+            }
         }
     }
 
