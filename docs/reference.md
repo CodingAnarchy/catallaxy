@@ -744,7 +744,8 @@ method call), with a `TypeError` panic that names the expected and actual types:
 
 `catx run file.cx [args]`, `catx check [--json] paths...`, `catx fmt [--check] paths...`,
 `catx fix [--dry-run] paths...`, `catx test [paths...]`, `catx repl`, `catx lsp`,
-`catx disasm file.cx [function]`, `catx version`. `check`, `fmt` and `fix` take files and
+`catx disasm file.cx [function]`, `catx version`. `catx file.cx [args]` (a first argument ending
+in `.cx`) is short for `catx run file.cx [args]`. `check`, `fmt` and `fix` take files and
 directories; a directory stands for every `*.cx` file under it, skipping hidden directories,
 `target/`, and programs meant to fail: `reject/` directories and files whose first line is
 `# expect: ...` (see `catx test` below). A file named on the command line is always processed.

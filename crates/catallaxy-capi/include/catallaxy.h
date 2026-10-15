@@ -42,7 +42,7 @@ typedef cx_status (*cx_native)(cx_vm *vm, const cx_value *args, size_t nargs, cx
  * class C). Returns 0, or -1 if the name is invalid or the 256-native table is full. Call before
  * running a program. */
 int cx_register(const char *name, cx_native f, void *user);
-/* Sets the program's command-line arguments (`ARGS` in Catallaxy). Call before running. */
+/* Sets the program's command-line arguments (what `args()` returns in Catallaxy). Call before running. */
 void cx_set_args(int argc, const char *const *argv);
 /* Compiles and runs a file / source text. Returns the program's exit code; compile errors are
  * printed to stderr and return 2. */
