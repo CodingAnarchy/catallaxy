@@ -9,6 +9,7 @@ pub use conc::{pending_parallel_jobs, report_unjoined_panics};
 mod core;
 mod data;
 pub mod fiber;
+mod json;
 mod net;
 mod script;
 mod sys;
