@@ -62,6 +62,12 @@ async function run() {
     assert.match(text, /List\[Shape\]/);
   });
 
+  await check("hover shows documentation comments", async () => {
+    const h = await exec("vscode.executeHoverProvider", uri, posOf(doc, "ByArea.new(s)", 0, 1));
+    const text = h.flatMap((x) => x.contents.map((c) => c.value || c)).join("\n");
+    assert.match(text, /A wrapper that orders shapes by area/);
+  });
+
   await check("diagnostics appear for an error and clear when it is undone", async () => {
     const end = doc.positionAt(doc.getText().length);
     const edit = new vscode.WorkspaceEdit();

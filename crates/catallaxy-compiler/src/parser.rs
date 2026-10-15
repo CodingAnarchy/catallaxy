@@ -1736,8 +1736,9 @@ pub fn doc_markdown(lines: &[&str]) -> String {
 struct Docs<'a> {
     src: &'a str,
     line_starts: Vec<u32>,
-    /// The comment that is alone on each line (text after `#`, one space dropped), by line.
-    lines: rustc_hash::FxHashMap<usize, &'a str>,
+    /// The comment that is alone on each line (text after `#`, one space dropped), by line;
+    /// `None` for a directive, which is skipped.
+    lines: rustc_hash::FxHashMap<usize, Option<&'a str>>,
 }
 
 impl<'a> Docs<'a> {
@@ -1747,9 +1748,9 @@ impl<'a> Docs<'a> {
         let mut d = Docs { src, line_starts, lines: Default::default() };
         for c in comments {
             let line = d.line(c.span.start);
-            if d.alone_from(c.span.start) && !is_directive(&c.text) {
+            if d.alone_from(c.span.start) {
                 let t = c.text.strip_prefix('#').unwrap_or(&c.text);
-                d.lines.insert(line, t.strip_prefix(' ').unwrap_or(t));
+                d.lines.insert(line, (!is_directive(&c.text)).then(|| t.strip_prefix(' ').unwrap_or(t)));
             }
         }
         d
@@ -1778,7 +1779,8 @@ impl<'a> Docs<'a> {
         while line > 0 {
             line -= 1;
             match self.lines.get(&line) {
-                Some(t) => out.push(t),
+                Some(Some(t)) => out.push(t),
+                Some(None) => {}
                 None => break,
             }
         }
@@ -2016,6 +2018,54 @@ mod tests {
         let (m, d) = parse(src, 0, &mut id);
         assert!(d.is_empty(), "{src}\n{d:#?}");
         m
+    }
+
+    #[test]
+    fn attaches_documentation_comments() {
+        let m = ok("# expect: W0001
+# The file.
+
+# Adds one.
+#
+#   inc(1) # 2
+# allow(W0004)
+pub fn inc(n: Int) -> Int { n + 1 }
+fn bare() {} # trailing, not a doc
+# A box.
+class B {
+  # Width.
+  w: Int
+  # Area.
+  fn area(self) -> Int { self.w }
+  const K = 1
+}
+enum E {
+  # First.
+  A, B
+}
+# Spaced
+
+const C = 2
+");
+        let doc = |i: usize| match &m.items[i] {
+            Item::Fn(f) => f.doc.clone(),
+            Item::Class(c) => c.doc.clone(),
+            Item::Enum(e) => e.doc.clone(),
+            Item::Const(k) => k.doc.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(doc(0).as_deref(), Some("Adds one.\n\n```catallaxy\ninc(1) # 2\n```"));
+        assert_eq!(doc(1), None);
+        assert_eq!(doc(2).as_deref(), Some("A box."));
+        let Item::Class(c) = &m.items[2] else { panic!() };
+        assert_eq!(c.fields[0].doc.as_deref(), Some("Width."));
+        assert_eq!(c.methods[0].doc.as_deref(), Some("Area."));
+        assert_eq!(c.consts[0].doc, None);
+        let Item::Enum(e) = &m.items[3] else { panic!() };
+        assert_eq!(e.variants[0].doc.as_deref(), Some("First."));
+        // `B` does not start its line.
+        assert_eq!(e.variants[1].doc, None);
+        assert_eq!(doc(4), None);
     }
 
     #[test]
