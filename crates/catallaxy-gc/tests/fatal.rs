@@ -27,7 +27,8 @@ unsafe fn trace_obj(obj: *const Header, t: &mut Tracer) {
 unsafe fn size_obj(_: *const Header) -> usize {
     std::mem::size_of::<Obj>()
 }
-static VT: GcVTable = GcVTable { trace: trace_obj, finalize: None, size: size_obj, trace_remembered: None };
+static VT: GcVTable =
+    GcVTable { trace: trace_obj, finalize: None, size: size_obj, trace_remembered: None, leaf: false };
 
 struct Roots(*const Vec<*mut Obj>);
 impl RootSource for Roots {

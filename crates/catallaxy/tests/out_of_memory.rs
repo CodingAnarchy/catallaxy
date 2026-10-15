@@ -128,6 +128,40 @@ grow()
     check(&o, &[OOM], "after: 999999", &[OOM], "grow");
 }
 
+/// Collections run while large containers are live: a list of 200,000 strings and one of
+/// 100,000 nested lists, which marking used to push one entry each onto a mark stack whose
+/// growth could abort the process (issue #139). Now strings are marked without being pushed,
+/// and a stack that cannot grow makes the collection rescan instead.
+#[test]
+fn marking_large_containers() {
+    let src = r#"class Node {
+  value: Int
+  next: Node?
+}
+fn grow() -> Int {
+  head: Node? = nil
+  n = 0
+  while true {
+    head = Node.new(n, head)
+    n += 1
+  }
+  n
+}
+words = (0...200_000).to_list().map { |i| "w#{i}" }
+nested = (0...100_000).to_list().map { |i| [[i], [i + 1]] }
+t = spawn { grow() }
+match t.join() {
+  Ok(n) => puts("grew to #{n}")
+  Err(e) => puts("join: #{e}")
+}
+gc()
+puts("after: #{words.length + nested.length + nested[99_999][1][0]}")
+grow()
+"#;
+    let o = run_limited("marking.cx", src);
+    check(&o, &[OOM], "after: 400000", &[OOM], "grow");
+}
+
 /// Strings: a concatenation and a `StringBuilder` grown until the allocator refuses.
 #[test]
 fn strings() {
@@ -274,11 +308,6 @@ grow_list()
 /// (`cannot allocate ...`, `cannot read ...`), or the list the program keeps them in (`cannot
 /// grow a list ...`).
 ///
-/// No list in these programs holds more than a few thousand objects. Marking a list pushes the
-/// objects it holds on the collector's mark stack, whose growth is not checked: a collection
-/// that runs while memory is exhausted could abort on a list of a hundred thousand strings.
-/// Results are kept in a linked list whose `next` field comes first, so that marking it does
-/// not stack up one entry per node.
 const NATIVE: [&str; 2] = ["MemoryError: cannot ", OOM];
 
 /// Strings split into lists: `split`, `chars` and `lines`.

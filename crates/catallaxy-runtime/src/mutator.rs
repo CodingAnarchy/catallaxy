@@ -348,6 +348,28 @@ impl Mutator {
         }
     }
 
+    /// For a native that allocates much and keeps everything it built rooted (so it may
+    /// collect), now and then: holds its allocations to the heap limit, which would otherwise
+    /// only see them once it returns (issue #158). Takes part in a pending major collection;
+    /// if the young objects the thread allocated since its last minor collection, on top of
+    /// the live heap, would pass the limit, collects to measure them; then raises the
+    /// `MemoryError` a collection left, as the interpreter's safepoints do. It runs no minor
+    /// collection: those wait for the native to return, as they would without this.
+    pub fn check_heap_limit(&self) -> RtResult<()> {
+        if catallaxy_gc::is_gc_requested() {
+            catallaxy_gc::safepoint_slow(&self.rec);
+        }
+        // SAFETY: only this (running) thread touches its heap outside of collections.
+        let young = unsafe { (*self.heap).young_bytes() };
+        if catallaxy_gc::limits::check_cap(young).is_err() {
+            catallaxy_gc::collect_to_free(&self.rec);
+        }
+        match catallaxy_gc::limits::take_pending_error() {
+            Some(msg) => Err(Trap::Panic(msg)),
+            None => Ok(()),
+        }
+    }
+
     /// An empty vector with room for exactly `n` items. If the allocator refuses, collects
     /// (garbage may hold the memory) and tries once more, then raises a `MemoryError`. For
     /// natives that hold no unrooted values yet: their arguments are rooted.

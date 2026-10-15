@@ -1,0 +1,22 @@
+# Prelude methods that accumulate with `concat` (#140). `crates/catallaxy/tests/linear_time.rs`
+# runs them on 1M-item results.
+xs = (0...5000).to_list()
+ys = xs.flat_map { |x| [x, x] }
+puts("#{ys.length} #{ys[9999]}")
+zs = xs.lazy().flat_map { |x| [x, -x] }.to_list()
+puts("#{zs.length} #{zs[9999]}")
+nested = xs.map { |x| [x, x + 1] }
+flat = nested.flatten()
+puts("#{flat.length} #{flat[9999]}")
+flat.delete_if { |x| x % 2 == 0 }
+puts("#{flat.length} #{flat[0]}")
+both = xs + xs
+puts(both.length)
+r = (0...100).flat_map { |i| List.filled(100, i) }
+puts("#{r.length} #{r[9999]}")
+words = ["ab", "cde"].flat_map { |w| w.chars() }
+puts(words)
+puts([[1], [], [2, 3]].flatten())
+empty: List[Int] = []
+puts(empty.flat_map { |x| [x] })
+puts(xs.flat_map { |x| if x % 1000 == 0 { [x] } else { [] } })

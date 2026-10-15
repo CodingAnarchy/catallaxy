@@ -195,6 +195,9 @@ fn run_program(program: &Program) -> i32 {
                 Err(RtTrap::Exit(code)) => {
                     catallaxy_stdlib::flush();
                     catallaxy_stdlib::report_unjoined_panics();
+                    if code == 0 && catallaxy_stdlib::stdout_broken() {
+                        return Some(catallaxy_stdlib::BROKEN_PIPE_STATUS);
+                    }
                     return Some(code);
                 }
                 Err(RtTrap::Unwind { .. }) => {
@@ -232,6 +235,7 @@ fn run_program(program: &Program) -> i32 {
     }
     catallaxy_stdlib::flush();
     catallaxy_stdlib::report_unjoined_panics();
+    let status = if catallaxy_stdlib::stdout_broken() { catallaxy_stdlib::BROKEN_PIPE_STATUS } else { 0 };
     if std::env::var_os("CATX_GC_STATS").is_some() {
         let (total, max) = catallaxy_gc::stats::pauses();
         eprintln!(
@@ -252,5 +256,5 @@ fn run_program(program: &Program) -> i32 {
             promoted as f64 / 1e6
         );
     }
-    0
+    status
 }

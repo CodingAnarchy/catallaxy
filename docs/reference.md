@@ -528,10 +528,11 @@ Annotate the parameter to use any of these.
     program that has the machine to itself; under a container memory limit the runtime still sees
     the host's memory, so set the variable there. The limit counts live heap objects together with
     the buffers outside the heap that lists, dicts, sets and `StringBuilder`s keep, the vectors
-    natives build their results in, and (estimated) the temporary trees of `Json.parse` and
-    `Json.stringify`. Growing any of these past it panics where it happens (after a collection and
-    one retry, for list pushes, dict inserts and `StringBuilder` pushes), with a message saying how
-    much more would pass the limit.
+    natives build their results in, and the text `Json.stringify` writes. Growing any of these past
+    it panics where it happens (after a collection and one retry, for list pushes, dict inserts and
+    `StringBuilder` pushes), with a message saying how much more would pass the limit. `Json.parse`
+    reaches a safepoint every 4,096 values, so a large document is held to the limit as a program
+    building the same values would be.
   - A single request larger than physical memory (or than the heap limit), such as `List.filled(n, x)`,
     `s * n` or `s.ljust(n)` with a huge `n`, is refused up front.
   - When the system refuses memory for the heap, or for one of the runtime's internal buffers, the runtime
@@ -559,9 +560,9 @@ Annotate the parameter to use any of these.
 - What is not covered: other allocations inside the runtime get one retry with the headroom released
   and then a `MemoryError` at the next safepoint. If that retry fails too, the process aborts
   (`memory allocation of N bytes failed`). These include the scratch buffer of a stable sort (which
-  `sorted` checks can be had just before), the text `Json.stringify` and `Csv.format` build, the keys
-  of a parsed JSON object, and the collector's mark stack, which needs 8 bytes for each object in
-  the longest list it marks (a list of 100,000 strings: 800 KB). The same happens when the reserve is used up before a
+  `sorted` checks can be had just before), the text `Json.stringify` and `Csv.format` build, and the keys
+  of a parsed JSON object. (The collector's own marking does not abort: when its mark stack cannot
+  grow, it rescans instead.) The same happens when the reserve is used up before a
   safepoint is reached. The retry comes from the global allocator `catallaxy_gc::Allocator`, which
   `catx` and the C API libraries use; a Rust program embedding the runtime gets it only if it opts in
   (section 11). On Linux with memory overcommit, and under memory pressure on macOS, a program that
@@ -662,6 +663,17 @@ expected and actual types: `xs[0].length` panics with `TypeError: expected Strin
 `catx lsp`, `catx test [paths...]`. `check` and `fmt` take files and directories; a directory stands for
 every `*.cx` file under it, skipping hidden directories and `target/`.
 
+A program's standard output (`puts`, `print`) is buffered: it is written when 64 KB have collected,
+when the program ends, before it reads standard input, sleeps or waits for I/O, and before anything
+is written to standard error. When standard output is a terminal it is also written at
+the end of each line, so progress output shows up while the program runs. If the reader of
+standard output goes away (`catx run prog.cx | head -2`), the program ends quietly with exit status
+141 at its next write (or at its end), as a process killed by `SIGPIPE` would; it does not keep
+running. `SIGINT` (Ctrl-C), `SIGTERM` and `SIGHUP` write out the buffered output before the program
+dies of the signal, so nothing printed is lost and the exit status still names the signal (a shell
+shows 130, 143 or 129). Signals the program inherited as ignored (`nohup`, background jobs) stay
+ignored. On Windows, Ctrl-C, Ctrl-Break and closing the console also write the buffer out first.
+
 `catx test paths...` runs each named `*.cx` file, and every `*.cx` file under each named directory
 (skipping hidden directories, `target/`, and `lib/` directories, which hold modules for tests to
 import), each in its own process. With no path it runs the tests under the current directory. A
@@ -729,6 +741,13 @@ status is 1 if errors remain, 2 if a file could not be read or written.
 Every diagnostic has a code. `docs/errors.md` explains each one with an example and a fix, and
 `catx check` (like `catx run` when a program does not compile) ends its report with a link to the
 entries for the codes it printed.
+
+`catx check` reports everything `catx run` would refuse to run, including the code generator's
+limit on live values in one function (E0900). The compiler has limits of its own instead of
+running out of stack: expressions, types and patterns may nest 1,000 levels deep, and one
+statement's syntax tree may be 10,000 levels deep (an operator or method chain of about 10,000
+links); deeper input is E0901. Chains below that, such as generated code that adds up thousands of
+strings, compile and run.
 
 Warnings never make `catx check` fail. A comment `# allow(CODE, ...)` on the warning's line, or on
 the line above it, silences those warnings there (`s += x # allow(W0004)`). The warnings are:

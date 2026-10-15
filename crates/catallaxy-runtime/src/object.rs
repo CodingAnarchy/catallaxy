@@ -1102,7 +1102,9 @@ pub(crate) fn vtable_for(kind: ObjKind) -> GcVTable {
         ObjKind::Dict | ObjKind::Set => Some(trace_dict_written),
         _ => None,
     };
-    GcVTable { trace, finalize, size, trace_remembered }
+    let leaf =
+        matches!(kind, ObjKind::Immediate | ObjKind::Str | ObjKind::BigInt | ObjKind::StringBuilder | ObjKind::Native);
+    GcVTable { trace, finalize, size, trace_remembered, leaf }
 }
 
 // ---------------------------------------------------------------------------------------------

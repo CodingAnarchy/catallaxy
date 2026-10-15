@@ -60,13 +60,14 @@ fn native_buffers_count_toward_the_heap_limit() {
             "fn grow() -> Int {\n  d: Dict[Int, Int] = [:]\n  i = 0\n  while true {\n    d[i] = i\n    i += 1\n  }\n  0\n}\nputs(grow())\n".to_string(),
             "MemoryError: cannot grow a table to ",
         ),
-        ("json.cx", json, "MemoryError: Json.parse: "),
+        // Parsing reaches safepoints, where a collection finds the heap over the limit.
+        ("json.cx", json, "MemoryError: "),
     ];
     for (name, src, want) in cases {
         let (code, err) = run(name, &src, &[("CATX_MAX_HEAP", "64M")]);
         assert_eq!(code, 101, "{name}: {err}");
         assert!(err.contains(&format!("panic: {want}")), "{name}: {err}");
-        assert!(err.contains("would pass the CATX_MAX_HEAP limit of 67.1 MB"), "{name}: {err}");
+        assert!(err.contains("the CATX_MAX_HEAP limit of 67.1 MB"), "{name}: {err}");
         assert!(err.contains("    at grow ("), "{name}: {err}");
     }
     // With the cap off, the same document parses.

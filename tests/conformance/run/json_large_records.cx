@@ -1,0 +1,16 @@
+# A large document of records with the same keys: Json.parse reaches safepoints as it reads,
+# so collections run part way through (#158). The key strings the records share must survive
+# them: a record in shape mode does not hold its own copy of a key.
+parts = (0...20_000).to_list().map { |i|
+  "{\"id\": #{i}, \"name\": \"n#{i}\", \"tags\": [\"t#{i % 7}\"]}"
+}
+text = "[" + parts.join(",") + "]"
+for round in 0...3 {
+  rows = Json.parse(text).unwrap()
+  total: Dyn = 0
+  for r in rows { total += r["id"] }
+  last = rows[19_999]
+  puts("#{rows.length} #{total} #{last["name"]} #{rows[123]["tags"][0]}")
+  junk = (0...20_000).to_list().map { |i| "junk #{i}" }
+}
+puts(Json.stringify(Json.parse(text).unwrap()[5]))
