@@ -549,9 +549,9 @@ Annotate the parameter to use any of these.
 - What is not covered: other allocations inside the runtime get one retry with the headroom released
   and then a `MemoryError` at the next safepoint. If that retry fails too, the process aborts
   (`memory allocation of N bytes failed`). These include the scratch buffer of a stable sort (which
-  `sorted` checks can be had just before), the text `Json.stringify` and `Csv.format` build, the keys
-  of a parsed JSON object, and the collector's mark stack, which needs 8 bytes for each object in
-  the longest list it marks (a list of 100,000 strings: 800 KB). The same happens when the reserve is used up before a
+  `sorted` checks can be had just before), the text `Json.stringify` and `Csv.format` build, and the keys
+  of a parsed JSON object. (The collector's own marking does not abort: when its mark stack cannot
+  grow, it rescans instead.) The same happens when the reserve is used up before a
   safepoint is reached. The retry comes from the global allocator `catallaxy_gc::Allocator`, which
   `catx` and the C API libraries use; a Rust program embedding the runtime gets it only if it opts in
   (section 11). On Linux with memory overcommit, and under memory pressure on macOS, a program that
