@@ -577,7 +577,7 @@ impl Server<'_> {
         let (path, _, off) = self.locate(&p.text_document_position_params)?;
         let c = self.compile(&path, None);
         let m = query::module_of_file(&c.comp.ck, c.file)?;
-        let (text, span) = query::hover(&c.comp.ck, m, off)?;
+        let (text, span) = query::hover(&c.comp.ck, &c.comp.sm, m, off)?;
         Some(lt::Hover {
             contents: lt::HoverContents::Markup(lt::MarkupContent { kind: lt::MarkupKind::Markdown, value: text }),
             range: Some(Self::range(c.comp.sm.file(c.file), span.start, span.end)),
@@ -640,6 +640,9 @@ impl Server<'_> {
                 label: c.label,
                 kind: Some(completion_kind(c.kind)),
                 detail: c.detail,
+                documentation: c.doc.map(|d| {
+                    lt::Documentation::MarkupContent(lt::MarkupContent { kind: lt::MarkupKind::Markdown, value: d })
+                }),
                 ..Default::default()
             })
             .collect();

@@ -1,0 +1,60 @@
+# Register stacks start small and grow on demand (issue #173). Growing moves the stack while
+# natives that called back into the interpreter still hold their arguments, and while outer
+# interpreter loops wait on those natives; every result below depends on both staying right.
+
+fn depth(n: Int) -> Int {
+  if n == 0 { 0 } else { 1 + depth(n - 1) }
+}
+
+# Each level calls back into the interpreter through a native (`map`, `each`, `==` on a class
+# with its own `==`), recursing deeper inside the block, then uses the native's result and its
+# own registers after the stack has moved.
+class Key {
+  n: Int
+  fn ==(self, other: Key) -> Bool { depth(50) == 50 && self.n == other.n }
+}
+
+fn through_natives(n: Int) -> Int {
+  if n == 0 { return 1 }
+  before = n * 3
+  ys = [n, n + 1].map { |x| x + through_natives(n - 1) - through_natives(n - 1) }
+  sum = 0
+  ys.each { |y| sum += y + depth(20) }
+  same = if Key.new(n) == Key.new(n) { 1 } else { 0 }
+  before - n * 3 + sum - 2 * n - 41 + same
+}
+
+fn overflow(n: Int) -> Int { overflow(n + 1) + 1 }
+
+puts(depth(30000))
+puts(through_natives(8))
+
+f = Fiber.start { depth(5000) + through_natives(6) }
+puts(f.join().unwrap())
+
+t = spawn { depth(20000) + through_natives(6) }
+puts(t.join().unwrap())
+
+# Many fibers, each growing its own stack while the others are parked.
+ch: Channel[Int] = Channel.new(100)
+fs = (0...100).map { |k|
+  Fiber.start {
+    Fiber.yield()
+    d = depth(200 + k * 10)
+    ch.send(d)
+    d
+  }
+}
+total = 0
+for g in fs { total += g.join().unwrap() }
+got = 0
+for _i in 0...100 { got += ch.recv() ?? 0 }
+puts(total == got)
+puts(total)
+
+# Past the limit it is still a stack overflow, in a fiber as on the main thread.
+o = Fiber.start { overflow(0) }
+match o.join() {
+  Ok(_) => puts("no error")
+  Err(e) => puts(e.lines()[0])
+}
