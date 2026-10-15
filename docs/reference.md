@@ -342,7 +342,7 @@ fn first_big(xs: List[Int]) -> Int? {
 - `[1, 2, 3]` is a `List`; `[]` an empty list (its element type is inferred from later use).
 - `["a": 1, "b": 2]` is a `Dict`; `[:]` an empty dict. A bare identifier before `:` is a **string
   key**: `[host: "x"]` is `["host": "x"]`, even if a local named `host` exists. Use parentheses for a
-  computed key: `[(host): 1]`.
+  computed key: `[(host): 1]`. When a variable of that name is in scope, the key is warning W0005.
 - `(1, "a")` is a tuple; `(x,)` a one-element tuple.
 - Dicts and sets iterate in insertion order.
 - Dict and set keys are hashed by value, so they must not change once inserted: a `Dict` or `Set` whose
@@ -915,6 +915,11 @@ the line above it, silences those warnings there (`s += x # allow(W0004)`). The 
   appending, it cannot `return` or `?` out, and no closure elsewhere captures the local), the fix
   adds `s_sb = StringBuilder.new()` and `s_sb.push(s)` before the loop (or replaces a `s = ""` just
   before it), turns each append into `s_sb.push(x)`, and adds `s = s_sb.to_s` after the loop.
+- `W0005`: a bare-identifier dict key (`[src: 0]`, the string `"src"`) where a variable `src` is in
+  scope. Write `[(src): 0]` for the variable's value, or `["src": 0]` for the string.
+- `W0006`: `return` with a value in a block whose result is discarded (`xs.each { |x| if x > 1 {
+  return x } }`): it ends only that call of the block and drops the value. Use `for` (where `return`
+  leaves the function) or `find`.
 
 `check --json` prints `{"diagnostics": [...]}` where each diagnostic has `code`, `severity`, `message`,
 `file`, `span` (`start`/`end` as `{line, col, offset}`, 1-based lines and columns), `notes`, and `fixes`

@@ -1,0 +1,6 @@
+# expect: W0005
+# `[src: 0]` is the string key "src", though a variable `src` is in scope.
+fn distances(src: String) -> Dict[String, Int] {
+  [src: 0]
+}
+puts(distances("a"))

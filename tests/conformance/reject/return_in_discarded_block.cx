@@ -1,0 +1,7 @@
+# expect: W0006
+# `return x` ends only this call of the block; `each` drops the value.
+fn first_big(xs: List[Int]) -> Int? {
+  xs.each { |x| if x > 1 { return x } }
+  nil
+}
+puts(first_big([1, 2, 3]))

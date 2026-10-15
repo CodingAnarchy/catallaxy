@@ -1817,3 +1817,34 @@ Append to a `StringBuilder`, which grows in place, and convert once after the lo
 `sb = StringBuilder.new()` before it, `sb.push(x)` inside, `s = sb.to_s` after. `catx fix` makes this
 rewrite when it is mechanical (reference, §10). To keep the code as it is, add `# allow(W0004)` on
 the line.
+
+## W0005
+
+Bare-identifier dict key that names a variable. In a dict literal, an identifier before `:` is a
+string key, so `[src: 0]` is `["src": 0]` even when a variable `src` is in scope. That is easy to
+misread as a key computed from the variable.
+
+```cx
+fn start(src: String) -> Dict[String, Int] {
+  [src: 0]
+}
+```
+
+Write `[(src): 0]` to use the variable's value, or `["src": 0]` to keep the string. To keep the code
+as it is, add `# allow(W0005)` on the line.
+
+## W0006
+
+`return` with a value in a block whose result is discarded. `return` in a block (`{ |x| ... }`, or an
+anonymous function) ends only that call of the block, and a block passed where no result is used,
+such as to `each`, drops the value. It does not return from the enclosing function.
+
+```cx
+fn first_big(xs: List[Int]) -> Int? {
+  xs.each { |x| if x > 1 { return x } }
+  nil
+}
+```
+
+Use a `for` loop, where `return` leaves the function (`for x in xs { if x > 1 { return x } }`), or
+`xs.find { |x| x > 1 }`. To keep the code as it is, add `# allow(W0006)` on the line.

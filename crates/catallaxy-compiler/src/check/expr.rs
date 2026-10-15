@@ -794,7 +794,44 @@ impl Checker {
         et
     }
 
+    /// W0005: a bare-identifier dict key (`[src: 0]`, the string `"src"`) that names a variable
+    /// in scope, which was likely meant as the key.
+    fn lint_bare_key(&mut self, k: &Expr) {
+        let ExprKind::Str(parts) = &k.kind else { return };
+        let [StrPart::Lit(name)] = parts.as_slice() else { return };
+        // A quoted key's span includes its quotes.
+        if (k.span.end - k.span.start) as usize != name.len() {
+            return;
+        }
+        let visible = {
+            let mut found = false;
+            for c in self.ctxs.iter().rev() {
+                if c.scopes.iter().any(|s| s.contains_key(name.as_str())) {
+                    found = true;
+                    break;
+                }
+                if c.kind == CtxKind::Function {
+                    break;
+                }
+            }
+            found
+        };
+        if !visible {
+            return;
+        }
+        let msg = format!("the key `{name}:` is the string \"{name}\", not the value of the variable `{name}`");
+        self.emit(
+            Diag::warning("W0005", msg, k.span)
+                .note("a bare identifier before `:` in a dict literal is a string key")
+                .suggest("use the variable's value as the key", k.span, format!("({name})"))
+                .suggest("quote the key to keep the string", k.span, format!("\"{name}\"")),
+        );
+    }
+
     fn check_dict(&mut self, entries: &[(Expr, Expr)], expected: Option<TyId>) -> TyId {
+        for (k, _) in entries {
+            self.lint_bare_key(k);
+        }
         let exp = expected.and_then(|t| {
             let t = self.types.shallow_resolve(t);
             let t = self.types.strip_nil(t).unwrap_or(t);
@@ -4123,6 +4160,30 @@ impl Checker {
     // ---- closures ----------------------------------------------------------------------------
 
     /// Checks a closure literal. `spawn_like` = Some(is_move) for parallel blocks.
+    /// W0006: `return value` in a block whose result is discarded (`xs.each { |x| return x }`):
+    /// it ends only this call of the block, and the value is dropped.
+    fn lint_discarded_returns(&mut self, body: &Block) {
+        let mut stack: Vec<&Expr> = body.stmts.iter().collect();
+        let mut found = Vec::new();
+        while let Some(x) = stack.pop() {
+            match &x.kind {
+                // Their `return`s belong to them.
+                ExprKind::Closure { .. } | ExprKind::Spawn { .. } => continue,
+                ExprKind::Return(Some(v)) if !matches!(v.kind, ExprKind::Nil) => found.push(x.span),
+                _ => {}
+            }
+            stack.extend(crate::query::children(x));
+        }
+        found.sort_by_key(|s| s.start);
+        for span in found {
+            self.emit(
+                Diag::warning("W0006", "`return` with a value in a block whose result is discarded", span)
+                    .note("`return` in a block ends only this call of the block, and the value is dropped")
+                    .note("to return from the function, use a `for` loop (where `return` leaves the function), or `find` to get the first match"),
+            );
+        }
+    }
+
     pub fn check_closure(
         &mut self,
         e: &Expr,
@@ -4246,6 +4307,9 @@ impl Checker {
             }
         }
         let bt = self.check_block(body, if ret_is_nil { None } else { Some(ret_ty) });
+        if ret_is_nil && ret.is_none() {
+            self.lint_discarded_returns(body);
+        }
         let returns = self.ctx().returns.clone();
         let captures = self.ctx().captures.clone();
         self.ctxs.pop();
