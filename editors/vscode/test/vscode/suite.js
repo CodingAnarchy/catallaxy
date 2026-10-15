@@ -102,6 +102,15 @@ async function run() {
     assert.deepStrictEqual(vscode.languages.getDiagnostics(target), []);
   });
 
+  await check("document highlights, folding ranges and semantic tokens", async () => {
+    const hs = await exec("vscode.executeDocumentHighlights", uri, posOf(doc, "fn total_area", 0, 3));
+    assert.strictEqual(hs.length, 2);
+    const folds = await exec("vscode.executeFoldingRangeProvider", uri);
+    assert(folds.some((f) => f.start === posOf(doc, "class ByArea").line), JSON.stringify(folds));
+    const toks = await exec("vscode.provideDocumentSemanticTokens", uri);
+    assert(toks && toks.data.length > 0, "no semantic tokens");
+  });
+
   await check("references", async () => {
     const r = await exec("vscode.executeReferenceProvider", uri, posOf(doc, "fn total_area", 0, 3));
     assert.strictEqual(r.length, 2);

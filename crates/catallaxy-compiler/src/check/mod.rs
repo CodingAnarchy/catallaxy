@@ -12,6 +12,7 @@ pub mod expr;
 pub mod implicit;
 pub mod lookup;
 pub mod pat;
+pub mod protect;
 pub mod rel;
 pub mod scan;
 

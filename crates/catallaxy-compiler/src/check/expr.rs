@@ -415,7 +415,9 @@ impl Checker {
             }
             ExprKind::Call { callee, args, block } => self.check_call(e, callee, args, block.as_deref(), expected),
             ExprKind::Member { recv, name, args, block, parens, safe } => {
-                self.check_member(e, recv, name, args, block.as_deref(), *parens, *safe, expected)
+                let t = self.check_member(e, recv, name, args, block.as_deref(), *parens, *safe, expected);
+                self.check_protected_escape(recv, name, args, block.as_deref(), t);
+                t
             }
             ExprKind::Index { recv, args } => self.check_index(e, recv, args),
             ExprKind::Closure { params, ret, body, .. } => {

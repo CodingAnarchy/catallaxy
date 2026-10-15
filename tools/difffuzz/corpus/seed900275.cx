@@ -317,7 +317,7 @@ ts168 = (1..4).map { |p169|
 }
 for t in ts168 { t.join() }
 puts(atom166.get())
-puts(mtx167.get())
+puts(mtx167.lock { |l| l.dup })
 puts(tot73)
 puts(fz76)
 puts(total93)
