@@ -246,6 +246,20 @@ async function main() {
       }
     });
 
+    await check("hover and completion: documentation comments", async () => {
+      // A user class's leading comment, and a prelude method's.
+      const h = await c.request("textDocument/hover", at(shapesUri, shapes, "ByArea.new(s)", 0, 1));
+      assert.match(h.contents.value, /class ByArea/);
+      assert.match(h.contents.value, /A wrapper that orders shapes by area/);
+      const s = await c.request("textDocument/hover", at(shapesUri, shapes, "sort_with", 0, 1));
+      assert.match(s.contents.value, /A stable sort by the comparator/);
+      const r = await c.request("textDocument/completion", at(shapesUri, shapes, "puts(wrapped[1]", 0, 5));
+      const item = (Array.isArray(r) ? r : r.items).find((i) => i.label === "ByArea");
+      assert(item && item.documentation, JSON.stringify(item));
+      assert.strictEqual(item.documentation.kind, "markdown");
+      assert.match(item.documentation.value, /orders shapes by area/);
+    });
+
     await check("hover: a method call shows its signature", async () => {
       const h = await c.request("textDocument/hover", at(shapesUri, shapes, "describe()", 0, 1));
       assert(h, "no hover");

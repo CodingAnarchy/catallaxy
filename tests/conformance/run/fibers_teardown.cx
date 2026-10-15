@@ -1,0 +1,28 @@
+# Thousands of fibers that finish in an order unrelated to their start order (issue #173: each
+# one leaves the thread's root set in O(1), and finished fibers' stacks are reused). Parked
+# fibers keep their objects through the collections that the churn below triggers.
+n = 3000
+chans: List[Channel[Int]] = (0...4).to_list().map { |_i| Channel.new() }
+fs = (0...n).map { |k|
+  Fiber.start {
+    mine = ["fiber #{k}", "x" * (k % 50)]
+    v = chans[k % 4].recv() ?? -1
+    mine[0].length + mine[1].length + v
+  }
+}
+# The waiters on channel 2 finish first, then 0, then 3, then 1, each woken in turn.
+for c in [2, 0, 3, 1] {
+  for _i in 0...(n / 4) {
+    junk = (0...20).to_list().map { |j| "tmp #{j}" }
+    chans[c].send(c)
+  }
+  Fiber.yield()
+}
+# A second wave reuses the finished fibers' stacks.
+more = (0...500).map { |k| Fiber.start { Fiber.yield(); k } }
+total = 0
+for f in fs { total += f.join().unwrap() }
+extra = 0
+for f in more { extra += f.join().unwrap() }
+puts(total)
+puts(extra)
