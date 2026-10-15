@@ -436,4 +436,25 @@ mod tests {
             WordBuf::free(b as *mut u8);
         }
     }
+
+    /// Buffers without a range word (dict indices, issue #145): one word smaller, freed and
+    /// released on their own path.
+    #[test]
+    fn plain_buffers_have_no_range_word() {
+        assert_eq!(WordBuf::plain_layout(8).unwrap().size() + 8, WordBuf::layout(8).size());
+        assert!(WordBuf::try_alloc_plain(usize::MAX, 0).is_err());
+        assert_eq!(WordBuf::try_alloc_plain(0, 7).unwrap(), WordBuf::empty());
+        let b = WordBuf::try_alloc_plain(5, 7).unwrap();
+        let c = WordBuf::try_alloc_plain(3, 1).unwrap();
+        // SAFETY: just allocated, never published.
+        unsafe {
+            assert_eq!(WordBuf::cap(b), 5);
+            assert!(WordBuf::slots(b).iter().all(|s| s.load(Ordering::Relaxed) == 7));
+            WordBuf::slots(b)[4].store(3, Ordering::Relaxed);
+            assert_eq!(WordBuf::slots(b)[4].load(Ordering::Relaxed), 3);
+            WordBuf::free_plain(b as *mut u8);
+            release_plain(c, Access::Local);
+            release_plain(WordBuf::empty(), Access::Local);
+        }
+    }
 }
