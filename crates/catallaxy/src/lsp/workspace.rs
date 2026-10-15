@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
-use catallaxy_compiler::diag::{SourceFile, Span};
+use catallaxy_compiler::diag::{Diagnostic, SourceFile, Span};
 use catallaxy_compiler::driver::{compile_path, Compilation, Options, SourceLoader, PRELUDE};
 use catallaxy_compiler::query;
 use catallaxy_compiler::symbols::{self, Index, OutlineKind, Symbol};
@@ -64,8 +64,8 @@ pub struct Unit {
     pub fixed: FxHashMap<Symbol, (String, Option<String>)>,
     /// Declarations of the user modules, with their containers.
     pub outline: Vec<WsItem>,
-    /// The compilation's diagnostics outside the prelude: code, message and span.
-    pub diags: Vec<(&'static str, String, Span)>,
+    /// The compilation's diagnostics outside the prelude.
+    pub diags: Vec<Diagnostic>,
 }
 
 /// The file id of a compilation's entry document (added right after the prelude).
@@ -110,12 +110,7 @@ impl Unit {
                 outline.push(WsItem { name, kind: item.kind, container, name_span: item.name_span });
             }
         }
-        let diags = comp
-            .diags
-            .iter()
-            .filter(|d| d.span.file as usize >= PRELUDE.len())
-            .map(|d| (d.code, d.message.clone(), d.span))
-            .collect();
+        let diags = comp.diags.iter().filter(|d| d.span.file as usize >= PRELUDE.len()).cloned().collect();
         let files = comp
             .sm
             .files
@@ -130,6 +125,19 @@ impl Unit {
             })
             .collect();
         Unit { deps, files, index, decls, fixed, outline, diags }
+    }
+
+    /// A unit of no compilation (for a file that is gone).
+    fn empty() -> Unit {
+        Unit {
+            deps: Vec::new(),
+            files: Vec::new(),
+            index: Index { occs: Vec::new(), user_files: Default::default(), links: Default::default() },
+            decls: Default::default(),
+            fixed: Default::default(),
+            outline: Vec::new(),
+            diags: Vec::new(),
+        }
     }
 
     pub fn file(&self, f: u32) -> Option<&FileData> {
@@ -191,6 +199,11 @@ impl Overlay {
             self.texts.iter().map(|(p, (t, _))| (p.clone(), t.clone())).collect();
         docs.extend(texts.iter().map(|(p, t)| (p.clone(), t.clone())));
         Overlay::new(docs.iter())
+    }
+
+    /// Whether `p` (however it is reached) is an open document.
+    pub fn contains(&self, p: &Path) -> bool {
+        self.get(p).is_some()
     }
 
     fn get(&self, p: &Path) -> Option<&(String, u64)> {
@@ -414,7 +427,20 @@ pub struct Workspace {
     progress_answered: Condvar,
     /// `CATX_LSP_DEBUG=1`: log how many files each request compiled.
     debug: bool,
+    /// The current run publishing the diagnostics of files that are not open; an older one stops.
+    diag_generation: AtomicU64,
+    /// What was last published for each file that is not open (a hash of the diagnostics).
+    published: Mutex<FxHashMap<PathBuf, u64>>,
+    /// Where and how to publish those diagnostics (set by the server).
+    diagnoser: Mutex<Option<(Sender, Diagnose)>>,
 }
+
+/// The diagnostics of a unit's own file, for `textDocument/publishDiagnostics`: the document's
+/// URI and the diagnostics (`None` if it has no URI).
+pub type Diagnose = Arc<dyn Fn(&Path, &Unit) -> Option<(lt::Uri, Vec<lt::Diagnostic>)> + Send + Sync>;
+
+/// How long the diagnostics of unopened files wait for typing to pause.
+const DIAGNOSE_DELAY_MS: u64 = 300;
 
 /// While alive, the warm-up pauses between files.
 pub struct Busy<'a>(&'a AtomicUsize);
@@ -492,6 +518,8 @@ impl Workspace {
     /// Stops the warm-up and waits for its threads (each finishes the file it is compiling).
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);
+        // It holds a sender of the connection.
+        *self.diagnoser.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let handles = std::mem::take(&mut *self.warmers.lock().unwrap_or_else(|e| e.into_inner()));
         for h in handles {
             let _ = h.join();
@@ -590,6 +618,90 @@ impl Workspace {
         compile_all(&overlay, entries, cores()).into_iter().map(|(p, b)| (p, b.map(|(u, _)| u))).collect()
     }
 
+    /// Publishes, in the background, the diagnostics of the workspace files that are not open
+    /// (open documents get theirs as they change), replacing a run in progress. It waits for
+    /// typing to pause, brings the cached units up to date (so files that import an edited one
+    /// are checked again) and sends only what changed since the last run.
+    pub fn diagnose(self: &Arc<Self>) {
+        let Some((send, convert)) = self.diagnoser.lock().unwrap_or_else(|e| e.into_inner()).clone() else { return };
+        let gen = self.diag_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let ws = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("catx-diagnose".into())
+            .stack_size(64 << 20)
+            .spawn(move || ws.run_diagnose(gen, &send, &convert));
+        let mut warmers = self.warmers.lock().unwrap_or_else(|e| e.into_inner());
+        warmers.retain(|h| !h.is_finished());
+        warmers.extend(spawned.ok());
+    }
+
+    fn diagnose_cancelled(&self, gen: u64) -> bool {
+        self.stopped.load(Ordering::SeqCst) || self.diag_generation.load(Ordering::SeqCst) != gen
+    }
+
+    fn run_diagnose(&self, gen: u64, send: &Sender, convert: &Diagnose) {
+        let end = Instant::now() + Duration::from_millis(DIAGNOSE_DELAY_MS);
+        while Instant::now() < end {
+            if self.diagnose_cancelled(gen) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if self.lock().roots.is_empty() {
+            return;
+        }
+        let mut notes = Notes::default();
+        let units = self.units(Vec::new(), true, &mut notes);
+        if self.diagnose_cancelled(gen) {
+            return;
+        }
+        let overlay = self.overlay();
+        let mut published = self.published.lock().unwrap_or_else(|e| e.into_inner());
+        let mut seen = FxHashSet::default();
+        let mut sent = 0;
+        for (p, u) in &units {
+            if overlay.contains(p) {
+                continue;
+            }
+            seen.insert(p.clone());
+            let Some((uri, diags)) = convert(p, u) else { continue };
+            let h = hash_text(&serde_json::to_string(&diags).unwrap_or_default());
+            if published.get(p) == Some(&h) {
+                continue;
+            }
+            published.insert(p.clone(), h);
+            let params = lt::PublishDiagnosticsParams { uri, diagnostics: diags, version: None };
+            send(Message::Notification(Notification::new("textDocument/publishDiagnostics".into(), params)));
+            sent += 1;
+        }
+        // Files gone from the workspace (deleted, or their folder removed) lose their diagnostics.
+        let gone: Vec<PathBuf> =
+            published.keys().filter(|p| !seen.contains(*p) && !overlay.contains(p)).cloned().collect();
+        for p in gone {
+            published.remove(&p);
+            if let Some(uri) = convert(&p, &Unit::empty()).map(|(u, _)| u) {
+                let params = lt::PublishDiagnosticsParams { uri, diagnostics: Vec::new(), version: None };
+                send(Message::Notification(Notification::new("textDocument/publishDiagnostics".into(), params)));
+            }
+        }
+        if self.debug {
+            let line = format!("catx lsp: published diagnostics of {sent} files that are not open");
+            send(log_message(lt::MessageType::LOG, line));
+        }
+    }
+
+    /// Sets how `diagnose` publishes.
+    pub fn set_diagnoser(&self, send: Sender, convert: Diagnose) {
+        *self.diagnoser.lock().unwrap_or_else(|e| e.into_inner()) = Some((send, convert));
+    }
+
+    /// Forgets what was published for `p` (it was opened or closed, and the document's own
+    /// diagnostics replaced it), so the next run publishes it again.
+    pub fn forget_published(&self, p: &Path) {
+        let mut published = self.published.lock().unwrap_or_else(|e| e.into_inner());
+        published.retain(|q, _| q != p && std::fs::canonicalize(q).ok() != std::fs::canonicalize(p).ok());
+    }
+
     /// Starts compiling every workspace file and open document in the background, replacing any
     /// warm-up in progress. Requests don't wait for it: one that needs a file the warm-up is
     /// compiling waits for that file, and compiles the files not yet reached itself.
@@ -601,7 +713,7 @@ impl Workspace {
             std::thread::Builder::new()
                 .name("catx-warm".into())
                 .stack_size(64 << 20)
-                .spawn(move || ws.run_warm(gen, &send, progress));
+                .spawn(move || Workspace::run_warm(&ws, gen, &send, progress));
         let mut warmers = self.warmers.lock().unwrap_or_else(|e| e.into_inner());
         warmers.retain(|h| !h.is_finished());
         warmers.extend(spawned.ok());
@@ -619,7 +731,7 @@ impl Workspace {
         }
     }
 
-    fn run_warm(&self, gen: u64, send: &Sender, progress: bool) {
+    fn run_warm(self: &Arc<Self>, gen: u64, send: &Sender, progress: bool) {
         let start = Instant::now();
         let (roots, kept, walk_gen) = {
             let st = self.lock();
@@ -687,6 +799,8 @@ impl Workspace {
             pr.end(send, cancelled);
         }
         if !cancelled {
+            // The diagnostics of the files that are not open, now that every unit is ready.
+            self.diagnose();
             let msg = format!(
                 "catx lsp: indexed the workspace ({} files, {} compiled) in {} ms",
                 list.len(),

@@ -41,7 +41,7 @@ ts = (0...text.length).to_list().map { |i|
   }
 }
 for t in ts { t.join() }
-final_counts = counts.get()
+final_counts = counts.lock { |d| d.dup }
 for k in final_counts.keys().sorted() { puts("#{k}: #{final_counts[k]!}") }
 
 # 4. A log list behind a Mutex; entries are sorted before printing.
@@ -50,7 +50,7 @@ ts = (1..4).to_list().map { |i|
   spawn { log.lock { |l| l.push("worker #{i} done") } }
 }
 for t in ts { t.join() }
-for line in log.get().sorted() { puts(line) }
+for line in (log.lock { |l| l.sorted() }) { puts(line) }
 
 # 5. A shared class: each field access is atomic, `with lock` makes compound updates atomic.
 shared class Account {

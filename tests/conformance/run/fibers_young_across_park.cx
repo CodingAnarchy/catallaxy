@@ -1,0 +1,39 @@
+# Minor collections skip parked fibers that have not run since one found their roots clean
+# (issue #174). Fibers here hold young objects only in their registers across parks: small ones,
+# which a minor collection tenures, and large ones (a long string, a long list), which it may
+# leave young while only roots reference them. Allocation churn between the parks triggers many
+# minor collections; each fiber then checks its objects and makes new ones.
+fn churn(n: Int) -> Int {
+  s = 0
+  for i in 0...n {
+    xs = [i, i + 1, i + 2]
+    s += xs[2] - i
+  }
+  s
+}
+
+wake: List[Channel[Int]] = (0...3).to_list().map { |_i| Channel.new() }
+fs = (0...60).map { |k|
+  Fiber.start {
+    ok = 0
+    for round in 0...3 {
+      small = ["fiber #{k}", "round #{round}"]
+      big = "#{k}:" + "y" * (100000 + k)
+      long = (0...5000).to_list().map { |i| i * k }
+      wake[round].recv()
+      if small[0] == "fiber #{k}" && small[1] == "round #{round}" { ok += 1 }
+      if big.length == 100000 + k + "#{k}:".length && big.ends_with("y") { ok += 1 }
+      if long.length == 5000 && long[4999] == 4999 * k { ok += 1 }
+    }
+    ok
+  }
+}
+Fiber.yield()
+for round in 0...3 {
+  puts(churn(300000))
+  for _k in 0...60 { wake[round].send(round) }
+  Fiber.yield()
+}
+total = 0
+for f in fs { total += f.join().unwrap() }
+puts(total)

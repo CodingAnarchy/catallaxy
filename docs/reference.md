@@ -619,7 +619,22 @@ object panics with `OwnershipError`; under `catx run --promote-on-access` the ob
 shared instead and a warning is logged. Single operations on shared objects are atomic; compound ones
 (`d[k] += 1`) need `Mutex`, `Atomic` or `with lock`.
 
-### 8.1 Atomics and channels
+### 8.1 Mutexes, atomics and channels
+
+A `Mutex[T]` protects an owned value only inside `lock`. The checker keeps the value from escaping
+to code that does not hold the lock:
+
+- `m.get` and `m.update { ... }` need a frozen or shareable `T` (E0616). For an owned `T`, work on
+  the value inside `m.lock { |v| ... }` and replace it with `m.set(move v)`.
+- A `lock` block may not return the protected value, an owned object inside it, or a shallow copy
+  that shares one, and may not store one in a variable from outside the block (E0617). It may
+  return frozen and shareable values, and fresh values whose owned contents are not taken from
+  the protected value: `m.lock { |l| l.length }`, `m.lock { |l| l.dup }` for a list of numbers,
+  `m.lock { |rows| rows.map { |r| r.dup } }`. The check follows the types a value can hold: a
+  result computed from the block's parameter is rejected when an owned type occurs both in it and
+  in `T`. `Dyn` values are not checked.
+- `Atomic.new` needs a frozen or shareable value (E0618), since `get` hands the value to every
+  thread.
 
 `Atomic.add(n)` returns the new value. `Channel.recv()` blocks until a value arrives and returns
 `nil` once the channel is closed and drained; `for x in ch` iterates until then.
@@ -767,7 +782,12 @@ throughout, any other with `\n`.
 `catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
 unsaved edits. It provides:
 
-- diagnostics (published on open, change and save), hover (types, signatures; on a binding name
+- diagnostics: an open document's on open, change and save; every other workspace file's (below)
+  after the warm-up and whenever typing pauses, so an edit that breaks the files importing it
+  shows in them unopened. A diagnostic's notes are its related information (at the note's place,
+  or at the diagnostic's), or lines of its message for a client that does not show related
+  information; its fixes are `help:` lines;
+- hover (types, signatures; on a binding name
   in a `for`, `let`, `if let` or `match` pattern, a block parameter or a function parameter, that
   variable's type; on a function or method, its signature with default values; and the
   declaration's documentation comment), go to definition (a prelude function, class or method
@@ -775,8 +795,15 @@ unsaved edits. It provides:
   `catallaxy/prelude-<version>-<hash>/` in the user's cache directory: `$XDG_CACHE_HOME` if set,
   else `~/Library/Caches` on macOS, `~/.cache` on other Unix systems and `%LOCALAPPDATA%` on
   Windows; that copy is not checked or indexed, and if it cannot be written the definition is
-  empty), completion (members after `.`, names in scope, keywords; each with its documentation
-  comment) and document formatting (as `catx fmt`);
+  empty), completion (members after `.` (not operators), names in scope, keywords; each with its
+  documentation comment; after `import`, the modules and directories next to the document, and
+  after `import m.{`, the module's public names), document formatting (as `catx fmt`) and range
+  formatting (the lines a selection touches get the changes `catx fmt` makes to them);
+- document highlights (the occurrences in the document of the name under the cursor: the
+  declaration as a write, uses as reads), folding ranges (declarations, multi-line blocks, closures,
+  `match`es and literals, runs of comment lines, runs of imports) and semantic tokens (names
+  classified as class, enum, interface, enum member, function, method, parameter, variable or
+  property, with the `declaration`, `readonly`, `static` and `defaultLibrary` modifiers);
 - find references and rename (with prepare-rename) for locals, parameters (including named
   arguments), functions, methods (an override and the method it overrides rename together), fields,
   classes, enums, variants, interfaces and constants. An interface member renames together with the
@@ -815,7 +842,9 @@ earlier waits only for the files being compiled at that moment and compiles the 
 client is shown its progress (`window/workDoneProgress`) and the time taken goes to the server's
 log. At most 2000 files are taken from the
 workspace folders (set `CATX_LSP_MAX_FILES` to change the limit); a larger workspace is cut, and the
-server says so in its log.
+server says so in its log. With `CATX_LSP_DEBUG=1` in its environment the server also logs, at
+the lowest level, how many files each request compiled and how many unopened files' diagnostics
+it published.
 
 `catx fix [--dry-run] paths...` applies the checker's fixes. For each file (directories are walked as
 for `catx fmt`, skipping `reject/`) it applies the first applicable fix of every diagnostic, checks
