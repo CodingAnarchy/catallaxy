@@ -301,6 +301,10 @@ impl Checker {
 
     pub fn check_match(&mut self, e: &Expr, subject: &Expr, arms: &[MatchArm], expected: Option<TyId>) -> TyId {
         let st = self.check_expr(subject, None);
+        // Literal patterns compare with `==`, which may be the subject's own method.
+        if arms.iter().any(|a| has_literal(&a.pattern)) && self.ty_runs_user(st, &["=="]) {
+            self.clear_unstable_paths();
+        }
         let subject_local = match (&subject.kind, self.names.get(&subject.id)) {
             (ExprKind::Ident(_), Some(NameRes::Local(l))) => Some(*l),
             _ => None,
@@ -1175,4 +1179,14 @@ enum Key {
     Tuple(usize),
     /// A union member type with no enumerable constructors.
     Member(TyId),
+}
+
+/// Whether `p` contains a literal (or range) pattern, which is tested with `==` (or `<=>`).
+fn has_literal(p: &Pattern) -> bool {
+    match &p.kind {
+        PatternKind::Literal(_) | PatternKind::Range { .. } => true,
+        PatternKind::Ctor { args, .. } => args.iter().any(has_literal),
+        PatternKind::Tuple(ps) | PatternKind::Or(ps) => ps.iter().any(has_literal),
+        PatternKind::Wildcard | PatternKind::Bind(_) | PatternKind::Typed { .. } => false,
+    }
 }

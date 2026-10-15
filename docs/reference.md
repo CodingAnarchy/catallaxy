@@ -266,10 +266,20 @@ variable that is assigned anywhere else in its function keeps no narrowing from 
 and a nil test inside the closure holds only until the next call (another fiber may run meanwhile).
 When the narrowing must outlive a call, bind the value: `if let v = x { ... }`.
 
+"Call" here includes the methods the language calls for you when they are user-defined: `[]` and `[]=`
+in indexing (`v[i]`, `v[i] = x`, `v[i] += 1`), operator methods (`v + 1`, `v += 1`, and operators on a
+`Dyn`, union or generic value), `==` and `<=>` (also inside list, tuple and dict comparisons, and for
+literal patterns in a `match`), `hash` and `==` of a dict or set key (`d[k]`, `d[k] = v`, `[k: v]`),
+`to_s` and `inspect` in string interpolation (also of values nested in a list or a field), and `each`
+in a `for` loop. Builtin ones, such as indexing a `List` or interpolating an `Int`, are not calls. The
+same holds before a loop: a narrowing that a call would end is dropped for the loop if its body contains
+such a call.
+
 A field path on a local or `self` (`n.next`, `self.head.next`) is narrowed by `!= nil` / `== nil` tests
 and by assigning it a non-nil value, as long as nothing could have changed it since: the narrowing ends at
 any assignment to a field of that name, a reassignment of the root variable, any call (unless every field
-on the path belongs to a `frozen class` or is read through a frozen value), and it does not reach into
+on the path belongs to a `frozen class` or is read through a frozen value, and a call cannot reassign
+the root variable as described above), and it does not reach into
 closures or across loop iterations that might change it. Fields of shared classes are never narrowed.
 When it does not apply, bind the value: `if let next = n.next { ... }`.
 
