@@ -724,8 +724,12 @@ throughout, any other with `\n`.
 `catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
 unsaved edits. It provides:
 
-- diagnostics (published on open, change and save), hover (types, signatures), go to definition,
-  completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
+- diagnostics (published on open, change and save), hover (types, signatures), go to definition
+  (a prelude function, class or method opens a read-only copy of the prelude's source, which the
+  server writes to `catallaxy/prelude-<version>-<hash>/` in the user's cache directory:
+  `$XDG_CACHE_HOME` if set, else `~/Library/Caches` on macOS, `~/.cache` on other Unix systems and
+  `%LOCALAPPDATA%` on Windows; that copy is not checked or indexed, and if it cannot be written the
+  definition is empty), completion (members after `.`, names in scope, keywords) and document formatting (as `catx fmt`);
 - find references and rename (with prepare-rename) for locals, parameters (including named
   arguments), functions, methods (an override and the method it overrides rename together), fields,
   classes, enums, variants, interfaces and constants. An interface member renames together with the
