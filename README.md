@@ -83,13 +83,15 @@ cargo build --release
 ## Usage
 
 ```
-catx run file.cx [args...]      run a program
+catx run file.cx [args...]      run a program (`catx file.cx [args...]` is short for this)
 catx check [--json] paths...    type-check without running (files or directories)
-catx fmt [--check] paths...     format source in place (files or directories)
+catx fmt [--check] paths...     format source in place (files or directories; `-` for stdin)
 catx fix [--dry-run] paths...   apply the checker's fixes (files or directories)
 catx test [paths...]            run test programs (files or directories; see the reference, §10)
 catx repl                       interactive session
 catx lsp                        language server (stdio)
+catx disasm file.cx [filter]    print the bytecode of the functions whose name contains `filter`
+catx version                    print the version
 ```
 
 `catx <command> --help` describes each command. The exit status is 0 on success, 1 when problems
@@ -150,9 +152,10 @@ lays out. It is tested on Linux, macOS and Windows.
 - a standard library for scripts and servers: files, directories, paths, file metadata, regexes,
   processes (run to completion or stream through pipes), TCP sockets and listeners on a
   non-blocking reactor, and an HTTP(S) client;
-- tooling: `check --json`, formatter, REPL, a language server (diagnostics, hover, definition,
-  completion, references, rename, signature help, inlay hints, symbols, formatting), Rust
-  extension API and C ABI.
+- tooling: `check --json`, `catx fix`, formatter, REPL, a language server (diagnostics, hover,
+  definition, completion, references, rename, signature help, inlay hints, symbols, highlights,
+  folding, semantic highlighting, formatting, and code actions that apply the checker's fixes as
+  quick fixes), Rust extension API and C ABI.
 
 Environment variables tune the runtime:
 

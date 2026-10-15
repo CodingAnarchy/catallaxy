@@ -11,6 +11,7 @@ Syntax highlighting for Catallaxy (`.cx`) files, plus the `catx lsp` language se
 - inlay hints with inferred types
 - document symbols, and workspace symbols over the workspace folders
 - formatting (`catx fmt`) of the document or a selection
+- code actions: the checker's suggested fixes as quick fixes (the light bulb, or **Quick Fix...**)
 
 ## Install
 
