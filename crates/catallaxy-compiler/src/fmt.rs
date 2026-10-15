@@ -27,7 +27,27 @@ pub const MAX_WIDTH: usize = 100;
 const INDENT: &str = "  ";
 
 /// Formats a source file. Refuses (returning the diagnostics) if the file does not parse.
+///
+/// The output keeps the file's line endings: a file whose first line ends in `\r\n` is formatted
+/// with `\r\n` throughout, any other with `\n`.
 pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
+    if uses_crlf(src) {
+        let lf = src.replace("\r\n", "\n");
+        return match format_lf(&lf) {
+            Ok(out) => Ok(out.replace('\n', "\r\n")),
+            // Report against the text as it is, so the spans point into the real file.
+            Err(e) => Err(format_lf(src).err().unwrap_or(e)),
+        };
+    }
+    format_lf(src)
+}
+
+/// Whether the first line of `src` ends in `\r\n`.
+fn uses_crlf(src: &str) -> bool {
+    src.find('\n').is_some_and(|i| src[..i].ends_with('\r'))
+}
+
+fn format_lf(src: &str) -> Result<String, Vec<Diagnostic>> {
     let mut next_id = 0;
     let (_, diags) = parser::parse(src, 0, &mut next_id);
     let errors: Vec<Diagnostic> = diags.into_iter().filter(|d| d.is_error()).collect();
@@ -844,7 +864,10 @@ mod tests {
     fn whitespace_and_final_newline() {
         assert_eq!(fmt("\n\n  x = 1   \n\n\n\ny = 2"), "x = 1\n\ny = 2\n");
         assert_eq!(fmt(""), "");
-        assert_eq!(fmt("x = 1\r\ny = 2\r\n"), "x = 1\ny = 2\n");
+        // A file keeps its line endings, decided by its first line.
+        assert_eq!(fmt("x=1\r\ny = 2\r\n"), "x = 1\r\ny = 2\r\n");
+        assert_eq!(fmt("x=1\r\ny = 2\n"), "x = 1\r\ny = 2\r\n");
+        assert_eq!(fmt("x=1\ny = 2\r\n"), "x = 1\ny = 2\n");
     }
 
     #[test]
