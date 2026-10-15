@@ -1,0 +1,116 @@
+# Channel.select, recv_timeout and try_send (issue #166), on the main thread (which blocks), in
+# fibers (which park) and across threads. Timeouts either expire with nothing ever sent, or are
+# long enough never to expire, so no outcome depends on timing.
+
+# try_send queues only when that needs no wait.
+bounded: Channel[Int] = Channel.new(1)
+puts(bounded.try_send(1))
+puts(bounded.try_send(2))
+puts(bounded.recv())
+unbounded: Channel[String] = Channel.new()
+puts(unbounded.try_send("a") && unbounded.try_send("b"))
+unbounded.close()
+puts(unbounded.try_send("c"))
+puts(unbounded.recv() ?? "nil")
+
+# recv_timeout: an item that is there, none ever (blocking the main thread), a closed channel.
+q: Channel[Int] = Channel.new()
+q.send(5)
+puts(q.recv_timeout(10.0) ?? -1)
+puts(q.recv_timeout(0.02) ?? -1)
+puts(q.recv_timeout(0.0) ?? -1)
+q.close()
+puts(q.recv_timeout(10.0) ?? -2)
+
+# In fibers: one waits with a long timeout for an item another sends later; one times out while
+# the others run.
+slow: Channel[Int] = Channel.new()
+never: Channel[Int] = Channel.new()
+waiter = Fiber.start { slow.recv_timeout(30.0) ?? -1 }
+quitter = Fiber.start { never.recv_timeout(0.02) ?? -1 }
+sender = Fiber.start {
+  sleep(0.01)
+  slow.send(42)
+  0
+}
+puts(waiter.join().unwrap())
+puts(quitter.join().unwrap())
+sender.join()
+
+# select: the ready case runs; with nothing ready it waits or times out; a closed channel's case
+# gets nil.
+a: Channel[Int] = Channel.new()
+b: Channel[String] = Channel.new()
+b.send("hi")
+r = Channel.select([a.on_recv { |x| "a #{x ?? -1}" }, b.on_recv { |s| "b #{s ?? "nil"}" }])
+puts(r ?? "timeout")
+r = Channel.select([a.on_recv { |x|
+  "a #{x ?? -1}"
+}, b.on_recv { |s| "b #{s ?? "nil"}" }], timeout: 0.02)
+puts(r ?? "timeout")
+r = Channel.select([a.on_recv { |x| "a #{x ?? -1}" }], timeout: 0.0)
+puts(r ?? "timeout")
+b.close()
+r = Channel.select([a.on_recv { |x| "a #{x ?? -1}" }, b.on_recv { |s| "b #{s ?? "nil"}" }])
+puts(r ?? "timeout")
+
+# Fairness: with both channels always ready, each is picked about half the time.
+x: Channel[Int] = Channel.new()
+y: Channel[Int] = Channel.new()
+picks = [0, 0]
+for _i in 0...2000 {
+  x.try_send(1)
+  y.try_send(1)
+  k = Channel.select([x.on_recv { |_v| 0 }, y.on_recv { |_v| 1 }]) ?? 0
+  picks[k] = picks[k] + 1
+}
+puts(picks[0] > 600 && picks[1] > 600)
+
+# Across threads: the main thread waits in select for an item another thread sends, and a thread
+# without fibers blocks in select until the main thread sends.
+c: Channel[Int] = Channel.new()
+d: Channel[Int] = Channel.new()
+t = spawn {
+  sleep(0.01)
+  d.send(7)
+  0
+}
+puts(Channel.select([c.on_recv { |v|
+  "c #{v ?? -1}"
+}, d.on_recv { |v| "d #{v ?? -1}" }]) ?? "timeout")
+t.join()
+e: Channel[Int] = Channel.new()
+f: Channel[Int] = Channel.new()
+t2 = spawn {
+  Channel.select([e.on_recv { |v| (v ?? 0) * 10 }, f.on_recv { |v| (v ?? 0) * 100 }]) ?? -1
+}
+f.send(3)
+puts(t2.join().unwrap())
+
+# Fibers on another thread select over channels the main thread feeds, mixed with timeouts.
+jobs: Channel[Int] = Channel.new()
+stop: Channel[Int] = Channel.new()
+t3 = spawn {
+  workers = (0...4).map { |_w|
+    Fiber.start {
+      got = 0
+      done = false
+      while !done {
+        n = Channel.select([jobs.on_recv { |v|
+          v ?? 0
+        }, stop.on_recv { |_v| -1 }], timeout: 30.0) ?? -1
+        if n < 0 { done = true } else { got += n }
+      }
+      got
+    }
+  }
+  total = 0
+  for w in workers { total += w.join().unwrap() }
+  total
+}
+for i in 1..100 { jobs.send(i) }
+# Each worker stops when the stop channel is closed (its case is then ready with nil), after the
+# job channel has drained.
+while jobs.length > 0 { sleep(0.001) }
+stop.close()
+puts(t3.join().unwrap())
