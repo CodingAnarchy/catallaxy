@@ -330,7 +330,7 @@ pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
         let closure = vm.extra_roots()[0];
         // A Rust panic in the runtime (an internal error) ends only this fiber, like a
         // Catallaxy panic; unwinding it through the coroutine would take the thread down too.
-        let r = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.call_value(closure, &[]))) {
+        let r = match crate::catch_internal(|| vm.call_value(closure, &[])) {
             Ok(r) => r,
             Err(payload) => {
                 // Not a panic message: corosensei dropping a suspended fiber, which must unwind.

@@ -514,7 +514,12 @@ Annotate the parameter to use any of these.
   Deeper nesting panics with `LockError:`.
 - An internal error of the runtime (a bug in Catallaxy, or in a native extension) is a panic whose
   message starts `internal error:`. It ends only the thread, fiber or `par_*` call it happened in, like
-  any panic, and releases the locks that thread held.
+  any panic, and releases the locks that thread held. Its report gives the Rust source location as
+  its first `at` line, marked `(Rust)`; Rust's own panic report is printed too with
+  `CATX_RUST_PANIC=1`. One that happens inside a garbage collection cannot be recovered from (the
+  heap's state is unknown, and other threads may be stopped for it): the program's output is
+  flushed, the message is printed, followed by `during a garbage collection; the program cannot
+  continue`, and the process exits with status 101.
 - Running out of memory panics with a message starting `MemoryError:`, like any other panic (so on another
   thread `join` returns it as `Err`, and the program can carry on once the data is dropped):
   - A single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,
@@ -714,6 +719,13 @@ status is 1 if errors remain, 2 if a file could not be read or written.
 Every diagnostic has a code. `docs/errors.md` explains each one with an example and a fix, and
 `catx check` (like `catx run` when a program does not compile) ends its report with a link to the
 entries for the codes it printed.
+
+`catx check` reports everything `catx run` would refuse to run, including the code generator's
+limit on live values in one function (E0900). The compiler has limits of its own instead of
+running out of stack: expressions, types and patterns may nest 1,000 levels deep, and one
+statement's syntax tree may be 10,000 levels deep (an operator or method chain of about 10,000
+links); deeper input is E0901. Chains below that, such as generated code that adds up thousands of
+strings, compile and run.
 
 Warnings never make `catx check` fail. A comment `# allow(CODE, ...)` on the warning's line, or on
 the line above it, silences those warnings there (`s += x # allow(W0004)`). The warnings are:
