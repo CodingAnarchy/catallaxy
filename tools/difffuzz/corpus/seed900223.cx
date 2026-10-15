@@ -196,7 +196,7 @@ ts100 = (1..4).map { |p101|
 }
 for t in ts100 { t.join() }
 puts(atom98.get())
-puts(mtx99.get())
+puts(mtx99.lock { |l| l.dup })
 shared class Shared102 {
   hits: Atomic[Int] = Atomic.new(0)
   total: Int = 0

@@ -1,6 +1,6 @@
 //! A frozen value is usable as an interface only if the methods implementing it do not mutate
 //! (E0614), and a `Fiber`, pinned to the thread that started it, cannot move to another thread
-//! (E0617).
+//! (E0619).
 
 use std::path::Path;
 
@@ -58,7 +58,7 @@ fn a_fiber_cannot_move_to_another_thread() {
     ];
     for src in bad {
         let codes = error_codes(&format!("{src}\n"));
-        assert!(!codes.is_empty() && codes.iter().all(|c| c == "E0617"), "{src}\n{codes:?}");
+        assert!(!codes.is_empty() && codes.iter().all(|c| c == "E0619"), "{src}\n{codes:?}");
     }
     let ok = [
         "f = Fiber.start { 1 }\nputs(f.join())",

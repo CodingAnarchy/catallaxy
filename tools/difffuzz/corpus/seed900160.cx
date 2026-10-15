@@ -190,7 +190,7 @@ ts103 = (1..4).map { |p104|
 }
 for t in ts103 { t.join() }
 puts(atom101.get())
-puts(mtx102.get())
+puts(mtx102.lock { |l| l.dup })
 if (false or ("  pad  " == "hello world")) {
   rec9(49, v93.fetch("k0", 0)).abs().digits().take(8).each_with_index { |x106, x107|
     if ((([14, (-30), (2 ** 62)]).sum_by { |p108| x107 }) < (x107 * (-6))) {

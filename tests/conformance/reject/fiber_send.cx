@@ -1,4 +1,4 @@
-# expect: E0617
+# expect: E0619
 # A fiber belongs to the thread that started it: another thread cannot join it.
 ch: Channel[Fiber[Int]] = Channel.new()
 t = spawn {

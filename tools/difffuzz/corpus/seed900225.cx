@@ -344,7 +344,7 @@ ts190 = (1..3).map { |p191|
 }
 for t in ts190 { t.join() }
 puts(atom188.get())
-puts(mtx189.get())
+puts(mtx189.lock { |l| l.dup })
 shared class Shared193 {
   hits: Atomic[Int] = Atomic.new(0)
   total: Int = 0

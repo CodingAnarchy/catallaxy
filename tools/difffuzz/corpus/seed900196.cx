@@ -357,7 +357,7 @@ ts214 = (1..3).map { |p215|
 }
 for t in ts214 { t.join() }
 puts(atom212.get())
-puts(mtx213.get())
+puts(mtx213.lock { |l| l.dup })
 junk216: List[String] = []
 for i217 in 0...1003 {
   junk216.push("j#{i217}-#{i217 * 7 % 13}")

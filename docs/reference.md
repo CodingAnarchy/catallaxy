@@ -624,7 +624,22 @@ object panics with `OwnershipError`; under `catx run --promote-on-access` the ob
 shared instead and a warning is logged. Single operations on shared objects are atomic; compound ones
 (`d[k] += 1`) need `Mutex`, `Atomic` or `with lock`.
 
-### 8.1 Atomics and channels
+### 8.1 Mutexes, atomics and channels
+
+A `Mutex[T]` protects an owned value only inside `lock`. The checker keeps the value from escaping
+to code that does not hold the lock:
+
+- `m.get` and `m.update { ... }` need a frozen or shareable `T` (E0616). For an owned `T`, work on
+  the value inside `m.lock { |v| ... }` and replace it with `m.set(move v)`.
+- A `lock` block may not return the protected value, an owned object inside it, or a shallow copy
+  that shares one, and may not store one in a variable from outside the block (E0617). It may
+  return frozen and shareable values, and fresh values whose owned contents are not taken from
+  the protected value: `m.lock { |l| l.length }`, `m.lock { |l| l.dup }` for a list of numbers,
+  `m.lock { |rows| rows.map { |r| r.dup } }`. The check follows the types a value can hold: a
+  result computed from the block's parameter is rejected when an owned type occurs both in it and
+  in `T`. `Dyn` values are not checked.
+- `Atomic.new` needs a frozen or shareable value (E0618), since `get` hands the value to every
+  thread.
 
 `Atomic.add(n)` returns the new value. `Channel.recv()` blocks until a value arrives and returns
 `nil` once the channel is closed and drained; `for x in ch` iterates until then.
@@ -646,7 +661,7 @@ pages = fs.map { |f| f.join().unwrap() }
   `Fiber.yield()` lets the thread's other fibers run.
 - A fiber runs on the OS thread that started it, for its whole life, and only that thread can
   join it: a `Fiber`, or a value that holds one, cannot be sent, moved to a `spawn move` block or
-  a `Mutex`, or returned from a thread or `par_*` block (E0617). Send its result instead.
+  a `Mutex`, or returned from a thread or `par_*` block (E0619). Send its result instead.
 - Fibers on one thread
   interleave only where one of them waits: channel `send`/`recv`, `join`, `sleep`, socket,
   file, directory, process and console I/O, HTTP requests, `Fiber.yield()`. Their blocks may therefore capture and mutate owned values (no
@@ -790,7 +805,15 @@ unsaved edits. It provides:
   same-named methods of every type whose values are used as that interface (passed, assigned,
   returned, put in a list or dict, or checked against a generic bound), so those types keep
   conforming; renaming such a method renames the member too. They cover the workspace (below);
-  names from the prelude cannot be renamed, nor can a member that a built-in type implements;
+  names from the prelude cannot be renamed, nor can a member that a built-in type implements.
+  A rename is refused (error `-32803`, naming what it would collide with) when the new name is
+  taken: by another variable of the same scope, by a variable of an enclosing or nested scope
+  whose uses (or the renamed variable's) would change meaning, by a function or variable used in
+  the renamed variable's scope, by an item, import or prelude name visible where a renamed item is
+  declared or used, or by a method, field or constant of the same class (its superclasses and
+  subclasses included), enum or interface. The server then checks the renamed workspace, every
+  compilation that includes an edited file, and refuses if a diagnostic appears that was not
+  there before, or if any name now refers to something other than it did;
 - signature help for function, method and constructor calls, showing default values and marking
   the trailing-block parameter, with the active parameter following commas and named arguments;
 - inlay hints with the inferred types of unannotated variables, `for`/`let`/`if let` bindings and

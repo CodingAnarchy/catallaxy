@@ -82,7 +82,7 @@ perfect: Mutex[List[Int]] = Mutex.new([])
     perfect.lock { |l| l.push(k) }
   }
 }
-puts("perfect numbers: #{perfect.get().sorted()} (count #{found.get()}, sum #{found_sum.get()})")
+puts("perfect numbers: #{perfect.lock { |l| l.sorted() }} (count #{found.get()}, sum #{found_sum.get()})")
 
 # Parallel and sequential agree on a floating-point series (summed in a fixed order).
 terms = (0...200_000).to_list().par_map { |k|

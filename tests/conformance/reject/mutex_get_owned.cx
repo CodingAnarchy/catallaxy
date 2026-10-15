@@ -1,0 +1,5 @@
+# expect: E0616
+# `Mutex.get` on an owned value hands out the protected dict itself (issue #162).
+m = Mutex.new(move ["n": 0])
+ts = (1..8).to_list().map { |_i| spawn { d = m.get; 20000.times { d["n"] = d["n"]! + 1 }; nil } }
+ts.each { |t| t.join() }

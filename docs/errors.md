@@ -1669,7 +1669,56 @@ cells.par_map { |c| c.v }
 
 Freeze the list first (`freeze(cells).par_map { ... }`), or use frozen or shared element types.
 
+## E0616
+
+`Mutex.get` or `Mutex.update` on an owned value. A `Mutex` protects an owned value (a list, a dict,
+an object) only inside `lock`. `get` would return the value itself, so other threads could change it
+while this one reads or changes it, and updates would be lost. `update` stores its block's result
+without moving it and returns it, so the new value would also stay reachable outside the lock.
+
+```cx
+m = Mutex.new(move ["n": 0])
+d = m.get
+d["n"] = d["n"]! + 1
+```
+
+Work on the value inside `m.lock { |d| d["n"] = d["n"]! + 1 }`, and return only what you need from
+the block: `m.lock { |d| d["n"] }`, or a fresh copy such as `m.lock { |d| d.dup }`. To replace the
+value, use `m.set(move v)`. `get` and `update` are fine on frozen and shareable values
+(`Mutex[Int]`, `Mutex[String]`).
+
 ## E0617
+
+A `lock` block lets the protected value escape. The block returns the value it was given, an owned
+object inside it, or a shallow copy that shares such objects, or it stores one in a variable from
+outside the block. Used outside the lock, the object could be changed by several threads at once.
+
+```cx
+m = Mutex.new(move [[1, 2], [3]])
+first = m.lock { |rows| rows[0] }
+first.push(4)
+```
+
+Return frozen values (counts, strings) or fresh values whose owned contents are not taken from the
+protected value: `m.lock { |rows| rows[0].dup }`, `m.lock { |rows| rows.map { |r| r.sum() } }`.
+The checker follows values through the types they can hold: a result computed from the block's
+parameter is rejected if an owned type occurs both in it and in the protected value. Values typed
+`Dyn` are not checked.
+
+## E0618
+
+`Atomic` of an owned value. An `Atomic` hands its value to every thread that calls `get`, so an
+owned value in it (a list, a dict, an object) could be changed by several threads at once.
+
+```cx
+a = Atomic.new([0])
+a.get.push(1)
+```
+
+Use `Atomic` for frozen values (`Int`, `String`, frozen objects) and shareable ones. Keep a mutable
+value in a `Mutex` and change it inside `lock`.
+
+## E0619
 
 A fiber cannot move to another thread. A `Fiber` runs on the thread that started it, and only that
 thread can join it. So a fiber, or a value that holds one (a list of fibers, an object with a fiber

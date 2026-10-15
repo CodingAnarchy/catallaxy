@@ -122,7 +122,7 @@ impl Checker {
         }
     }
 
-    /// E0617 if a value of type `t` would move to another thread but holds a pinned `Fiber`.
+    /// E0619 if a value of type `t` would move to another thread but holds a pinned `Fiber`.
     pub fn check_not_pinned(&mut self, t: TyId, what: &str, span: Span) -> bool {
         let Some(p) = self.pinned_in(t) else { return true };
         let inner = if self.types.shallow_resolve(t) == p {
@@ -132,7 +132,7 @@ impl Checker {
         };
         let msg = format!("{what} of type `{}` cannot move to another thread{inner}", self.show(t));
         self.emit(
-            Diagnostic::error("E0617", msg, span)
+            Diagnostic::error("E0619", msg, span)
                 .note("a fiber runs on the thread that started it, and only that thread can join it")
                 .note("join it on this thread and send its result instead"),
         );

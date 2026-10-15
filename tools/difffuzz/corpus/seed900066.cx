@@ -335,7 +335,7 @@ ts177 = (1..6).map { |p178|
 }
 for t in ts177 { t.join() }
 puts(atom175.get())
-puts(mtx176.get())
+puts(mtx176.lock { |l| l.dup })
 puts(v46)
 puts(tot63)
 puts(v74)
