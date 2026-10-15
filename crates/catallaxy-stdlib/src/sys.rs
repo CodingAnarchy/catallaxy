@@ -118,13 +118,15 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             RNG.with(|r| r.set(splitmix(n as u64)));
             Ok(Value::NIL)
         },
-        "Random.int" => |_, a| {
+        "Random.int" => |vm, a| {
             let (lo, hi) = (int(a[0])?, int(a[1])?);
             if hi < lo {
                 return panic("ArgumentError: Random.int(lo, hi) needs lo <= hi");
             }
-            let span = (hi - lo) as u64 + 1;
-            Ok(Value::small_int(lo + (next_u64() % span) as i64))
+            // The span has up to 2^64 values: count in 128 bits.
+            let span = (hi as i128 - lo as i128) as u128 + 1;
+            let r = if span > u64::MAX as u128 { next_u64() as u128 } else { next_u64() as u128 % span };
+            Ok(vm.m.int((lo as i128 + r as i128) as i64))
         },
         "Random.float" => |_, _| Ok(Value::from_f64((next_u64() >> 11) as f64 / (1u64 << 53) as f64)),
         "Random.shuffle" => |vm, a| {

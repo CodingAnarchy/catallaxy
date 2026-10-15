@@ -1,0 +1,53 @@
+c
+a
+IndexError: index 3 out of range for string of length 3
+IndexError: index -4 out of range for string of length 3
+IndexError: index 0 out of range for string of length 0
+IndexError: index 5 out of range for string of length 5
+"bc"
+"b"
+nil
+nil
+[[1, 2], [3, 4], [5]]
+ArgumentError: chunk size must be positive, got 0
+ArgumentError: chunk size must be positive, got -1
+[1, 4, 7, 10]
+ArgumentError: step must be positive, got 0
+ArgumentError: step must be positive, got -1
+[[1, 2], [3]]
+ArgumentError: slice size must be positive, got 0
+ArgumentError: slice size must be positive, got -2
+[[1, 2], [2, 3]]
+ArgumentError: window size must be positive, got 0
+ArgumentError: slice size must be positive, got 0
+1024
+ArgumentError: negative exponent for Int ** Int; use a Float power
+ArgumentError: negative exponent for Int ** Int; use a Float power
+RangeError: exponent too large
+ArgumentError: negative shift count
+ArgumentError: negative shift count
+RangeError: shift count too large
+ArgumentError: negative shift count
+1
+-1
+0
+1
+0
+1
+-1
+[-Infinity, 1.0, 2.0, 3.0, Infinity, NaN]
+[1.0, 3.0, NaN]
+NaN
+1.0
+[2.0, NaN]
+false false false false false
+false false false
+false true
+false
+[[[1]]]
+ArgumentError: Json.stringify: nesting deeper than 200 levels (a cycle?)
+true
+true
+5
+RangeError: integer too large
+ArgumentError: Random.int(lo, hi) needs lo <= hi

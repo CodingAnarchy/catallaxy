@@ -181,12 +181,18 @@ pub fn int_mod(m: &mut Mutator, a: Value, b: Value) -> RtResult<Value> {
 }
 
 pub fn int_pow(m: &mut Mutator, a: Value, b: Value) -> RtResult<Value> {
-    let Some(e) = int_as_i64(b) else { return panic("exponent too large") };
+    let Some(e) = int_as_i64(b) else {
+        return panic(if sign_of(b) < 0 {
+            "ArgumentError: negative exponent for Int ** Int; use a Float power"
+        } else {
+            "RangeError: exponent too large"
+        });
+    };
     if e < 0 {
-        return panic("negative exponent for Int ** Int; use Float");
+        return panic("ArgumentError: negative exponent for Int ** Int; use a Float power");
     }
     if e > u32::MAX as i64 {
-        return panic("exponent too large");
+        return panic("RangeError: exponent too large");
     }
     if let Some(x) = a.is_small_int().then(|| a.as_small_int()) {
         if let Some(p) = x.checked_pow(e as u32) {
@@ -212,7 +218,7 @@ pub fn int_bitop(m: &mut Mutator, op: u8, a: Value, b: Value) -> RtResult<Value>
             b'^' => x ^ y,
             b'<' => {
                 if y < 0 {
-                    return panic("negative shift count");
+                    return panic("ArgumentError: negative shift count");
                 }
                 if y < 16 && fits_small(x << y) && (x << y) >> y == x {
                     x << y
@@ -222,7 +228,7 @@ pub fn int_bitop(m: &mut Mutator, op: u8, a: Value, b: Value) -> RtResult<Value>
             }
             b'>' => {
                 if y < 0 {
-                    return panic("negative shift count");
+                    return panic("ArgumentError: negative shift count");
                 }
                 x >> y.min(63)
             }
@@ -236,7 +242,13 @@ pub fn int_bitop(m: &mut Mutator, op: u8, a: Value, b: Value) -> RtResult<Value>
         b'|' => x | y,
         b'^' => x ^ y,
         b'<' | b'>' => {
-            let Some(n) = y.to_usize() else { return panic("invalid shift count") };
+            let Some(n) = y.to_usize() else {
+                return panic(if y.is_negative() {
+                    "ArgumentError: negative shift count"
+                } else {
+                    "RangeError: shift count too large"
+                });
+            };
             if op == b'<' {
                 x << n
             } else {
@@ -386,7 +398,7 @@ fn write_value(ix: &mut dyn Interop, v: Value, out: &mut String, quoted: bool, d
             if let Some(r) = ix.call_method(v, name, &[])? {
                 match str_of(r) {
                     Some(s) => out.push_str(s),
-                    None => return panic(format!("{}#{} must return a String", cls.name, name)),
+                    None => return panic(format!("TypeError: {}#{} must return a String", cls.name, name)),
                 }
                 return Ok(());
             }
@@ -745,13 +757,28 @@ pub unsafe fn dict_lookup_hashed_unchecked(
     }
 }
 
+/// The total order `<=>` uses for numbers: the usual one, with NaN after every other value
+/// (infinity included) and equal to itself; `-0.0` and `0.0` are equal.
+pub fn float_cmp(x: f64, y: f64) -> CmpOrdering {
+    match x.partial_cmp(&y) {
+        Some(o) => o,
+        None => x.is_nan().cmp(&y.is_nan()),
+    }
+}
+
+/// True if `<` / `<=` on these values compares numbers one of which is NaN: false, as IEEE 754
+/// and the `Float` operators have it (only `<=>` orders NaN).
+pub fn unordered_numbers(x: Value, y: Value) -> bool {
+    matches!((num_f64(x), num_f64(y)), (Some(p), Some(q)) if p.is_nan() || q.is_nan())
+}
+
 /// `<=>`-style comparison. Returns None if the values are not comparable.
 pub fn compare(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<Option<CmpOrdering>> {
     if is_int(a) && is_int(b) {
         return Ok(Some(int_cmp(a, b)));
     }
     if let (Some(x), Some(y)) = (num_f64(a), num_f64(b)) {
-        return Ok(x.partial_cmp(&y));
+        return Ok(Some(float_cmp(x, y)));
     }
     if !a.is_ptr() || !b.is_ptr() {
         if a.is_bool() && b.is_bool() {
