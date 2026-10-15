@@ -1304,3 +1304,62 @@ fn string_append_lint_warns_and_fixes() {
     assert!(!err.contains("W0004"), "{err}");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// Deep and long expressions (#156) get diagnostics from the server, which keeps serving
+/// requests over them, and its workspace indexing walks them too.
+#[test]
+fn lsp_survives_deep_and_long_expressions() {
+    let dir = scratch_dir("lsp-deep");
+    let chain = |n: usize| format!("x = {}\nputs(x)\n", vec!["1"; n].join(" + "));
+    let docs = [
+        ("long.cx", chain(5_000), None),
+        ("methods.cx", format!("s = \"a\"{}\nputs(s)\n", ".upcase()".repeat(8_000)), None),
+        ("too_long.cx", chain(20_000), Some("E0901")),
+        ("parens.cx", format!("x = {}1{}\nputs(x)\n", "(".repeat(5_000), ")".repeat(5_000)), Some("E0901")),
+        ("ifs.cx", format!("{}puts(1)\n{}", "if true {\n".repeat(3_000), "}\n".repeat(3_000)), Some("E0901")),
+    ];
+    for (name, text, _) in &docs {
+        std::fs::write(dir.join(name), text).unwrap();
+    }
+    let mut lsp = Lsp::start();
+    lsp.request(1, "initialize", json!({"processId": null, "rootUri": path_uri(&dir), "capabilities": {}}));
+    lsp.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
+    let mut id = 2;
+    for (name, text, want) in &docs {
+        let uri = path_uri(&dir.join(name));
+        lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+            "textDocument": {"uri": uri, "languageId": "catallaxy", "version": 1, "text": text}
+        }}));
+        let diags = lsp.wait("publishDiagnostics", |v| {
+            v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == json!(uri)
+        });
+        let codes: Vec<&str> =
+            diags["params"]["diagnostics"].as_array().unwrap().iter().filter_map(|d| d["code"].as_str()).collect();
+        match want {
+            Some(code) => assert!(codes.contains(code), "{name}: {codes:?}"),
+            None => assert!(codes.is_empty(), "{name}: {codes:?}"),
+        }
+        let doc = json!({"uri": uri});
+        let at = json!({"line": 0, "character": 0});
+        let end = json!({"line": 2, "character": 0});
+        for (method, params) in [
+            ("textDocument/hover", json!({"textDocument": doc, "position": at})),
+            ("textDocument/documentSymbol", json!({"textDocument": doc})),
+            ("textDocument/inlayHint", json!({"textDocument": doc, "range": {"start": at, "end": end}})),
+            ("textDocument/formatting", json!({"textDocument": doc, "options": {"tabSize": 2, "insertSpaces": true}})),
+            (
+                "textDocument/references",
+                json!({"textDocument": doc, "position": at, "context": {"includeDeclaration": true}}),
+            ),
+        ] {
+            let r = lsp.request(id, method, params);
+            assert!(r.get("result").is_some(), "{name} {method}: {r}");
+            id += 1;
+        }
+    }
+    let r = lsp.request(id, "workspace/symbol", json!({"query": "x"}));
+    assert!(r.get("result").is_some(), "{r}");
+    lsp.request(id + 1, "shutdown", json!(null));
+    lsp.send(json!({"jsonrpc": "2.0", "method": "exit"}));
+    std::fs::remove_dir_all(&dir).ok();
+}

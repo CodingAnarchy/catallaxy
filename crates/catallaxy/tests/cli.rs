@@ -170,5 +170,23 @@ fn help_link_is_pinned_to_the_version() {
     let (_, _, err) = catx(&[OsStr::new("check"), bad.as_os_str()]);
     let want = format!("/blob/v{}/docs/errors.md#e0300", env!("CARGO_PKG_VERSION"));
     assert!(err.contains(&want), "{err}");
+
+/// Long operator chains run; nesting past the limit is a diagnostic from `check` and `run`
+/// alike, never a stack overflow (#156).
+#[test]
+fn deep_and_long_expressions() {
+    let dir = scratch_dir("deep");
+    let long = dir.join("long.cx");
+    std::fs::write(&long, format!("x = {}\nputs(x)\n", vec!["1"; 5_000].join(" + "))).unwrap();
+    let (code, out, err) = catx(&[OsStr::new("run"), long.as_os_str()]);
+    assert_eq!((code, out.trim()), (0, "5000"), "{err}");
+    let deep = dir.join("deep.cx");
+    std::fs::write(&deep, format!("x = {}1{}\nputs(x)\n", "(".repeat(10_000), ")".repeat(10_000))).unwrap();
+    let (code, _, err) = catx(&[OsStr::new("check"), deep.as_os_str()]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("error[E0901]") && err.matches("error[").count() == 1, "{err}");
+    let (code, _, err) = catx(&[OsStr::new("run"), deep.as_os_str()]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("error[E0901]"), "{err}");
     std::fs::remove_dir_all(&dir).ok();
 }

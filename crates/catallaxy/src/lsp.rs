@@ -36,7 +36,8 @@ pub fn cmd_lsp(args: &[String]) -> i32 {
         return crate::unexpected("lsp", a);
     }
     let (conn, io) = Connection::stdio();
-    let code = match serve(&conn) {
+    // Requests walk syntax trees as deep as the parser allows: serve them on the compiler's stack.
+    let code = match catallaxy_compiler::util::on_compiler_stack(|| serve(&conn).map_err(|e| e.to_string())) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("catx lsp: {e}");
