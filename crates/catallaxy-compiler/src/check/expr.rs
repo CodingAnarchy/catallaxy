@@ -2613,17 +2613,22 @@ impl Checker {
         expected: Option<TyId>,
     ) -> TyId {
         let info = self.enums[en as usize].clone();
+        // Type arguments written here or inferred from the payload are checked against the
+        // enum's bounds; ones taken from the expected type are checked where that is written.
+        let mut from_expected = false;
         let targs = targs.unwrap_or_else(|| {
             // Use the expected enum's arguments when available.
             if let Some(exp) = expected {
                 if let Ty::Enum(e2, a) = self.types.get(self.types.shallow_resolve(exp)).clone() {
                     if e2 == en {
+                        from_expected = true;
                         return a;
                     }
                 }
                 if let Some(inner) = self.types.strip_nil(exp) {
                     if let Ty::Enum(e2, a) = self.types.get(inner).clone() {
                         if e2 == en {
+                            from_expected = true;
                             return a;
                         }
                     }
@@ -2651,6 +2656,9 @@ impl Checker {
             slots.push(ArgSlot::Arg(i));
         }
         self.calls.insert(e.id, CallRes::Variant { class: v.class_id, args: slots });
+        if !from_expected {
+            self.note_instance(&info.name, &info.params, &targs, e.span);
+        }
         self.types.intern(Ty::Enum(en, targs))
     }
 
@@ -3773,6 +3781,14 @@ impl Checker {
                 return self.globals[g as usize].ty;
             }
         }
+        // Inferred type arguments are checked against the class's bounds, unless the expected
+        // type (an annotation, a parameter type, a field type), which is checked where it is
+        // written, already decides them.
+        let from_expected = targs.is_none()
+            && expected.is_some_and(|x| {
+                let x = self.types.strip_nil(x).unwrap_or(x);
+                matches!(self.types.get(self.types.shallow_resolve(x)), Ty::Class(c, _) if *c == cid)
+            });
         let targs = match targs {
             Some(t) => {
                 if t.len() != ci.params.len() {
@@ -3785,6 +3801,9 @@ impl Checker {
             None => ci.params.iter().map(|_| self.types.fresh_var()).collect(),
         };
         let self_ty = self.types.class(cid, targs.clone());
+        if !from_expected {
+            self.note_instance(&ci.name, &ci.params, &targs, e.span);
+        }
         let subst: FxHashMap<ParamId, TyId> = ci.params.iter().copied().zip(targs.iter().copied()).collect();
         if name.name == "new" && !ci.is_builtin {
             let ctor = ci.constructor.unwrap();
@@ -3856,9 +3875,10 @@ impl Checker {
             self.types.strip_nil(t).unwrap_or(t)
         });
         if let Some(t) = exp {
-            if let Ty::Enum(en, targs) = self.types.get(t).clone() {
+            if let Ty::Enum(en, _) = self.types.get(t).clone() {
                 if let Some(tag) = self.enums[en as usize].variants.iter().position(|v| v.name == name.name) {
-                    return self.construct_variant(e, en, tag as u32, Some(targs), args, expected);
+                    // The type arguments come from `expected`.
+                    return self.construct_variant(e, en, tag as u32, None, args, expected);
                 }
                 let msg = format!("enum `{}` has no variant `{}`", self.enums[en as usize].name, name.name);
                 self.err("E0343", msg, name.span);

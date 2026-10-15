@@ -439,6 +439,11 @@ A parameter of an interface type accepts a value of any type that satisfies the 
 parameter (`fn f(a: I, b: I)`) may get a different type. To require the same type, use a type parameter
 (`fn f[T: I](a: T, b: T)`); an interface with `Self` parameters must be used that way (E0375).
 
+Bounds hold for every instantiation, of functions and of generic classes, enums and interfaces
+(`class SortedList[T: Comparable]`): type arguments written in types (`SortedList[P]`) and type arguments
+inferred for a construction (`SortedList.new()`, `Heap.Node(x, .Leaf)`), including ones inferred from
+later uses, must meet them (E0368). A type parameter used as such an argument needs the bound itself.
+
 Type arguments are erased at run time: one compiled body serves every instantiation, and a type test
 cannot check them (see §4.4 and E0374).
 

@@ -314,6 +314,88 @@ impl Checker {
             self.ensure_global(g as GlobalId);
         }
         self.check_local_keys();
+        self.check_instance_bounds();
+    }
+
+    /// Records a use of the generic type `name` (parameters `params`) with type arguments `args`;
+    /// [`Self::check_instance_bounds`] checks the arguments against the parameters' bounds.
+    pub fn note_instance(&mut self, name: &str, params: &[ParamId], args: &[TyId], span: Span) {
+        if params.is_empty() || params.len() != args.len() || !self.pending_inst_seen.insert((span, args.to_vec())) {
+            return;
+        }
+        self.pending_insts.push(PendingInst {
+            module: self.cur_module,
+            name: name.to_string(),
+            params: params.to_vec(),
+            args: args.to_vec(),
+            span,
+        });
+    }
+
+    /// In a function with untyped parameters, a type argument derived from one of them (`fn
+    /// g(x) { Box.new(v: x) }`) becomes a requirement on that parameter, checked at each call
+    /// (E0341), like any other typed place the parameter flows into.
+    fn require_open_instance_bounds(&mut self, from: usize) {
+        for i in from..self.pending_insts.len() {
+            let inst = self.pending_insts[i].clone();
+            let args: Vec<TyId> = inst.args.iter().map(|&a| self.types.resolve(a)).collect();
+            let subst: FxHashMap<ParamId, TyId> = inst.params.iter().copied().zip(args.iter().copied()).collect();
+            for (&p, &actual) in inst.params.iter().zip(args.iter()) {
+                if !self.types.has_open(actual) {
+                    continue;
+                }
+                for b in self.params[p as usize].bounds.clone() {
+                    let b = self.types.subst(b, &subst, None);
+                    self.assignable(actual, b);
+                }
+            }
+        }
+    }
+
+    /// E0368 for each recorded instantiation of a generic class, enum or interface whose type
+    /// argument does not meet its parameter's bound. Runs after every body, so that type arguments
+    /// inferred from later uses (`s = SortedList.new(); s.add(x)`) are known; one still unknown is
+    /// skipped.
+    pub fn check_instance_bounds(&mut self) {
+        let saved = self.cur_module;
+        for inst in std::mem::take(&mut self.pending_insts) {
+            if inst.params.iter().all(|&p| self.params[p as usize].bounds.is_empty()) {
+                continue;
+            }
+            self.cur_module = inst.module;
+            let args: Vec<TyId> = inst.args.iter().map(|&a| self.types.resolve(a)).collect();
+            let subst: FxHashMap<ParamId, TyId> = inst.params.iter().copied().zip(args.iter().copied()).collect();
+            for (&p, &actual) in inst.params.iter().zip(args.iter()) {
+                // Unknown, or a requirement on an untyped parameter (above).
+                let unknown = self.types.has_vars(actual) || self.types.has_open(actual);
+                if unknown || matches!(self.types.get(actual), Ty::Error) {
+                    continue;
+                }
+                for b in self.params[p as usize].bounds.clone() {
+                    let b = self.types.subst(b, &subst, None);
+                    if self.trial(|c| c.assignable(actual, b)) {
+                        continue;
+                    }
+                    let pname = self.params[p as usize].name.clone();
+                    let msg = format!(
+                        "`{}` does not satisfy the bound `{}` of type parameter `{pname}` of `{}`",
+                        self.show(actual),
+                        self.show(b),
+                        inst.name
+                    );
+                    let mut d = Diag::error("E0368", msg, inst.span);
+                    let missing = self.missing_methods(actual, b);
+                    if !missing.is_empty() {
+                        d = d.note(format!(
+                            "missing: {}",
+                            missing.iter().map(|x| format!("`{x}`")).collect::<Vec<_>>().join(", ")
+                        ));
+                    }
+                    self.emit(d);
+                }
+            }
+        }
+        self.cur_module = saved;
     }
 
     pub fn check_fn_body(&mut self, fid: FnId) {
@@ -400,9 +482,11 @@ impl Checker {
             }
         }
         let expected = if f.ret_annotated { Some(f.ret) } else { None };
+        let insts_before = self.pending_insts.len();
         let t = self.check_block(body, expected);
         self.finish_fn(fid, t, body.span);
         if f.has_untyped_params {
+            self.require_open_instance_bounds(insts_before);
             let ret = self.fns[fid as usize].ret;
             let ret = self.types.resolve(ret);
             self.fns[fid as usize].implicit = Some(ImplicitSig { params: open_params, ret });

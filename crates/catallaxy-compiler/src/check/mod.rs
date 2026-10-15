@@ -254,6 +254,20 @@ pub struct Checker {
     /// from the last `instantiate_sig` (empty otherwise).
     pub last_sigs: Vec<(lookup::MethodRef, Vec<PInfo>, TyId)>,
     pub pending_bounds: Vec<(ModId, Vec<ParamId>, Vec<ast::TypeParam>, collect::TypeScope)>,
+    /// Instantiations of generic classes, enums and interfaces whose bounds are checked once
+    /// every body has been checked (inferred type arguments are known by then).
+    pub pending_insts: Vec<PendingInst>,
+    pub pending_inst_seen: FxHashSet<(Span, Vec<TyId>)>,
+}
+
+/// A use of a generic type with these type arguments, for [`Checker::check_instance_bounds`].
+#[derive(Clone, Debug)]
+pub struct PendingInst {
+    pub module: ModId,
+    pub name: String,
+    pub params: Vec<ParamId>,
+    pub args: Vec<TyId>,
+    pub span: Span,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -356,6 +370,8 @@ impl Checker {
             last_inst_subst: FxHashMap::default(),
             last_sigs: Vec::new(),
             pending_bounds: Vec::new(),
+            pending_insts: Vec::new(),
+            pending_inst_seen: FxHashSet::default(),
         }
     }
 

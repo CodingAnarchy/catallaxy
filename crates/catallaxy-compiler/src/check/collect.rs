@@ -582,6 +582,7 @@ impl Checker {
             }
             return self.types.error;
         }
+        self.note_instance(name, &params, &arg_tys, span);
         mk(&mut self.types, arg_tys)
     }
 
