@@ -673,6 +673,48 @@ fn lsp_hover_pattern_bindings() {
 }
 
 #[test]
+fn lsp_definition_in_the_prelude() {
+    let cache = std::env::temp_dir().join(format!("catx-lsp-prelude-cache-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cache);
+    let mut lsp = Lsp::start_with(&[("XDG_CACHE_HOME", cache.to_str().unwrap())]);
+    lsp.request(1, "initialize", json!({"processId": null, "rootUri": null, "capabilities": {}}));
+    lsp.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
+    let text = "puts([3, 1].sorted())\n";
+    let uri = lsp.open("prelude_def.cx", text);
+    let at = |p: Value| json!({"textDocument": {"uri": uri}, "position": p});
+    for (i, (needle, decl)) in [("puts", "fn puts"), ("sorted", "fn sorted")].into_iter().enumerate() {
+        let d = lsp.request(2 + i as i64, "textDocument/definition", at(pos(text, 0, needle, 0)));
+        let target = d["result"]["uri"].as_str().unwrap_or_else(|| panic!("{needle}: {d}"));
+        // A real file, under the cache directory, holding the declaration at the range given.
+        let path = std::fs::read_dir(cache.join("catallaxy"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .flat_map(|e| std::fs::read_dir(e.path()).unwrap().filter_map(Result::ok).map(|f| f.path()))
+            .find(|f| path_uri(f) == target || path_uri(&f.canonicalize().unwrap()) == target)
+            .unwrap_or_else(|| panic!("{needle}: {target} is not in the cache"));
+        assert!(std::fs::metadata(&path).unwrap().permissions().readonly(), "{}", path.display());
+        let src = std::fs::read_to_string(&path).unwrap();
+        let line = d["result"]["range"]["start"]["line"].as_u64().unwrap() as usize;
+        assert!(src.lines().nth(line).unwrap().contains(decl), "{needle}: line {line} of {}", path.display());
+        // Opening the copy publishes nothing and adds nothing to the workspace.
+        lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+            "textDocument": {"uri": target, "languageId": "catallaxy", "version": 1, "text": src}
+        }}));
+        let (h, seen) = lsp.request_seeing(
+            10 + i as i64,
+            "textDocument/hover",
+            json!({"textDocument": {"uri": target}, "position": {"line": line, "character": 4}}),
+        );
+        assert!(h["result"].is_null(), "{h}");
+        assert!(!seen.iter().any(|m| m["params"]["uri"] == json!(target)), "{seen:?}");
+    }
+    let r = lsp.request(20, "workspace/symbol", json!({"query": "puts"}));
+    assert_eq!(r["result"], json!([]), "{r}");
+    lsp.finish();
+    let _ = std::fs::remove_dir_all(&cache);
+}
+
+#[test]
 fn lsp_signature_help() {
     let (mut lsp, caps) = Lsp::init();
     assert!(caps["signatureHelpProvider"]["triggerCharacters"].as_array().unwrap().contains(&json!("(")), "{caps}");

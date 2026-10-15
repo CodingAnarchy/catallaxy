@@ -1,0 +1,7 @@
+# expect: E0231
+# A constant whose initializer depends on itself, through another constant. Only E0231 is
+# reported: the uses below do not pin the constants' types.
+const A = B + 1
+const B = A * 2
+x: String = A
+puts(x)
