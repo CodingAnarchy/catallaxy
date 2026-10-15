@@ -4,7 +4,8 @@
 use rustc_hash::FxHashSet;
 
 use crate::ast::{Block, ClassDecl, Expr, ExprKind, FnDecl, Item, Module, Pattern, PatternKind, StrPart};
-use crate::check::{CallRes, Checker, Dispatch, ModId, NameRes, Owner, ScopeItem};
+use crate::check::{CallRes, Checker, Dispatch, GlobalInit, ModId, NameRes, Owner, ScopeItem};
+use crate::diag::SourceMap;
 use crate::diag::Span;
 use crate::types::{Ty, TyId};
 
@@ -274,6 +275,15 @@ pub fn last_stmt_from(ck: &Checker, m: ModId, from: u32) -> Option<&Expr> {
 
 /// `fn Owner.name[T](a: A, b: B = …) -> R`.
 pub fn fn_signature(ck: &Checker, fid: u32) -> String {
+    signature(ck, fid, &|_| None)
+}
+
+/// As [`fn_signature`], with each default value's source text (`b: B = 2`) where it is short.
+pub fn fn_signature_src(ck: &Checker, sm: &SourceMap, fid: u32) -> String {
+    signature(ck, fid, &|k| crate::symbols::default_text(ck, sm, fid, k))
+}
+
+fn signature(ck: &Checker, fid: u32, default: &dyn Fn(usize) -> Option<String>) -> String {
     let f = &ck.fns[fid as usize];
     let owner = match f.owner {
         Owner::Class(c) => ck.classes.get(&c).map(|c| format!("{}.", c.name)).unwrap_or_default(),
@@ -300,13 +310,70 @@ pub fn fn_signature(ck: &Checker, fid: u32) -> String {
         let ty = f.implicit.as_ref().and_then(|s| s.params.get(i).copied()).unwrap_or(p.ty);
         let mut s = format!("{}{}: {}", if p.is_move { "move " } else { "" }, p.name, ck.show(ty));
         if p.has_default {
-            s.push_str(" = …");
+            s.push_str(" = ");
+            s.push_str(&default(i).unwrap_or_else(|| "…".into()));
         }
         ps.push(s);
     }
     let ret = f.implicit.as_ref().map(|s| s.ret).unwrap_or(f.ret);
     let ret = if ret == ck.types.nil { String::new() } else { format!(" -> {}", ck.show(ret)) };
     format!("fn {owner}{}{tps}({}){ret}", f.name, ps.join(", "))
+}
+
+/// The documentation comment of field `index` of a (possibly frozen) class type.
+pub fn field_doc(ck: &Checker, recv: TyId, index: u32) -> Option<String> {
+    let t = ck.types.shallow_resolve(recv);
+    let t = match ck.types.get(t) {
+        Ty::Frozen(i) => ck.types.shallow_resolve(*i),
+        _ => t,
+    };
+    let Ty::Class(c, _) = ck.types.get(t) else { return None };
+    let f = ck.classes.get(c)?.fields.get(index as usize)?;
+    let dc = ck.classes.get(&f.decl_class)?;
+    match ck.mods.get(dc.module as usize)?.ast.items.get(dc.item?)? {
+        Item::Class(cd) => cd.fields.get(f.decl_index)?.doc.clone(),
+        _ => None,
+    }
+}
+
+/// The documentation comment of a module constant or variable, or of a class constant.
+pub fn global_doc(ck: &Checker, g: u32) -> Option<String> {
+    match ck.globals.get(g as usize)?.init {
+        GlobalInit::Item(m, i) => match ck.mods.get(m as usize)?.ast.items.get(i)? {
+            Item::Const(k) => k.doc.clone(),
+            Item::Var(v) => v.doc.clone(),
+            _ => None,
+        },
+        GlobalInit::ClassConst(c, i) => {
+            let ci = ck.classes.get(&c)?;
+            match ck.mods.get(ci.module as usize)?.ast.items.get(ci.item?)? {
+                Item::Class(cd) => cd.consts.get(i)?.doc.clone(),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// The documentation comment of variant `v` of enum `e`.
+pub fn variant_doc(ck: &Checker, e: u32, v: u32) -> Option<String> {
+    let ei = ck.enums.get(e as usize)?;
+    match ck.mods.get(ei.module as usize)?.ast.items.get(ei.item)? {
+        Item::Enum(ed) => ed.variants.get(v as usize)?.doc.clone(),
+        _ => None,
+    }
+}
+
+/// The documentation comment of a top-level name.
+fn item_doc(ck: &Checker, it: ScopeItem) -> Option<String> {
+    match it {
+        ScopeItem::Class(c) => ck.classes.get(&c)?.doc.clone(),
+        ScopeItem::Enum(e) => ck.enums.get(e as usize)?.doc.clone(),
+        ScopeItem::Iface(i) => ck.ifaces.get(i as usize)?.doc.clone(),
+        ScopeItem::Fn(f) => ck.fns.get(f as usize)?.doc.clone(),
+        ScopeItem::Global(g) => global_doc(ck, g),
+        ScopeItem::Variant(e, v) => variant_doc(ck, e, v),
+        ScopeItem::Module(_) => None,
+    }
 }
 
 fn with_doc(code: String, doc: &Option<String>) -> String {
@@ -331,8 +398,9 @@ pub fn called_fn(ck: &Checker, e: &Expr) -> Option<u32> {
     }
 }
 
-/// Markdown hover text for the expression at `offset` of module `m`.
-pub fn hover(ck: &Checker, m: ModId, offset: u32) -> Option<(String, Span)> {
+/// Markdown hover text for the expression at `offset` of module `m`: the type, or the
+/// declaration (with default values) and its documentation comment.
+pub fn hover(ck: &Checker, sm: &SourceMap, m: ModId, offset: u32) -> Option<(String, Span)> {
     let ast = &ck.mods[m as usize].ast;
     let e = expr_at(ast, offset)?;
     let ty_line = |e: &Expr| ck.expr_ty.get(&e.id).map(|&t| ck.show(t));
@@ -343,12 +411,12 @@ pub fn hover(ck: &Checker, m: ModId, offset: u32) -> Option<(String, Span)> {
                     let li = &ck.locals[*l as usize];
                     with_doc(format!("{}: {}", li.name, ck.show(li.ty)), &None)
                 }
-                Some(NameRes::Fn(f)) => with_doc(fn_signature(ck, *f), &ck.fns[*f as usize].doc),
+                Some(NameRes::Fn(f)) => with_doc(fn_signature_src(ck, sm, *f), &ck.fns[*f as usize].doc),
                 Some(NameRes::Global(g)) => {
                     let gi = &ck.globals[*g as usize];
                     with_doc(
                         format!("{} {}: {}", if gi.is_const { "const" } else { "var" }, gi.name, ck.show(gi.ty)),
-                        &None,
+                        &global_doc(ck, *g),
                     )
                 }
                 Some(NameRes::Class(c)) => {
@@ -366,16 +434,45 @@ pub fn hover(ck: &Checker, m: ModId, offset: u32) -> Option<(String, Span)> {
                 Some(NameRes::Module(x)) => with_doc(format!("module {}", ck.mods[*x as usize].name), &None),
                 Some(NameRes::Variant(x, v)) => {
                     let ei = &ck.enums[*x as usize];
-                    with_doc(format!("{}.{}", ei.name, ei.variants[*v as usize].name), &None)
+                    with_doc(format!("{}.{}", ei.name, ei.variants[*v as usize].name), &variant_doc(ck, *x, *v))
                 }
                 None => with_doc(format!("{name}: {}", ty_line(e)?), &None),
             };
             Some((text, e.span))
         }
-        ExprKind::Member { name, .. } if contains(name.span, offset) => {
-            let text = match called_fn(ck, e) {
-                Some(f) => with_doc(fn_signature(ck, f), &ck.fns[f as usize].doc),
-                None => with_doc(format!("{}: {}", name.name, ty_line(e)?), &None),
+        ExprKind::Member { recv, name, .. } if contains(name.span, offset) => {
+            let text = match (called_fn(ck, e), ck.calls.get(&e.id), ck.names.get(&e.id)) {
+                // `module.Type`, `Enum.Variant` and `Class.CONST` used as paths.
+                (_, _, Some(NameRes::Class(c))) => {
+                    let ci = ck.classes.get(c)?;
+                    with_doc(format!("class {}", ci.name), &ci.doc)
+                }
+                (_, _, Some(NameRes::Enum(x))) => {
+                    let ei = &ck.enums[*x as usize];
+                    with_doc(format!("enum {}", ei.name), &ei.doc)
+                }
+                (_, _, Some(NameRes::Iface(x))) => {
+                    let ii = &ck.ifaces[*x as usize];
+                    with_doc(format!("interface {}", ii.name), &ii.doc)
+                }
+                (_, _, Some(NameRes::Variant(x, v))) => {
+                    let ei = &ck.enums[*x as usize];
+                    with_doc(format!("{}.{}", ei.name, ei.variants[*v as usize].name), &variant_doc(ck, *x, *v))
+                }
+                (Some(f), ..) => with_doc(fn_signature_src(ck, sm, f), &ck.fns[f as usize].doc),
+                (None, Some(CallRes::Field { index, .. }), _) => {
+                    let doc = ck.expr_ty.get(&recv.id).and_then(|&t| field_doc(ck, t, *index));
+                    with_doc(format!("{}: {}", name.name, ty_line(e)?), &doc)
+                }
+                (_, Some(CallRes::Variant { class, .. }), _) if ck.variant_of_class.contains_key(class) => {
+                    let (x, v) = ck.variant_of_class[class];
+                    let ei = &ck.enums[x as usize];
+                    with_doc(format!("{}.{}", ei.name, ei.variants[v as usize].name), &variant_doc(ck, x, v))
+                }
+                (None, Some(CallRes::Global(g)), _) => {
+                    with_doc(format!("{}: {}", name.name, ty_line(e)?), &global_doc(ck, *g))
+                }
+                _ => with_doc(format!("{}: {}", name.name, ty_line(e)?), &None),
             };
             Some((text, name.span))
         }
@@ -454,6 +551,8 @@ pub struct Completion {
     pub label: String,
     pub kind: CompletionKind,
     pub detail: Option<String>,
+    /// The declaration's documentation comment (Markdown).
+    pub doc: Option<String>,
 }
 
 pub const KEYWORDS: &[&str] = &[
@@ -506,7 +605,7 @@ fn scope_item_completion(ck: &Checker, name: &str, it: ScopeItem) -> Completion 
         ScopeItem::Module(m) => (CompletionKind::Module, Some(format!("module {}", ck.mods[m as usize].name))),
         ScopeItem::Variant(..) => (CompletionKind::Variant, None),
     };
-    Completion { label: name.to_string(), kind, detail }
+    Completion { label: name.to_string(), kind, detail, doc: item_doc(ck, it) }
 }
 
 /// Members available on a value of type `recv` in module `m`: fields, methods (inherited, from
@@ -540,7 +639,13 @@ pub fn member_completions(ck: &mut Checker, m: ModId, recv: TyId) -> Vec<Complet
             false
         });
         if let Some(t) = field {
-            out.push(Completion { detail: Some(ck.show(t)), label: name, kind: CompletionKind::Field });
+            let mut index = None;
+            ck.trial(|ck| {
+                index = ck.lookup_field(recv, &name).map(|(i, _)| i);
+                false
+            });
+            let doc = index.and_then(|i| field_doc(ck, recv, i));
+            out.push(Completion { detail: Some(ck.show(t)), label: name, kind: CompletionKind::Field, doc });
             continue;
         }
         let mut found: Option<u32> = None;
@@ -552,7 +657,8 @@ pub fn member_completions(ck: &mut Checker, m: ModId, recv: TyId) -> Vec<Complet
             if ck.fns[f as usize].self_kind == crate::ast::SelfKind::None {
                 continue;
             }
-            out.push(Completion { detail: Some(fn_signature(ck, f)), label: name, kind: CompletionKind::Method });
+            let doc = ck.fns[f as usize].doc.clone();
+            out.push(Completion { detail: Some(fn_signature(ck, f)), label: name, kind: CompletionKind::Method, doc });
         }
     }
     ck.cur_module = saved_module;
@@ -595,6 +701,7 @@ pub fn path_completions(ck: &Checker, res: NameRes) -> Vec<Completion> {
                     label: "new".into(),
                     kind: CompletionKind::Function,
                     detail: ci.constructor.map(|f| fn_signature(ck, f)),
+                    doc: ci.init.and_then(|f| ck.fns[f as usize].doc.clone()).or_else(|| ci.doc.clone()),
                 });
             }
             for (n, &f) in &ci.methods {
@@ -603,6 +710,7 @@ pub fn path_completions(ck: &Checker, res: NameRes) -> Vec<Completion> {
                         label: n.clone(),
                         kind: CompletionKind::Function,
                         detail: Some(fn_signature(ck, f)),
+                        doc: ck.fns[f as usize].doc.clone(),
                     });
                 }
             }
@@ -611,13 +719,19 @@ pub fn path_completions(ck: &Checker, res: NameRes) -> Vec<Completion> {
                     label: n.clone(),
                     kind: CompletionKind::Constant,
                     detail: Some(ck.show(ck.globals[g as usize].ty)),
+                    doc: global_doc(ck, g),
                 });
             }
         }
         NameRes::Enum(e) => {
             let ei = &ck.enums[e as usize];
-            for v in &ei.variants {
-                out.push(Completion { label: v.name.clone(), kind: CompletionKind::Variant, detail: None });
+            for (v, vi) in ei.variants.iter().enumerate() {
+                out.push(Completion {
+                    label: vi.name.clone(),
+                    kind: CompletionKind::Variant,
+                    detail: None,
+                    doc: variant_doc(ck, e, v as u32),
+                });
             }
             for (n, &f) in &ei.methods {
                 if ck.fns[f as usize].self_kind == crate::ast::SelfKind::None {
@@ -625,6 +739,7 @@ pub fn path_completions(ck: &Checker, res: NameRes) -> Vec<Completion> {
                         label: n.clone(),
                         kind: CompletionKind::Function,
                         detail: Some(fn_signature(ck, f)),
+                        doc: ck.fns[f as usize].doc.clone(),
                     });
                 }
             }
@@ -633,6 +748,7 @@ pub fn path_completions(ck: &Checker, res: NameRes) -> Vec<Completion> {
                     label: "values".into(),
                     kind: CompletionKind::Function,
                     detail: Some(format!("fn {}.values() -> List[{}]", ei.name, ei.name)),
+                    doc: Some("Every variant, in declaration order.".into()),
                 });
             }
         }
@@ -670,7 +786,12 @@ pub fn scope_completions(ck: &Checker, m: ModId, offset: u32) -> Vec<Completion>
             Some(s) => enclosing.contains(&s),
         };
         if visible && seen.insert(l.name.clone()) {
-            out.push(Completion { label: l.name.clone(), kind: CompletionKind::Variable, detail: Some(ck.show(l.ty)) });
+            out.push(Completion {
+                label: l.name.clone(),
+                kind: CompletionKind::Variable,
+                detail: Some(ck.show(l.ty)),
+                doc: None,
+            });
         }
     }
     let mut items: Vec<(&String, ScopeItem)> = md.items.iter().map(|(n, &i)| (n, i)).collect();
@@ -688,7 +809,7 @@ pub fn scope_completions(ck: &Checker, m: ModId, offset: u32) -> Vec<Completion>
     }
     for k in KEYWORDS {
         if seen.insert(k.to_string()) {
-            out.push(Completion { label: k.to_string(), kind: CompletionKind::Keyword, detail: None });
+            out.push(Completion { label: k.to_string(), kind: CompletionKind::Keyword, detail: None, doc: None });
         }
     }
     out

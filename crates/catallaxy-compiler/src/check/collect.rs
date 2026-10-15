@@ -695,6 +695,9 @@ impl Checker {
 
     /// Fills a function's signature from its declaration.
     fn fill_sig(&mut self, fid: FnId, d: &ast::FnDecl, scope: &mut TypeScope, is_free_fn: bool) {
+        if d.doc.is_some() {
+            self.fns[fid as usize].doc = d.doc.clone();
+        }
         let mut sc = scope.clone();
         let tps = self.type_params(&d.type_params, &mut sc);
         let mut params = Vec::new();

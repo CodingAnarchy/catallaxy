@@ -2,7 +2,7 @@
 
 use crate::ast::*;
 use crate::diag::{Diagnostic, Span};
-use crate::lexer::{Kw, Lexer, StrPiece, Tok, Token};
+use crate::lexer::{Comment, Kw, Lexer, StrPiece, Tok, Token};
 
 pub struct Parser<'a> {
     toks: Vec<Token>,
@@ -311,7 +311,7 @@ impl<'a> Parser<'a> {
                 self.expect_sym("=")?;
                 let value = self.parse_expr()?;
                 let span = start.to(value.span);
-                Ok(Item::Const(ConstDecl { name, is_pub, ty, value, span }))
+                Ok(Item::Const(ConstDecl { name, is_pub, ty, value, span, doc: None }))
             }
             Tok::Kw(Kw::Var) => {
                 self.bump();
@@ -332,7 +332,7 @@ impl<'a> Parser<'a> {
                 self.expect_sym("=")?;
                 let value = self.parse_expr()?;
                 let span = start.to(value.span);
-                Ok(Item::Var(VarDecl { name, is_pub, ty, value, span }))
+                Ok(Item::Var(VarDecl { name, is_pub, ty, value, span, doc: None }))
             }
             _ => {
                 if is_pub {
@@ -494,7 +494,7 @@ impl<'a> Parser<'a> {
                     self.expect_sym("=")?;
                     let value = self.parse_expr()?;
                     let span = mstart.to(value.span);
-                    consts.push(ConstDecl { name: cname, is_pub: true, ty, value, span });
+                    consts.push(ConstDecl { name: cname, is_pub: true, ty, value, span, doc: None });
                 } else if self.is_kw(Kw::Fn) || self.is_kw(Kw::Native) {
                     methods.push(self.parse_fn(mpub, mstart, true)?);
                 } else {
@@ -502,7 +502,8 @@ impl<'a> Parser<'a> {
                     self.expect_sym(":")?;
                     let ty = self.parse_type()?;
                     let default = if self.eat_sym("=") { Some(self.parse_expr()?) } else { None };
-                    fields.push(FieldDecl { name: fname, ty, default, span: mstart.to(self.prev_span()) });
+                    let span = mstart.to(self.prev_span());
+                    fields.push(FieldDecl { name: fname, ty, default, span, doc: None });
                 }
                 self.end_stmt()
             })();
@@ -584,7 +585,8 @@ impl<'a> Parser<'a> {
                     }
                     self.expect_sym(")")?;
                 }
-                variants.push(VariantDecl { name: vname, fields: vfields, span: mstart.to(self.prev_span()) });
+                let span = mstart.to(self.prev_span());
+                variants.push(VariantDecl { name: vname, fields: vfields, span, doc: None });
                 if !self.eat_sym(",") {
                     self.end_stmt()?;
                 }
@@ -1690,11 +1692,157 @@ fn too_deep(span: Span, what: &str, limit: u32) -> Diagnostic {
 }
 
 /// Parses a whole file.
+/// Comments that are directives for tools rather than documentation.
+fn is_directive(text: &str) -> bool {
+    let body = text.trim_start_matches('#').trim_start();
+    text.starts_with("#!")
+        || body.starts_with("allow(")
+        || body.starts_with("expect:")
+        || body.starts_with("exit:")
+        || body.starts_with("FORMATTER")
+}
+
+/// A documentation comment's lines (after `# `) as Markdown: lines indented by two or more
+/// spaces are example code, put in a fenced `catallaxy` block without that indent; the rest is
+/// Markdown as written.
+pub fn doc_markdown(lines: &[&str]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if !lines[i].starts_with("  ") {
+            out.push(lines[i].to_string());
+            i += 1;
+            continue;
+        }
+        // An indented run, through blank lines that more indented lines follow.
+        let mut end = i;
+        let mut j = i;
+        while j < lines.len() && (lines[j].starts_with("  ") || lines[j].trim().is_empty()) {
+            if lines[j].starts_with("  ") {
+                end = j + 1;
+            }
+            j += 1;
+        }
+        out.push("```catallaxy".into());
+        out.extend(lines[i..end].iter().map(|l| l.get(2..).unwrap_or("").trim_end().to_string()));
+        out.push("```".into());
+        i = end;
+    }
+    out.join("\n")
+}
+
+/// Documentation comments: the block of whole-line `#` comments right above each declaration
+/// (no blank line between), attached to the declaration's `doc`.
+struct Docs<'a> {
+    src: &'a str,
+    line_starts: Vec<u32>,
+    /// The comment that is alone on each line (text after `#`, one space dropped), by line.
+    lines: rustc_hash::FxHashMap<usize, &'a str>,
+}
+
+impl<'a> Docs<'a> {
+    fn new(src: &'a str, comments: &'a [Comment]) -> Docs<'a> {
+        let mut line_starts = vec![0u32];
+        line_starts.extend(src.bytes().enumerate().filter(|&(_, b)| b == b'\n').map(|(i, _)| i as u32 + 1));
+        let mut d = Docs { src, line_starts, lines: Default::default() };
+        for c in comments {
+            let line = d.line(c.span.start);
+            if d.alone_from(c.span.start) && !is_directive(&c.text) {
+                let t = c.text.strip_prefix('#').unwrap_or(&c.text);
+                d.lines.insert(line, t.strip_prefix(' ').unwrap_or(t));
+            }
+        }
+        d
+    }
+
+    fn line(&self, offset: u32) -> usize {
+        match self.line_starts.binary_search(&offset) {
+            Ok(i) => i,
+            Err(i) => i - 1,
+        }
+    }
+
+    /// Whether only whitespace precedes `offset` on its line.
+    fn alone_from(&self, offset: u32) -> bool {
+        let ls = self.line_starts[self.line(offset)] as usize;
+        self.src.get(ls..offset as usize).is_some_and(|t| t.trim().is_empty())
+    }
+
+    /// The documentation of a declaration starting at `offset`.
+    fn of(&self, span: Span) -> Option<String> {
+        if !self.alone_from(span.start) {
+            return None;
+        }
+        let mut line = self.line(span.start);
+        let mut out: Vec<&str> = Vec::new();
+        while line > 0 {
+            line -= 1;
+            match self.lines.get(&line) {
+                Some(t) => out.push(t),
+                None => break,
+            }
+        }
+        out.reverse();
+        // Leading and trailing empty `#` lines say nothing.
+        while out.first().is_some_and(|l| l.trim().is_empty()) {
+            out.remove(0);
+        }
+        while out.last().is_some_and(|l| l.trim().is_empty()) {
+            out.pop();
+        }
+        (!out.is_empty()).then(|| doc_markdown(&out))
+    }
+
+    fn fns(&self, fs: &mut [FnDecl]) {
+        for f in fs {
+            f.doc = self.of(f.span);
+        }
+    }
+}
+
+fn attach_docs(m: &mut Module, src: &str, comments: &[Comment]) {
+    if comments.is_empty() {
+        return;
+    }
+    let d = Docs::new(src, comments);
+    for it in &mut m.items {
+        match it {
+            Item::Fn(f) => f.doc = d.of(f.span),
+            Item::Class(c) => {
+                c.doc = d.of(c.span);
+                d.fns(&mut c.methods);
+                for f in &mut c.fields {
+                    f.doc = d.of(f.span);
+                }
+                for k in &mut c.consts {
+                    k.doc = d.of(k.span);
+                }
+            }
+            Item::Interface(x) => {
+                x.doc = d.of(x.span);
+                d.fns(&mut x.methods);
+            }
+            Item::Enum(e) => {
+                e.doc = d.of(e.span);
+                d.fns(&mut e.methods);
+                for v in &mut e.variants {
+                    v.doc = d.of(v.span);
+                }
+            }
+            Item::Extend(x) => d.fns(&mut x.methods),
+            Item::Const(k) => k.doc = d.of(k.span),
+            Item::Var(v) => v.doc = d.of(v.span),
+            Item::Import(_) | Item::Stmt(_) => {}
+        }
+    }
+}
+
 pub fn parse(src: &str, file: u32, next_id: &mut u32) -> (Module, Vec<Diagnostic>) {
-    let (toks, mut diags) = Lexer::new(src, file, 0).tokenize();
+    let (toks, mut diags, comments) = Lexer::new(src, file, 0).tokenize_with_comments();
     let mut p = Parser::new(toks, file, next_id);
     let mut m = p.parse_module();
     diags.extend(p.diags);
+    attach_docs(&mut m, src, &comments);
     // Each nesting level adds its chains' links and a few nodes (a statement, `not`, unary
     // operators, the primary) to a path through the tree.
     if (p.max_nesting + 1).saturating_mul(p.max_chain + 8) > MAX_DEPTH {
