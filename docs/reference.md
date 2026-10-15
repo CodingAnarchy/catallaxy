@@ -396,7 +396,10 @@ interface Enumerable[T] { fn each(self, f: fn(T)) ... }            # (prelude)
 ```
 
 Any type that has all required methods satisfies an interface and gains its default methods, even when
-called directly on the concrete type. If two in-scope interfaces provide the same default method to one
+called directly on the concrete type. An interface whose methods take `Self` as a parameter (or inside a
+generic type, as in `List[Self]`), such as `Comparable`, can only be a bound (`[T: Comparable]`): two
+values of the interface type may have different implementing types, so it is not a value type (E0375).
+Interfaces that use `Self` only in results (`fn copy(self) -> Self`) are. If two in-scope interfaces provide the same default method to one
 type, the call is ambiguous and must be resolved by defining the method.
 
 `Enumerable`'s `map`, `select` and the like are eager and return lists. `xs.lazy()` returns a
@@ -429,8 +432,12 @@ resolve statically and are visible only in modules that declare or import them (
 
 ```
 fn max[T: Comparable](xs: List[T]) -> T? { ... }
-pub fn total(xs: Enumerable[Int]) -> Int { xs.reduce(0) { |a, b| a + b } }   # interface param = bound
+pub fn total(xs: Enumerable[Int]) -> Int { xs.reduce(0) { |a, b| a + b } }   # any Enumerable[Int]
 ```
+
+A parameter of an interface type accepts a value of any type that satisfies the interface; each such
+parameter (`fn f(a: I, b: I)`) may get a different type. To require the same type, use a type parameter
+(`fn f[T: I](a: T, b: T)`); an interface with `Self` parameters must be used that way (E0375).
 
 Type arguments are erased at run time: one compiled body serves every instantiation, and a type test
 cannot check them (see §4.4 and E0374).
@@ -607,6 +614,12 @@ OS default. `Http.get` and `Http.post` (HTTP and HTTPS) return an `HttpResponse`
 `d.method(...)`, arithmetic) is checked at runtime and yields `Dyn`. As a missing object key gives `nil`, so does a list index out
 of range (`doc["users"][5]`). Convert with `as?`:
 `name = (d["name"] as? String) ?? "anon"`. Every typed value converts implicitly to `Dyn`. JSON objects parse to records that behave exactly like `Dict[String, Dyn]` (`as? Dict[String, Dyn]` succeeds); records parsed with the same keys share a hidden class, so `d.name` is served from a per-site cache. `Json.parse` reads a number with no fraction or exponent as an `Int` of any size, so `123456789012345678901234567890` stays exact and `as? Int` succeeds; any other number (`1.5`, `1e3`) is a `Float`. `Json.stringify` writes object keys in sorted order and integers of any size (including big integers) as JSON numbers; it writes a class instance as an object of its fields, or as whatever its `to_json` method returns (`Deque` writes an array).
+
+Generic types are erased at runtime, so a call through `Dyn` can put a value of the wrong type into
+typed data: `d: Dyn = xs` then `d.push(5)` adds an `Int` to a `List[String]`. Such a value is caught
+where it is used as its static type (a standard-library method's receiver or argument, a field
+access, a list or tuple access, a method call), with a `TypeError` panic that names the
+expected and actual types: `xs[0].length` panics with `TypeError: expected String, got Int`.
 
 ## 10. Tooling
 

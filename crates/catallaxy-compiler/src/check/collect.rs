@@ -8,6 +8,49 @@ use crate::ast::{ClassModifier, Item, SelfKind, TypeExpr, TypeExprKind};
 /// A suggested edit: message, span, replacement.
 type Suggestion = (String, Span, String);
 
+/// The variance of a position in a type: a parameter is an input (`Neg`), a result an output
+/// (`Pos`); type arguments of generic types are invariant.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Pol {
+    Pos,
+    Neg,
+    Inv,
+}
+
+/// The first method of an interface declaration with `Self` in an input position, and where.
+fn self_use_in(methods: &[ast::FnDecl]) -> Option<(String, Span)> {
+    methods.iter().find_map(|m| {
+        let input = m.params.iter().filter_map(|p| p.ty.as_ref()).find_map(|t| self_in_input(t, Pol::Neg));
+        let output = m.ret.as_ref().and_then(|t| self_in_input(t, Pol::Pos));
+        input.or(output).map(|sp| (m.name.name.clone(), sp))
+    })
+}
+
+/// Where `Self` appears in a position where an implementor would receive it from the caller
+/// (`Neg` or `Inv`) in type expression `t` at polarity `pol`.
+fn self_in_input(t: &TypeExpr, pol: Pol) -> Option<Span> {
+    match &t.kind {
+        TypeExprKind::SelfType => (pol != Pol::Pos).then_some(t.span),
+        TypeExprKind::Named { args, .. } => args.iter().find_map(|a| self_in_input(a, Pol::Inv)),
+        TypeExprKind::Optional(x) | TypeExprKind::Frozen(x) => self_in_input(x, pol),
+        TypeExprKind::Union(xs) | TypeExprKind::Inter(xs) | TypeExprKind::Tuple(xs) => {
+            xs.iter().find_map(|x| self_in_input(x, pol))
+        }
+        TypeExprKind::Fn { params, ret } => {
+            let flip = match pol {
+                Pol::Pos => Pol::Neg,
+                Pol::Neg => Pol::Pos,
+                Pol::Inv => Pol::Inv,
+            };
+            params
+                .iter()
+                .find_map(|p| self_in_input(p, flip))
+                .or_else(|| ret.as_ref().and_then(|r| self_in_input(r, pol)))
+        }
+        TypeExprKind::Inline(_) | TypeExprKind::Error => None,
+    }
+}
+
 /// Names in scope while resolving a type expression.
 #[derive(Clone, Default)]
 pub struct TypeScope {
@@ -376,7 +419,17 @@ impl Checker {
 
     // ---- type expressions --------------------------------------------------------------------
 
+    /// Resolves a type-parameter bound: interfaces at its top level (`T: Comparable`,
+    /// `T: A & B`) are bounds, so interfaces with `Self` parameters are allowed there.
+    pub fn resolve_bound(&mut self, te: &TypeExpr, scope: &mut TypeScope) -> TyId {
+        self.in_bound_top = true;
+        let t = self.resolve_type(te, scope);
+        self.in_bound_top = false;
+        t
+    }
+
     pub fn resolve_type(&mut self, te: &TypeExpr, scope: &mut TypeScope) -> TyId {
+        let bound_top = std::mem::take(&mut self.in_bound_top);
         match &te.kind {
             TypeExprKind::Error => self.types.error,
             TypeExprKind::SelfType => match scope.self_ty {
@@ -395,7 +448,13 @@ impl Checker {
                 self.types.union(ts)
             }
             TypeExprKind::Inter(parts) => {
-                let ts: Vec<TyId> = parts.iter().map(|p| self.resolve_type(p, scope)).collect();
+                let ts: Vec<TyId> = parts
+                    .iter()
+                    .map(|p| {
+                        self.in_bound_top = bound_top;
+                        self.resolve_type(p, scope)
+                    })
+                    .collect();
                 for (p, &t) in parts.iter().zip(ts.iter()) {
                     if !matches!(self.types.get(t), Ty::Iface(..) | Ty::Error | Ty::Inter(_)) {
                         self.err(
@@ -423,12 +482,28 @@ impl Checker {
                 let t = self.resolve_type(inner, scope);
                 self.freeze_ty(t)
             }
-            TypeExprKind::Inline(methods) => self.inline_iface(methods, scope, te.span),
-            TypeExprKind::Named { path, args } => self.resolve_named(path, args, scope, te.span),
+            TypeExprKind::Inline(methods) => {
+                let t = self.inline_iface(methods, scope, te.span);
+                if let Ty::Iface(i, _) = self.types.get(t).clone() {
+                    self.self_param_ifaces.insert(i, self_use_in(methods));
+                    if !bound_top {
+                        self.check_iface_value_type(i, te.span);
+                    }
+                }
+                t
+            }
+            TypeExprKind::Named { path, args } => self.resolve_named(path, args, scope, te.span, bound_top),
         }
     }
 
-    fn resolve_named(&mut self, path: &[ast::Ident], args: &[TypeExpr], scope: &mut TypeScope, span: Span) -> TyId {
+    fn resolve_named(
+        &mut self,
+        path: &[ast::Ident],
+        args: &[TypeExpr],
+        scope: &mut TypeScope,
+        span: Span,
+        bound_top: bool,
+    ) -> TyId {
         let m = self.cur_module;
         let name = &path.last().unwrap().name;
         let arg_tys: Vec<TyId> = args.iter().map(|a| self.resolve_type(a, scope)).collect();
@@ -461,6 +536,9 @@ impl Checker {
                 _ => None,
             }
         };
+        if let (Some(ScopeItem::Iface(i)), false) = (item, bound_top) {
+            self.check_iface_value_type(i, span);
+        }
         type MakeTy = Box<dyn Fn(&mut Types, Vec<TyId>) -> TyId>;
         let (params, mk): (Vec<ParamId>, MakeTy) = match item {
             Some(ScopeItem::Class(c)) => (self.classes[&c].params.clone(), Box::new(move |t, a| t.class(c, a))),
@@ -505,6 +583,41 @@ impl Checker {
             return self.types.error;
         }
         mk(&mut self.types, arg_tys)
+    }
+
+    /// An interface whose methods take `Self` (a `Comparable`, a user `Merge`) cannot be a value
+    /// type: two values of that type may be different implementors, so a `Self` parameter would
+    /// receive an unrelated type (E0375). It can be a bound (`[T: Comparable]`).
+    pub fn check_iface_value_type(&mut self, i: IfaceId, span: Span) {
+        let Some((method, self_span)) = self.self_param_use(i) else { return };
+        let name = self.ifaces[i as usize].name.clone();
+        let msg =
+            format!("interface `{name}` cannot be used as a value type, because its method `{method}` takes `Self`");
+        let mut d = Diag::error("E0375", msg, span).note_at(
+            format!("`Self` is the implementing type, and two `{name}` values may have different ones"),
+            self_span,
+        );
+        d = d.note(format!(
+            "use a type parameter bounded by the interface instead: `fn f[T: {name}](a: T, b: T)`, or a `List[T]` with `[T: {name}]`"
+        ));
+        self.emit(d);
+    }
+
+    /// For an interface with `Self` in an input position of a method (a parameter, or inside a
+    /// generic type in any position), that method and the place.
+    pub fn self_param_use(&mut self, i: IfaceId) -> Option<(String, Span)> {
+        if let Some(r) = self.self_param_ifaces.get(&i) {
+            return r.clone();
+        }
+        // A placeholder against cycles through the interface's own types.
+        self.self_param_ifaces.insert(i, None);
+        let info = &self.ifaces[i as usize];
+        let found = match info.item.map(|it| &self.mods[info.module as usize].ast.items[it]) {
+            Some(Item::Interface(d)) => self_use_in(&d.methods),
+            _ => None,
+        };
+        self.self_param_ifaces.insert(i, found.clone());
+        found
     }
 
     fn suggest_type(&self, name: &str) -> Option<String> {
@@ -572,7 +685,7 @@ impl Checker {
             })
             .collect();
         for (tp, &p) in tps.iter().zip(ids.iter()) {
-            let bounds: Vec<TyId> = tp.bounds.iter().map(|b| self.resolve_type(b, scope)).collect();
+            let bounds: Vec<TyId> = tp.bounds.iter().map(|b| self.resolve_bound(b, scope)).collect();
             self.params[p as usize].bounds = bounds;
         }
         ids
@@ -675,7 +788,7 @@ impl Checker {
         for (m, ids, tps, mut scope) in std::mem::take(&mut self.pending_bounds) {
             self.cur_module = m;
             for (tp, &p) in tps.iter().zip(ids.iter()) {
-                let bounds: Vec<TyId> = tp.bounds.iter().map(|b| self.resolve_type(b, &mut scope)).collect();
+                let bounds: Vec<TyId> = tp.bounds.iter().map(|b| self.resolve_bound(b, &mut scope)).collect();
                 self.params[p as usize].bounds = bounds;
             }
         }

@@ -638,3 +638,46 @@ fn moved_values_survive_the_senders_minor_collection() {
     assert!(catallaxy_gc::blocking(&a.m.rec, || reader.join().unwrap()));
     a.finish();
 }
+
+#[test]
+fn checked_views_reject_other_kinds_with_a_type_error() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let h = Host::new();
+    let s = h.m.alloc_str("text");
+    let l = h.m.alloc_list(vec![Value::small_int(1)]);
+    let d = h.m.alloc_dict(DictTable::new());
+    let t = h.m.alloc_tuple(&[Value::small_int(1), Value::small_int(2)]);
+    let r = h.m.alloc_range(Value::small_int(1), Value::small_int(3), false);
+    let message = |e: catallaxy_runtime::Trap| match e {
+        catallaxy_runtime::Trap::Panic(m) => m,
+        _ => panic!("not a panic"),
+    };
+    // The right kind passes; immediates and objects of other kinds raise a TypeError naming both
+    // types, before any read of the object's memory.
+    assert_eq!(str_obj_of(s).unwrap().as_str(), "text");
+    assert_eq!(list_of(l).unwrap().len(), 1);
+    assert_eq!(tuple_of(t).unwrap().len, 2);
+    assert!(dict_of(d).is_ok());
+    assert_eq!(message(str_obj_of(Value::small_int(5)).err().unwrap()), "TypeError: expected String, got Int");
+    assert_eq!(message(list_of(s).err().unwrap()), "TypeError: expected List, got String");
+    assert_eq!(message(dict_of(l).err().unwrap()), "TypeError: expected Dict or Set, got List");
+    assert_eq!(message(tuple_of(Value::NIL).err().unwrap()), "TypeError: expected Tuple, got Nil");
+    assert_eq!(message(atomic_of(t).err().unwrap()), "TypeError: expected Atomic, got Tuple");
+    assert_eq!(message(channel_of(Value::from_f64(1.5)).err().unwrap()), "TypeError: expected Channel, got Float");
+    assert_eq!(message(sb_of(d).err().unwrap()), "TypeError: expected StringBuilder, got Dict");
+    assert!(mutex_of(Value::TRUE).is_err() && thread_of(r).is_err());
+    let range_id = catallaxy_runtime::class::ids::RANGE;
+    assert_eq!(instance_of(r, range_id, "Range").unwrap().get(1), Value::small_int(3));
+    assert_eq!(message(instance_of(s, range_id, "Range").err().unwrap()), "TypeError: expected Range, got String");
+    // Fields: only instances, and only within their field count.
+    assert!(instance_with_field(r, 2).is_some());
+    assert!(instance_with_field(r, 3).is_none() && instance_with_field(s, 0).is_none());
+    assert!(instance_with_field(Value::small_int(7), 0).is_none());
+    // The container accessors check the kind too.
+    assert!(ownership::read_list(h.m, s).is_err());
+    assert!(ownership::write_list(h.m, Value::small_int(3), |_, _| ()).is_err());
+    assert!(ownership::read_dict(h.m, l, |t| t.len()).is_err());
+    assert!(ownership::write_dict(h.m, t, |t, _| t.len()).is_err());
+    assert_eq!(ownership::read_list(h.m, l).unwrap().len(), 1);
+    h.finish();
+}

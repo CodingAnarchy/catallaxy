@@ -36,7 +36,17 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "gc" => gc_fn,
 
         "Int.to_s" => int_to_s,
-        "Int.hash" | "Float.hash" | "Bool.hash" | "String.hash" | "__hash_of" => hash,
+        "Int.hash" => |vm, a| hash(vm, &[int_value(a[0])?]),
+        "Float.hash" => |vm, a| {
+            float(a[0])?;
+            hash(vm, a)
+        },
+        "Bool.hash" => |vm, a| hash(vm, &[bool_value(a[0])?]),
+        "String.hash" => |vm, a| {
+            s(a[0])?;
+            hash(vm, a)
+        },
+        "__hash_of" => hash,
         "Int.to_f" => int_to_f,
         "Int.to_s_radix" => int_to_s_radix,
         "Int.chr" => int_chr,
@@ -67,9 +77,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "Float.is_finite" => |_, a| Ok(Value::bool(float(a[0])?.is_finite())),
         "Float.format" => float_format,
 
-        "Bool.to_s" => |vm, a| Ok(new_str(vm, if a[0].is_true() { "true" } else { "false" })),
+        "Bool.to_s" => |vm, a| Ok(new_str(vm, if bool_value(a[0])?.is_true() { "true" } else { "false" })),
 
-        "String.to_s" => |_, a| Ok(a[0]),
+        "String.to_s" => |_, a| {
+            s(a[0])?;
+            Ok(a[0])
+        },
         "String.<=>" => |_, a| Ok(Value::small_int(s(a[0])?.cmp(s(a[1])?) as i64)),
         "String.+" => |vm, a| {
             let parts = [str_obj(a[0])?, str_obj(a[1])?];
@@ -88,7 +101,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             vm.m.try_alloc_str(&r)
         },
         "String.[]" => str_index,
-        "String.length" => |_, a| Ok(Value::small_int(unsafe { as_str_obj(a[0]) }.char_count() as i64)),
+        "String.length" => |_, a| Ok(Value::small_int(str_obj(a[0])?.char_count() as i64)),
         "String.byte_length" => |_, a| Ok(Value::small_int(s(a[0])?.len() as i64)),
         "String.upcase" => |vm, a| str_map(vm, a, |x| x.to_uppercase()),
         "String.downcase" => |vm, a| str_map(vm, a, |x| x.to_lowercase()),
@@ -195,11 +208,11 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             })
         },
         "String.parse_int" => |vm, a| {
+            let t = s(a[0])?.trim();
             let radix = arg(a, 1).map(int).transpose()?.unwrap_or(10);
             if !(2..=36).contains(&radix) {
                 return panic("ArgumentError: radix must be between 2 and 36");
             }
-            let t = s(a[0])?.trim();
             Ok(match BigInt::parse_bytes(t.as_bytes(), radix as u32) {
                 Some(b) => vm.m.int_from_big(b),
                 None => Value::NIL,
@@ -358,25 +371,26 @@ fn hash(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn int_to_s(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    match arg(a, 1) {
-        Some(base) if base.is_small_int() && base.as_small_int() != 10 => int_to_s_radix(vm, a),
+    match arg(a, 1).map(int).transpose()? {
+        Some(base) if base != 10 => int_to_s_radix(vm, a),
         _ => {
-            let r = ops::format_int(a[0]);
+            let r = ops::format_int(int_value(a[0])?);
             vm.m.try_alloc_str(&r)
         }
     }
 }
 
 fn int_to_f(_: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    Ok(Value::from_f64(ops::int_to_f64(a[0])))
+    Ok(Value::from_f64(ops::int_to_f64(int_value(a[0])?)))
 }
 
 fn int_to_s_radix(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
+    let x = int_value(a[0])?;
     let radix = int(a[1])?;
     if !(2..=36).contains(&radix) {
         return panic("ArgumentError: radix must be between 2 and 36");
     }
-    let r = ops::to_bigint(a[0]).to_str_radix(radix as u32);
+    let r = ops::to_bigint(x).to_str_radix(radix as u32);
     Ok(new_str(vm, &r))
 }
 
@@ -389,7 +403,7 @@ fn int_chr(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn int_sqrt(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    let b = ops::to_bigint(a[0]);
+    let b = ops::to_bigint(int_value(a[0])?);
     if b.is_negative() {
         return panic("Math::DomainError: square root of a negative number");
     }
@@ -397,7 +411,7 @@ fn int_sqrt(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn int_bit_length(_: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    Ok(Value::small_int(ops::to_bigint(a[0]).bits() as i64))
+    Ok(Value::small_int(ops::to_bigint(int_value(a[0])?).bits() as i64))
 }
 
 fn float_to_s(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
@@ -474,6 +488,9 @@ fn assert_fn(_: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn assert_eq(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
+    if let Some(v) = arg(a, 2) {
+        s(v)?;
+    }
     if !ops::values_eq(vm, a[0], a[1])? {
         let got = ops::inspect(vm, a[0])?;
         let exp = ops::inspect(vm, a[1])?;

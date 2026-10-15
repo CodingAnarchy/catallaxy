@@ -84,8 +84,8 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             })
         },
         "List.concat" => |vm, a| {
+            let h = &list_of(a[0])?.header;
             let other = list_items(vm, a[1])?;
-            let h = unsafe { &*a[0].as_ptr() };
             if ownership::check_write(&vm.m, h)? == Access::Shared {
                 for &x in &other {
                     ownership::publish_into_shared(&vm.m, x)?;
@@ -245,9 +245,9 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             Ok(set)
         },
 
-        "Range.first" => |_, a| Ok(unsafe { as_instance(a[0]) }.get(0)),
-        "Range.last" => |_, a| Ok(unsafe { as_instance(a[0]) }.get(1)),
-        "Range.is_exclusive" => |_, a| Ok(unsafe { as_instance(a[0]) }.get(2)),
+        "Range.first" => |_, a| Ok(range_of(a[0])?.get(0)),
+        "Range.last" => |_, a| Ok(range_of(a[0])?.get(1)),
+        "Range.is_exclusive" => |_, a| Ok(range_of(a[0])?.get(2)),
 
         "StringBuilder.new" => |vm, _| Ok(vm.m.alloc_string_builder(String::new())),
         "StringBuilder.push" => |vm, a| {
@@ -268,8 +268,9 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "StringBuilder.to_s" => |vm, a| {
             // A snapshot (a shared builder may change once its lock is released), then the
             // string, each raising a MemoryError if refused.
+            let sb = sb_of(a[0])?;
             let text = ownership::with_read(&vm.m, a[0], || {
-                let b = unsafe { &*as_sb(a[0]).buf.get() };
+                let b = unsafe { &*sb.buf.get() };
                 let mut t = String::new();
                 t.try_reserve_exact(b.len()).map(|_| {
                     t.push_str(b);
@@ -282,7 +283,8 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             }
         },
         "StringBuilder.length" => |vm, a| {
-            let n = ownership::with_read(&vm.m, a[0], || unsafe { (*as_sb(a[0]).buf.get()).chars().count() })?;
+            let sb = sb_of(a[0])?;
+            let n = ownership::with_read(&vm.m, a[0], || unsafe { (*sb.buf.get()).chars().count() })?;
             Ok(Value::small_int(n as i64))
         },
         "StringBuilder.clear" => |vm, a| sb_write(vm, a[0], |b| b.clear()),
@@ -292,9 +294,6 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
 
 /// Checks that `l` is a list this thread may read. List reads never lock.
 pub(crate) fn list_read<'a>(vm: &Vm, l: Value) -> RtResult<&'a ListObj> {
-    if kind_of(l) != ObjKind::List {
-        return panic("TypeError: expected List");
-    }
     ownership::read_list(&vm.m, l)
 }
 
@@ -305,10 +304,7 @@ pub(crate) fn list_write<R>(
     incoming: &[Value],
     f: impl FnOnce(&mut Vec<Value>) -> R,
 ) -> RtResult<R> {
-    if kind_of(l) != ObjKind::List {
-        return panic("TypeError: expected List");
-    }
-    let h = unsafe { &*l.as_ptr() };
+    let h = &list_of(l)?.header;
     if ownership::check_write(&vm.m, h)? == Access::Shared {
         for &x in incoming {
             ownership::publish_into_shared(&vm.m, x)?;
@@ -338,6 +334,11 @@ fn table_refused<T>(layout: std::alloc::Layout) -> RtResult<T> {
     catallaxy_runtime::refused(format!("cannot allocate a table of {} bytes", layout.size()))
 }
 
+/// The `Range` instance behind `v`, or a `TypeError` panic.
+fn range_of<'a>(v: Value) -> RtResult<&'a InstanceObj> {
+    instance_of(v, catallaxy_runtime::class::ids::RANGE, "Range")
+}
+
 /// Removes `k`; returns its value, nil (dict, absent) or the empty marker (absent, for sets).
 fn dict_delete(vm: &mut Vm, d: Value, k: Value) -> RtResult<Value> {
     loop {
@@ -358,9 +359,10 @@ fn dict_delete(vm: &mut Vm, d: Value, k: Value) -> RtResult<Value> {
 /// Appends `x` to a builder. If its buffer cannot grow, collects (garbage may hold the memory)
 /// and tries once more, then raises a `MemoryError`.
 fn sb_push(vm: &Vm, b: Value, x: &str) -> RtResult<Value> {
+    let sb = sb_of(b)?;
     for retry in [false, true] {
         let grown = ownership::with_write(&vm.m, b, |_| {
-            let buf = unsafe { &mut *as_sb(b).buf.get() };
+            let buf = unsafe { &mut *sb.buf.get() };
             buf.try_reserve(x.len()).map(|_| buf.push_str(x))
         })?;
         if grown.is_ok() {
@@ -378,7 +380,8 @@ fn sb_refused() -> RtResult<Value> {
 }
 
 fn sb_write(vm: &Vm, b: Value, f: impl FnOnce(&mut String)) -> RtResult<Value> {
-    ownership::with_write(&vm.m, b, |_| f(unsafe { &mut *as_sb(b).buf.get() }))?;
+    let sb = sb_of(b)?;
+    ownership::with_write(&vm.m, b, |_| f(unsafe { &mut *sb.buf.get() }))?;
     Ok(Value::NIL)
 }
 

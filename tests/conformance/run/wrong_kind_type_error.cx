@@ -1,0 +1,161 @@
+# A value of the wrong type that gets past the checker (here through a `Dyn` alias of a typed
+# list) raises a TypeError where a native or an instruction relies on its type, instead of
+# reading the wrong memory (#147). The tests/native_kinds.rs test covers every native.
+fn attempt(name: String, f: fn() -> Dyn) {
+  t = spawn move { f() }
+  match t.join() {
+    Ok(v) => puts("#{name}: ok #{v}")
+    Err(e) => puts("#{name}: #{e}")
+  }
+}
+
+class Point {
+  x: Int
+  y: Int
+}
+class Animal {
+  name: String
+  fn speak(self) -> String { "..." }
+}
+class Dog < Animal {
+  fn speak(self) -> String { "woof" }
+}
+
+# The issue's reproductions.
+attempt("String.length") {
+  xs: List[String] = []
+  d: Dyn = xs
+  d.push(5)
+  xs[0].length
+}
+attempt("Atomic.get") {
+  xs: List[Atomic[Int]] = []
+  d: Dyn = xs
+  d.push("hello")
+  xs[0].get
+}
+attempt("Range.first") {
+  xs: List[Range] = []
+  d: Dyn = xs
+  d.push("hello")
+  xs[0].first
+}
+attempt("Channel.length") {
+  xs: List[Channel[Int]] = []
+  d: Dyn = xs
+  d.push(3)
+  xs[0].length
+}
+
+# Natives and instructions of other kinds.
+attempt("Thread.join") {
+  xs: List[Thread[Int]] = []
+  d: Dyn = xs
+  d.push([1])
+  xs[0].join()
+}
+attempt("Mutex.get") {
+  xs: List[Mutex[Int]] = []
+  d: Dyn = xs
+  d.push(1.5)
+  xs[0].get
+}
+attempt("StringBuilder.to_s") {
+  xs: List[StringBuilder] = []
+  d: Dyn = xs
+  d.push(7)
+  xs[0].to_s
+}
+attempt("Fiber.join") {
+  xs: List[Fiber[Int]] = []
+  d: Dyn = xs
+  d.push("f")
+  xs[0].join()
+}
+attempt("Fiber.is_done") {
+  xs: List[Fiber[Int]] = []
+  d: Dyn = xs
+  d.push(9)
+  xs[0].is_done
+}
+attempt("list length") {
+  xs: List[List[Int]] = []
+  d: Dyn = xs
+  d.push(4)
+  xs[0].length
+}
+attempt("list index") {
+  xs: List[List[Int]] = []
+  d: Dyn = xs
+  d.push(4)
+  xs[0][0]
+}
+attempt("list push") {
+  xs: List[List[Int]] = []
+  d: Dyn = xs
+  d.push("s")
+  xs[0].push(1)
+}
+attempt("dict get") {
+  xs: List[Dict[String, Int]] = []
+  d: Dyn = xs
+  d.push(4)
+  xs[0]["k"]
+}
+attempt("dict set") {
+  xs: List[Dict[String, Int]] = []
+  d: Dyn = xs
+  d.push([1])
+  xs[0]["k"] = 1
+}
+attempt("field read") {
+  xs: List[Point] = []
+  d: Dyn = xs
+  d.push(5)
+  xs[0].x
+}
+attempt("field read of a string") {
+  xs: List[Point] = []
+  d: Dyn = xs
+  d.push("not a point")
+  xs[0].y
+}
+attempt("field write") {
+  xs: List[Point] = []
+  d: Dyn = xs
+  d.push(5)
+  xs[0].x = 1
+}
+attempt("two fields") {
+  xs: List[Point] = []
+  d: Dyn = xs
+  d.push(5)
+  p = xs[0]
+  p.x + p.y
+}
+attempt("tuple") {
+  xs: List[(Int, Int)] = []
+  d: Dyn = xs
+  d.push(5)
+  let (a, b) = xs[0]
+  a + b
+}
+attempt("virtual call") {
+  xs: List[Animal] = []
+  d: Dyn = xs
+  d.push(5)
+  xs[0].speak()
+}
+attempt("concat") {
+  xs: List[String] = []
+  d: Dyn = xs
+  d.push(5)
+  xs[0] + "!"
+}
+# A right value of the type still works.
+attempt("fine") {
+  xs: List[String] = []
+  d: Dyn = xs
+  d.push("text")
+  xs[0].length
+}

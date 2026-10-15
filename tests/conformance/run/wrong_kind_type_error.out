@@ -1,0 +1,22 @@
+String.length: TypeError: expected String, got Int
+Atomic.get: TypeError: expected Atomic, got String
+Range.first: TypeError: expected Range, got String
+Channel.length: TypeError: expected Channel, got Int
+Thread.join: TypeError: expected Thread, got List
+Mutex.get: TypeError: expected Mutex, got Float
+StringBuilder.to_s: TypeError: expected StringBuilder, got Int
+Fiber.join: TypeError: expected Fiber, got String
+Fiber.is_done: TypeError: field access on a value of type Int
+list length: TypeError: expected List, got Int
+list index: TypeError: expected List, got Int
+list push: TypeError: expected List, got String
+dict get: NoMethodError: `[]` is not defined for Int
+dict set: TypeError: index must be Int, got String
+field read: TypeError: field access on a value of type Int
+field read of a string: TypeError: field access on a value of type String
+field write: TypeError: field access on a value of type Int
+two fields: TypeError: field access on a value of type Int
+tuple: TypeError: expected Tuple, got Int
+virtual call: TypeError: method call on a value of type Int
+concat: TypeError: expected String operands to concatenate
+fine: ok 4
