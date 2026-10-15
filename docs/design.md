@@ -1,6 +1,6 @@
 # Catallaxy Language Design
 
-*Matthew Tanous · October 12, 2026.* The source of this document is the [Catallaxy Language Design](https://claude.ai/artifact/RbuYbCUoz3Fps7tipXLTZJ) doc; this is a markdown copy.
+*Matthew Tanous · October 12, 2026.*
 
 ## Goals and non-goals
 
