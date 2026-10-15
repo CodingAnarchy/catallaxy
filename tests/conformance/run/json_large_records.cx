@@ -1,16 +1,17 @@
 # A large document of records with the same keys: Json.parse reaches safepoints as it reads,
 # so collections run part way through (#158). The key strings the records share must survive
-# them: a record in shape mode does not hold its own copy of a key.
-parts = (0...20_000).to_list().map { |i|
+# them: a record in shape mode does not hold its own copy of a key. Kept small: under
+# CATX_GC_STRESS every allocation collects, so any size exercises it (and TSan is slow).
+parts = (0...2_000).to_list().map { |i|
   "{\"id\": #{i}, \"name\": \"n#{i}\", \"tags\": [\"t#{i % 7}\"]}"
 }
 text = "[" + parts.join(",") + "]"
-for round in 0...3 {
+for round in 0...2 {
   rows = Json.parse(text).unwrap()
   total: Dyn = 0
   for r in rows { total += r["id"] }
-  last = rows[19_999]
+  last = rows[1_999]
   puts("#{rows.length} #{total} #{last["name"]} #{rows[123]["tags"][0]}")
-  junk = (0...20_000).to_list().map { |i| "junk #{i}" }
+  junk = (0...2_000).to_list().map { |i| "junk #{i}" }
 }
 puts(Json.stringify(Json.parse(text).unwrap()[5]))
