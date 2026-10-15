@@ -629,11 +629,13 @@ expected and actual types: `xs[0].length` panics with `TypeError: expected Strin
 ## 10. Tooling
 
 `catx run file.cx [args]`, `catx check [--json] paths...`, `catx fmt [--check] paths...`, `catx repl`,
-`catx lsp`, `catx test dir`. `check` and `fmt` take files and directories; a directory stands for
+`catx lsp`, `catx test [paths...]`. `check` and `fmt` take files and directories; a directory stands for
 every `*.cx` file under it, skipping hidden directories and `target/`.
 
-`catx test dir` runs every `*.cx` file under `dir` (except those in `lib/` directories, which hold
-modules for tests to import) in its own process. A file whose first line is `# expect: CODE[, CODE...]`
+`catx test paths...` runs each named `*.cx` file, and every `*.cx` file under each named directory
+(skipping hidden directories, `target/`, and `lib/` directories, which hold modules for tests to
+import), each in its own process. With no path it runs the tests under the current directory. A
+path that does not exist is an error (exit status 2), and so is finding no tests at all. A file whose first line is `# expect: CODE[, CODE...]`
 must fail `catx check` with those diagnostic codes (if every code is a warning, `W...`, it need only
 report them). Any other file must run with standard output
 equal to its `.out` file and exit with status 0, or with the status given by a `# exit: N` line; a
