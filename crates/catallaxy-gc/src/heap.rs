@@ -28,9 +28,12 @@ use parking_lot::Mutex;
 use crate::header::{Header, HEADER_SIZE, MINOR_MARK_BIT, YOUNG_BIT};
 use crate::stats;
 
-pub const SEGMENT_SIZE: usize = 256 * 1024;
-pub const PAGE_SIZE: usize = 32 * 1024;
-pub const PAGES_PER_SEGMENT: usize = SEGMENT_SIZE / PAGE_SIZE;
+pub const SEGMENT_SIZE: usize = PAGES_PER_SEGMENT * PAGE_SIZE;
+/// 4 KB under Miri, where every slot a sweep visits costs interpretation time and leaves a
+/// borrow tag behind: a minor collection sweeps each current page whole, and with 32 KB pages
+/// that dominated the runtime's Miri tests (issue #146). The page logic is the same either way.
+pub const PAGE_SIZE: usize = if cfg!(miri) { 4 * 1024 } else { 32 * 1024 };
+pub const PAGES_PER_SEGMENT: usize = 8;
 pub const MAX_SMALL: usize = 2048;
 
 /// Slot sizes: 16-byte steps up to 512, then coarser steps up to 2048.

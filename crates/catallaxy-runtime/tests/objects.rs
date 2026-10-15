@@ -370,6 +370,7 @@ fn shared_list_reads_do_not_lock_and_stay_safe() {
                     if stop.load(std::sync::atomic::Ordering::Relaxed) {
                         break;
                     }
+                    pause(&w.m.rec);
                 }
                 assert!(reads > 0);
                 w.finish();
@@ -453,6 +454,7 @@ fn shared_dict_seqlock_reads_stay_consistent() {
                     if done {
                         break;
                     }
+                    pause(&w.m.rec);
                 }
                 assert!(hits > 0, "no key was ever found");
                 w.finish();
