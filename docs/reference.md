@@ -488,6 +488,13 @@ Annotate the parameter to use any of these.
   `par_*` block, whichever thread ran it).
 - `Thread.join` returns `Result[T, String]`: `Err` carries the panic message. A thread that panicked and
   was never joined is reported, with its trace, on stderr when the program ends.
+- Recursion too deep panics with `SystemStackError: stack level too deep`, like any other panic. Calls
+  between Catallaxy functions are limited (to at most 200,000 frames per thread or fiber). Some recursion
+  also uses the native stack: comparing and hashing nested values (`==`, `<=>`, dict and set keys), and
+  blocks called by native methods (`Mutex.lock`, `Atomic.update`, `par_map`, a class's own `==` called
+  by a dict lookup). Native stacks are 256 MB on the main thread, 16 MB on spawned threads and pool
+  workers, and 256 KB on a fiber, so a fiber reaches this limit first (at a few hundred nested
+  `Mutex.lock` blocks, or about a thousand levels of nested lists).
 - `with lock` is reentrant: a thread may lock an object it already holds, up to 1,000 levels deep.
   Deeper nesting panics with `LockError:`.
 - An internal error of the runtime (a bug in Catallaxy, or in a native extension) is a panic whose

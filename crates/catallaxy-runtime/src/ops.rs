@@ -392,6 +392,7 @@ fn write_value(ix: &mut dyn Interop, v: Value, out: &mut String, quoted: bool, d
             }
         }
     }
+    crate::stack::check()?;
     let m = ix.mutator() as *mut Mutator;
     let m = unsafe { &*m };
     match cls.kind {
@@ -539,6 +540,7 @@ pub fn values_eq(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<bool> {
         ObjKind::Str => Ok(unsafe { as_str_obj(a).as_str() == as_str_obj(b).as_str() }),
         ObjKind::BigInt => Ok(unsafe { as_bigint(a).value == as_bigint(b).value }),
         ObjKind::Tuple => {
+            crate::stack::check()?;
             let (ta, tb) = unsafe { (as_tuple(a), as_tuple(b)) };
             if ta.len != tb.len {
                 return Ok(false);
@@ -551,6 +553,7 @@ pub fn values_eq(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<bool> {
             Ok(true)
         }
         ObjKind::List => {
+            crate::stack::check()?;
             let len = |v: Value| read_list(m, v).map(|l| l.len());
             if len(a)? != len(b)? {
                 return Ok(false);
@@ -573,6 +576,7 @@ pub fn values_eq(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<bool> {
         }
         // SAFETY (the unchecked reads): matched on the kind, which `b` shares.
         ObjKind::Dict | ObjKind::Set => {
+            crate::stack::check()?;
             let len = |v: Value| unsafe { read_dict_unchecked(m, v, |t| t.len()) };
             if len(a)? != len(b)? {
                 return Ok(false);
@@ -600,6 +604,7 @@ pub fn values_eq(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<bool> {
             if ca.id != cb.id || !(ca.variant_tag.is_some() || ca.id == ids::RANGE) {
                 return Ok(false);
             }
+            crate::stack::check()?;
             let (oa, ob) = unsafe { (as_instance(a), as_instance(b)) };
             for i in 0..ca.nfields() {
                 if !values_eq(ix, oa.get(i), ob.get(i))? {
@@ -637,6 +642,7 @@ pub fn hash_value(ix: &mut dyn Interop, v: Value) -> RtResult<u64> {
             Ok(hash_bytes(&b.to_signed_bytes_le()))
         }
         ObjKind::Tuple => {
+            crate::stack::check()?;
             let mut acc = 0x7475_706c_u64;
             for &e in unsafe { as_tuple(v) }.elems() {
                 acc = mix(acc ^ hash_value(ix, e)?);
@@ -644,6 +650,7 @@ pub fn hash_value(ix: &mut dyn Interop, v: Value) -> RtResult<u64> {
             Ok(acc)
         }
         ObjKind::List => {
+            crate::stack::check()?;
             let mut acc = 0x6c69_7374_u64;
             let mut i = 0;
             loop {
@@ -656,6 +663,7 @@ pub fn hash_value(ix: &mut dyn Interop, v: Value) -> RtResult<u64> {
         }
         // SAFETY (the unchecked reads): matched on the kind.
         ObjKind::Dict | ObjKind::Set => {
+            crate::stack::check()?;
             let mut acc = 0x6469_6374_u64;
             let n = unsafe { read_dict_unchecked(m, v, |t| t.raw_len()) }?;
             for i in 0..n {
@@ -674,6 +682,7 @@ pub fn hash_value(ix: &mut dyn Interop, v: Value) -> RtResult<u64> {
                 }
             }
             if cls.variant_tag.is_some() || cls.id == ids::RANGE {
+                crate::stack::check()?;
                 let o = unsafe { as_instance(v) };
                 let mut acc = mix(cls.id as u64);
                 for i in 0..cls.nfields() {
@@ -763,6 +772,7 @@ pub fn compare(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<Option<CmpO
     match ca.kind {
         ObjKind::Str => Ok(Some(unsafe { as_str_obj(a).as_str().cmp(as_str_obj(b).as_str()) })),
         ObjKind::Tuple | ObjKind::List => {
+            crate::stack::check()?;
             let get = |v: Value, i: usize| -> RtResult<Option<Value>> {
                 if ca.kind == ObjKind::Tuple {
                     Ok(unsafe { as_tuple(v) }.elems().get(i).copied())
@@ -789,6 +799,7 @@ pub fn compare(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<Option<CmpO
             if ta != tb {
                 return Ok(Some(ta.cmp(&tb)));
             }
+            crate::stack::check()?;
             let (oa, ob) = unsafe { (as_instance(a), as_instance(b)) };
             for i in 0..ca.nfields() {
                 match compare(ix, oa.get(i), ob.get(i))? {

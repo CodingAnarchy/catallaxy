@@ -340,8 +340,14 @@ fn next_u64() -> u64 {
     })
 }
 
+/// Native stack that parsing or printing JSON may use beyond the stack guard's margin. Both
+/// recurse once per nesting level, to at most 128 (serde_json's limit) or 200 (`to_json`)
+/// levels: about 80 KB in all on aarch64 macOS, part of which the margin covers.
+const JSON_STACK: usize = 64 << 10;
+
 fn json_parse(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let text = s(a[0])?;
+    catallaxy_runtime::stack::check_extra(JSON_STACK)?;
     // serde_json checks the text and words the errors; `Pj` then reads the checked text
     // again so that integers keep every digit.
     if let Err(e) = serde_json::from_str::<JsonCheck>(text) {
@@ -620,6 +626,10 @@ impl Jv {
 fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
     if depth > 200 {
         return panic("JSON nesting too deep");
+    }
+    if depth == 0 {
+        // Covers this recursion and the printing of what it builds.
+        catallaxy_runtime::stack::check_extra(JSON_STACK)?;
     }
     if v.is_nil() {
         return Ok(Jv::Scalar("null".into()));
