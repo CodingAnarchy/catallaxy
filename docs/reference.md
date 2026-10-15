@@ -495,6 +495,11 @@ Annotate the parameter to use any of these.
   by a dict lookup). Native stacks are 256 MB on the main thread, 16 MB on spawned threads and pool
   workers, and 256 KB on a fiber, so a fiber reaches this limit first (at a few hundred nested
   `Mutex.lock` blocks, or about a thousand levels of nested lists).
+- `with lock` is reentrant: a thread may lock an object it already holds, up to 1,000 levels deep.
+  Deeper nesting panics with `LockError:`.
+- An internal error of the runtime (a bug in Catallaxy, or in a native extension) is a panic whose
+  message starts `internal error:`. It ends only the thread, fiber or `par_*` call it happened in, like
+  any panic, and releases the locks that thread held.
 - Running out of memory panics with a message starting `MemoryError:`, like any other panic (so on another
   thread `join` returns it as `Err`, and the program can carry on once the data is dropped):
   - A single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,

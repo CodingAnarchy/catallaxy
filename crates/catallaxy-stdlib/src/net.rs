@@ -36,23 +36,36 @@ struct Reactor {
     waiters: Mutex<HashMap<usize, Vec<Wake>>>,
     /// Sockets with a connect in flight, and whether the reactor has seen an event for them.
     connecting: Mutex<HashMap<usize, bool>>,
-    next: AtomicUsize,
 }
 
-static REACTOR: LazyLock<Reactor> = LazyLock::new(|| {
-    let poll = Poll::new().expect("create the network poller");
-    let registry = poll.registry().try_clone().expect("clone the poller registry");
+/// The reactor, started on first use. The system may refuse it (out of file descriptors or
+/// threads): then watching a socket fails with an `Err` result, as later attempts do too.
+static REACTOR_INIT: LazyLock<Result<Reactor, String>> = LazyLock::new(|| {
+    let poll = Poll::new().map_err(|e| format!("cannot create the network poller: {e}"))?;
+    let registry = poll.registry().try_clone().map_err(|e| format!("cannot create the network poller: {e}"))?;
     std::thread::Builder::new()
         .name("catx-net".into())
         .spawn(move || reactor_main(poll))
-        .expect("spawn the network reactor");
-    Reactor {
-        registry,
-        waiters: Mutex::new(HashMap::new()),
-        connecting: Mutex::new(HashMap::new()),
-        next: AtomicUsize::new(1),
-    }
+        .map_err(|e| format!("cannot start the network reactor: {e}"))?;
+    Ok(Reactor { registry, waiters: Mutex::new(HashMap::new()), connecting: Mutex::new(HashMap::new()) })
 });
+
+/// The reactor, or why it could not start. Every socket is watched through this first.
+fn reactor() -> Result<&'static Reactor, String> {
+    REACTOR_INIT.as_ref().map_err(|e| e.clone())
+}
+
+/// The running reactor, for sockets [`reactor`] has already watched.
+struct Started;
+static REACTOR: Started = Started;
+impl std::ops::Deref for Started {
+    type Target = Reactor;
+    fn deref(&self) -> &Reactor {
+        REACTOR_INIT.as_ref().expect("the reactor started before a socket was watched")
+    }
+}
+
+static NEXT_TOKEN: AtomicUsize = AtomicUsize::new(1);
 
 fn reactor_main(mut poll: Poll) {
     let mut events = Events::with_capacity(1024);
@@ -74,7 +87,7 @@ fn reactor_main(mut poll: Poll) {
 }
 
 fn new_token() -> Token {
-    Token(REACTOR.next.fetch_add(1, Ordering::Relaxed))
+    Token(NEXT_TOKEN.fetch_add(1, Ordering::Relaxed))
 }
 
 /// Runs `op` until it stops returning `WouldBlock`, waiting for readiness of `token` in between.
@@ -174,7 +187,9 @@ fn deadline(c: &Conn) -> Option<Instant> {
 
 fn new_socket(vm: &mut Vm, mut stream: TcpStream) -> RtResult<Value> {
     let token = new_token();
-    if let Err(e) = REACTOR.registry.register(&mut stream, token, Interest::READABLE | Interest::WRITABLE) {
+    if let Err(e) = reactor().and_then(|r| {
+        r.registry.register(&mut stream, token, Interest::READABLE | Interest::WRITABLE).map_err(|e| e.to_string())
+    }) {
         return Ok(err(vm, &format!("cannot watch socket: {e}")));
     }
     let _ = stream.set_nodelay(true);
@@ -238,6 +253,7 @@ fn connect(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 /// once, so the reactor records it in `connecting` rather than leaving it to be inferred from
 /// which wakers remain: a waker armed after the only event would otherwise wait forever.
 fn wait_connected(vm: &mut Vm, stream: &mut TcpStream, token: Token, deadline: Option<Instant>) -> Result<(), String> {
+    reactor().map_err(|e| format!("cannot watch socket: {e}"))?;
     REACTOR.connecting.lock().insert(token.0, false);
     let r = wait_connected_inner(vm, stream, token, deadline);
     REACTOR.connecting.lock().remove(&token.0);
@@ -412,7 +428,9 @@ fn listen(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
         Err(e) => return Ok(err(vm, &format!("{addr}: {e}"))),
     };
     let token = new_token();
-    if let Err(e) = REACTOR.registry.register(&mut l, token, Interest::READABLE) {
+    if let Err(e) =
+        reactor().and_then(|r| r.registry.register(&mut l, token, Interest::READABLE).map_err(|e| e.to_string()))
+    {
         return Ok(err(vm, &format!("cannot watch listener: {e}")));
     }
     let port = l.local_addr().map(|a| a.port()).unwrap_or(0);

@@ -172,37 +172,60 @@ fn run_program(program: &Program) -> i32 {
         eprintln!("error: {}", e.0);
         return 70;
     }
-    for &fid in &program.entry {
-        match vm.call_func(fid, &[]) {
-            Ok(_) => {}
-            Err(RtTrap::Panic(msg)) => {
-                catallaxy_stdlib::flush();
-                eprintln!("panic: {msg}");
-                if let Some(trace) = vm.panic_trace.take() {
-                    for line in trace.iter().take(30) {
-                        eprintln!("    at {line}");
+    // A Rust panic in the runtime (an internal error) ends the program like a Catallaxy panic:
+    // with the program's output flushed and a message saying what happened where.
+    let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Option<i32> {
+        for &fid in &program.entry {
+            match vm.call_func(fid, &[]) {
+                Ok(_) => {}
+                Err(RtTrap::Panic(msg)) => {
+                    catallaxy_stdlib::flush();
+                    eprintln!("panic: {msg}");
+                    if let Some(trace) = vm.panic_trace.take() {
+                        for line in trace.iter().take(30) {
+                            eprintln!("    at {line}");
+                        }
+                        if trace.len() > 30 {
+                            eprintln!("    ... {} more", trace.len() - 30);
+                        }
                     }
-                    if trace.len() > 30 {
-                        eprintln!("    ... {} more", trace.len() - 30);
-                    }
+                    catallaxy_stdlib::report_unjoined_panics();
+                    return Some(101);
                 }
-                catallaxy_stdlib::report_unjoined_panics();
-                return 101;
-            }
-            Err(RtTrap::Exit(code)) => {
-                catallaxy_stdlib::flush();
-                catallaxy_stdlib::report_unjoined_panics();
-                return code;
-            }
-            Err(RtTrap::Unwind { .. }) => {
-                catallaxy_stdlib::flush();
-                eprintln!("panic: internal error: stray non-local exit");
-                return 101;
+                Err(RtTrap::Exit(code)) => {
+                    catallaxy_stdlib::flush();
+                    catallaxy_stdlib::report_unjoined_panics();
+                    return Some(code);
+                }
+                Err(RtTrap::Unwind { .. }) => {
+                    catallaxy_stdlib::flush();
+                    eprintln!("panic: internal error: stray non-local exit");
+                    return Some(101);
+                }
             }
         }
+        // The program ends when its fibers do.
+        catallaxy_stdlib::fiber::drain(&mut vm);
+        None
+    }));
+    match run {
+        Ok(Some(code)) => return code,
+        Ok(None) => {}
+        Err(payload) => {
+            let msg = catallaxy_stdlib::internal_error_message(&*payload).unwrap_or_else(|| "internal error".into());
+            let trace = vm.backtrace();
+            catallaxy_stdlib::flush();
+            eprintln!("panic: {msg}");
+            for line in trace.iter().take(30) {
+                eprintln!("    at {line}");
+            }
+            if trace.len() > 30 {
+                eprintln!("    ... {} more", trace.len() - 30);
+            }
+            catallaxy_stdlib::report_unjoined_panics();
+            return 101;
+        }
     }
-    // The program ends when its fibers do.
-    catallaxy_stdlib::fiber::drain(&mut vm);
     catallaxy_stdlib::flush();
     catallaxy_stdlib::report_unjoined_panics();
     if std::env::var_os("CATX_GC_STATS").is_some() {
