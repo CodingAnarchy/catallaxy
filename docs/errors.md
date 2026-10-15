@@ -536,7 +536,8 @@ const A = B + 1
 const B = A + 1
 ```
 
-Break the cycle by giving one of them a value that does not depend on the other.
+Break the cycle by giving one of them a value that does not depend on the other. The constant's
+type is unknown until then, so its uses are not checked and report no further errors.
 
 ## E0232
 

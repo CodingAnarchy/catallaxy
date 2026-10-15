@@ -1,17 +1,68 @@
 //! Memory limits: which allocation requests the runtime refuses up front (so they become a
-//! `MemoryError` panic with a stack trace instead of an allocator abort), and the optional heap
-//! cap set with `CATX_MAX_HEAP`.
+//! `MemoryError` panic with a stack trace instead of an allocator abort), and the heap cap:
+//! `CATX_MAX_HEAP`, or by default three quarters of physical memory.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 pub use crate::heap::{memory_refused, release_headroom};
 
-/// The heap cap from `CATX_MAX_HEAP`: a byte count with an optional `K`, `M` or `G` suffix
-/// (powers of 1024). Unset, empty or unparsable means no cap.
+/// The heap cap: `CATX_MAX_HEAP`, a byte count with an optional `K`, `M` or `G` suffix (powers
+/// of 1024), or `0` (or `off`, `none`) for none. Unset, empty or unparsable means the default:
+/// three quarters of physical memory (none where the platform does not report it). It counts
+/// the live heap, including the buffers of lists, dicts and builders, and the temporaries of
+/// natives that check it (see [`check_cap`]), so that a runaway program raises a `MemoryError`
+/// instead of making the machine swap (issue #158).
 pub fn max_heap() -> Option<usize> {
-    static MAX: OnceLock<Option<usize>> = OnceLock::new();
-    *MAX.get_or_init(|| std::env::var("CATX_MAX_HEAP").ok().and_then(|v| parse_size(&v)))
+    cap().map(|(max, _)| max)
+}
+
+/// The cap and whether `CATX_MAX_HEAP` set it.
+fn cap() -> Option<(usize, bool)> {
+    static MAX: OnceLock<Option<(usize, bool)>> = OnceLock::new();
+    *MAX.get_or_init(|| cap_from(std::env::var("CATX_MAX_HEAP").ok().as_deref(), physical_memory()))
+}
+
+/// The cap for a `CATX_MAX_HEAP` setting and the machine's physical memory.
+fn cap_from(setting: Option<&str>, physical: Option<usize>) -> Option<(usize, bool)> {
+    match setting.map(str::trim) {
+        Some(off) if ["0", "off", "none"].iter().any(|w| off.eq_ignore_ascii_case(w)) => None,
+        Some(v) if parse_size(v).is_some() => parse_size(v).map(|b| (b, true)),
+        _ => physical.map(|p| (p / 4 * 3, false)),
+    }
+}
+
+/// How messages name the cap.
+fn cap_name(max: usize) -> String {
+    match cap() {
+        Some((_, true)) => format!("the CATX_MAX_HEAP limit of {:.1} MB", max as f64 / 1e6),
+        _ => format!(
+            "the heap limit of {:.1} MB (three quarters of physical memory; CATX_MAX_HEAP changes it)",
+            max as f64 / 1e6
+        ),
+    }
+}
+
+/// Before memory outside the heap grows by `bytes` (a list, dict or builder buffer, or a
+/// native's temporaries): whether the live heap, as the last major collection measured it, and
+/// `bytes` more would pass the cap. If so, returns why, for a `MemoryError` message. A caller
+/// whose values are all rooted collects and checks again before raising it.
+///
+/// Memory allocated since that collection is not counted, so garbage never causes a refusal:
+/// counting buffers toward the collection budget (which the cap limits; see [`cap_budget`])
+/// makes collections come often enough for the live figure to keep up.
+pub fn check_cap(bytes: usize) -> Result<(), String> {
+    let Some(max) = max_heap() else { return Ok(()) };
+    let live = crate::stats::live_bytes();
+    if live.saturating_add(bytes) <= max {
+        return Ok(());
+    }
+    Err(format!(
+        "{:.1} MB more would pass {} ({:.1} MB live after the last collection)",
+        bytes as f64 / 1e6,
+        cap_name(max),
+        live as f64 / 1e6
+    ))
 }
 
 /// Parses `"512M"`, `"2g"`, `"1048576"` and the like.
@@ -76,7 +127,10 @@ pub fn physical_memory() -> Option<usize> {
 pub fn check_request(bytes: usize) -> Result<(), String> {
     if let Some(max) = max_heap() {
         if bytes > max {
-            return Err(format!("cannot allocate {bytes} bytes (CATX_MAX_HEAP is {max} bytes)"));
+            return Err(match cap() {
+                Some((_, true)) => format!("cannot allocate {bytes} bytes (CATX_MAX_HEAP is {max} bytes)"),
+                _ => format!("cannot allocate {bytes} bytes (over the heap limit of {max} bytes, three quarters of physical memory)"),
+            });
         }
     }
     if let Some(phys) = physical_memory() {
@@ -133,9 +187,9 @@ pub fn take_pending_error() -> Option<String> {
 fn take_pending_slow() -> Option<String> {
     if OVER_LIMIT.swap(false, Ordering::AcqRel) {
         return Some(format!(
-            "MemoryError: {:.1} MB live after collection, over the CATX_MAX_HEAP limit of {:.1} MB",
+            "MemoryError: {:.1} MB live after collection, over {}",
             crate::stats::live_bytes() as f64 / 1e6,
-            max_heap().unwrap_or(0) as f64 / 1e6
+            cap_name(max_heap().unwrap_or(0))
         ));
     }
     if OUT_OF_MEMORY.swap(false, Ordering::AcqRel) {
@@ -160,6 +214,19 @@ mod tests {
         assert_eq!(parse_size("0"), None);
         assert_eq!(parse_size("lots"), None);
         assert_eq!(parse_size(""), None);
+    }
+
+    #[test]
+    fn the_cap_defaults_to_three_quarters_of_physical_memory() {
+        let gb = 1usize << 30;
+        assert_eq!(cap_from(None, Some(16 * gb)), Some((12 * gb, false)));
+        assert_eq!(cap_from(Some(""), Some(16 * gb)), Some((12 * gb, false)));
+        assert_eq!(cap_from(Some("lots"), Some(16 * gb)), Some((12 * gb, false)));
+        assert_eq!(cap_from(None, None), None);
+        assert_eq!(cap_from(Some("512M"), Some(16 * gb)), Some((512 << 20, true)));
+        for off in ["0", "off", "OFF", "none", " None "] {
+            assert_eq!(cap_from(Some(off), Some(16 * gb)), None, "{off}");
+        }
     }
 
     #[test]

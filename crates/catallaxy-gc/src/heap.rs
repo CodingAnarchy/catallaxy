@@ -850,6 +850,11 @@ impl LocalHeap {
         }
     }
 
+    /// Bytes allocated young since the thread's last minor collection.
+    pub fn young_bytes(&self) -> usize {
+        self.young_bytes
+    }
+
     pub fn owner(&self) -> u16 {
         self.owner
     }

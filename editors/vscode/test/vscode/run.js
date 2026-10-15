@@ -25,15 +25,19 @@ async function main() {
   fs.mkdirSync(path.join(ws, ".vscode"));
   fs.writeFileSync(path.join(ws, ".vscode/settings.json"), JSON.stringify({ "catallaxy.serverPath": catx }, null, 2));
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "catx-vscode-user-"));
+  // Where the server writes the prelude's sources (go to definition of `puts`).
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), "catx-vscode-cache-"));
   try {
     await runTests({
       extensionDevelopmentPath: path.resolve(__dirname, "../.."),
       extensionTestsPath: path.join(__dirname, "suite.js"),
       launchArgs: [ws, "--disable-extensions", "--disable-workspace-trust", "--user-data-dir", userData],
+      extensionTestsEnv: { XDG_CACHE_HOME: cache },
     });
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
     fs.rmSync(userData, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
   }
 }
 

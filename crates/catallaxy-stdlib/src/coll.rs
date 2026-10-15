@@ -404,10 +404,23 @@ fn sb_push(vm: &Vm, b: Value, x: &str) -> RtResult<Value> {
     for retry in [false, true] {
         let grown = ownership::with_write(&vm.m, b, |_| {
             let buf = unsafe { &mut *sb.buf.get() };
-            buf.try_reserve(x.len()).map(|_| {
-                buf.push_str(x);
-                unsafe { *sb.chars.get() += char_count(x) };
-            })
+            let cap = buf.capacity();
+            if buf.len().saturating_add(x.len()) > cap {
+                // The buffer counts toward the heap cap and the collection budget, like a
+                // list's (issue #158). `try_reserve` grows to at least twice the capacity.
+                let want = buf.len().saturating_add(x.len()).max(cap.saturating_mul(2)).max(8);
+                if !catallaxy_runtime::cap_allows(want) {
+                    return Err(());
+                }
+                if buf.try_reserve(x.len()).is_err() {
+                    catallaxy_runtime::allocator_refused();
+                    return Err(());
+                }
+                catallaxy_runtime::note_external(buf.capacity() - cap);
+            }
+            buf.push_str(x);
+            unsafe { *sb.chars.get() += char_count(x) };
+            Ok(())
         })?;
         if grown.is_ok() {
             return Ok(Value::NIL);
