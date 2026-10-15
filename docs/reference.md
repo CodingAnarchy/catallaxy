@@ -499,7 +499,12 @@ Annotate the parameter to use any of these.
   Deeper nesting panics with `LockError:`.
 - An internal error of the runtime (a bug in Catallaxy, or in a native extension) is a panic whose
   message starts `internal error:`. It ends only the thread, fiber or `par_*` call it happened in, like
-  any panic, and releases the locks that thread held.
+  any panic, and releases the locks that thread held. Its report gives the Rust source location as
+  its first `at` line, marked `(Rust)`; Rust's own panic report is printed too with
+  `CATX_RUST_PANIC=1`. One that happens inside a garbage collection cannot be recovered from (the
+  heap's state is unknown, and other threads may be stopped for it): the program's output is
+  flushed, the message is printed, followed by `during a garbage collection; the program cannot
+  continue`, and the process exits with status 101.
 - Running out of memory panics with a message starting `MemoryError:`, like any other panic (so on another
   thread `join` returns it as `Err`, and the program can carry on once the data is dropped):
   - A single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,
