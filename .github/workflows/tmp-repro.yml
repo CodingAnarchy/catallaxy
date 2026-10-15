@@ -5,7 +5,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rev: [origin/main, a8b80fb, 1e0f6f1, f5ae0ad, b8b0a3a, v0.4.1]
+        include:
+          - { rev: a8b80fb, name: control, env: "" }
+          - { rev: a8b80fb, name: nooverflow, env: "CATX_GC_MARK_STACK=1000000000" }
+          - { rev: a8b80fb, name: tinystack, env: "CATX_GC_MARK_STACK=1" }
+          - { rev: a8b80fb, name: nohelpers, env: "CATX_GC_THREADS=0" }
+          - { rev: a8b80fb, name: nogen, env: "CATX_GC_GENERATIONAL=0" }
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -22,14 +27,14 @@ jobs:
           ulimit -c unlimited
           loop() {
             for i in $(seq 1 100); do
-              CATX_GC_STRESS=1 ./target/release/catx run /tmp/crash.cx > /tmp/o$1 2> /tmp/e$1
+              env CATX_GC_STRESS=1 ${{ matrix.env }} ./target/release/catx run /tmp/crash.cx > /tmp/o$1 2> /tmp/e$1
               c=$?
               if [ $c -ne 0 ]; then echo "worker $1 run $i exit $c (signal $((c-128))) after $(wc -l < /tmp/o$1) lines"; tail -3 /tmp/e$1; fi
             done
           }
           for w in 1 2 3 4 5 6 7 8; do loop $w & done
           wait
-          n=$(ls /tmp/cores | wc -l); echo "CORES ${{ matrix.rev }}: $n/800"
+          n=$(ls /tmp/cores | wc -l); echo "CORES ${{ matrix.rev }} ${{ matrix.name }}: $n/800"
           for core in $(ls /tmp/cores | head -2); do
             echo "===== backtrace for $core"
             gdb -batch -ex "thread apply all bt 25" ./target/release/catx /tmp/cores/$core 2>/dev/null | grep -v "^\[New LWP" | head -150
