@@ -840,6 +840,14 @@ impl Tracer {
         bytes
     }
 
+    /// Whether this is a minor collection: only the owning thread's young objects are marked,
+    /// and the root source runs on the owning thread. A root source may then skip roots it knows
+    /// reference no young object (their young referents, if any, are found through the
+    /// remembered set).
+    pub fn is_minor(&self) -> bool {
+        self.minor.is_some()
+    }
+
     /// Marks `obj` reachable. Null pointers are ignored. Tracers are only handed to root sources
     /// and trace hooks, whose contract is to pass live object pointers.
     #[inline]
