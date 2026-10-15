@@ -18,12 +18,32 @@ fn boom(_: &mut Vm, _: &[Value]) -> RtResult<Value> {
     panic!("boom from a native");
 }
 
+fn pool_jobs(_: &mut Vm, _: &[Value]) -> RtResult<Value> {
+    Ok(Value::small_int(catallaxy_stdlib::pending_parallel_jobs() as i64))
+}
+
+/// Global roots whose tracing panics: the next major collection meets a Rust panic while the
+/// world is stopped.
+struct PoisonedRoots;
+impl catallaxy_gc::RootSource for PoisonedRoots {
+    fn trace_roots(&self, _: &mut catallaxy_gc::Tracer) {
+        panic!("root source failed");
+    }
+}
+
+fn poison_roots(_: &mut Vm, _: &[Value]) -> RtResult<Value> {
+    catallaxy_gc::add_global_roots(Box::new(PoisonedRoots));
+    Ok(Value::NIL)
+}
+
 /// The child side: runs the program in `CATX_INTERNAL_PANIC_SRC` with `boom` registered.
 #[test]
 fn child() {
     let Ok(src) = std::env::var("CATX_INTERNAL_PANIC_SRC") else { return };
     let mut engine = Engine::new();
     engine.register("boom", boom);
+    engine.register("pool_jobs", pool_jobs);
+    engine.register("poison_roots", poison_roots);
     let code = engine.run_source("internal_panic.cx", &src).expect("compiles");
     std::process::exit(code);
 }
@@ -72,10 +92,19 @@ fn wait(mut cmd: Command) -> Outcome {
 
 /// Runs `src` with the panicking native, in a child process.
 fn run(src: &str) -> Outcome {
+    run_with(src, &[])
+}
+
+/// As [`run`], with more environment variables (`CATX_THREADS` is 4 unless set here).
+fn run_with(src: &str, env: &[(&str, &str)]) -> Outcome {
     let mut cmd = Command::new(std::env::current_exe().unwrap());
     cmd.args(["child", "--exact", "--nocapture", "--test-threads=1"])
         .env("CATX_INTERNAL_PANIC_SRC", src)
-        .env("CATX_THREADS", "4");
+        .env("CATX_THREADS", "4")
+        .env_remove("CATX_RUST_PANIC");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
     wait(cmd)
 }
 
@@ -172,6 +201,33 @@ puts("sum: #{(0...200).to_list().par_map { |x| x * 2 }.sum()}")
     assert!(o.stdout.contains("sum: 39800\n"), "{}", o.ctx());
 }
 
+/// The calling thread itself panics inside the runtime while running its share of a `par_map`
+/// (with `CATX_THREADS=1` there are no workers, so it runs every element): the job leaves the
+/// pool's roots all the same (issue #198). With workers, whichever thread panics.
+#[test]
+fn par_map_caller_panic_leaves_no_job_behind() {
+    let src = r#"native fn boom() -> Int
+native fn pool_jobs() -> Int
+for round in 0...3 {
+  t = spawn { (0...100).to_list().par_map { |x| if x == 50 { boom() } else { x } } }
+  match t.join() {
+    Ok(_) => puts("ok")
+    Err(e) => puts("join: #{e}")
+  }
+  puts("jobs: #{pool_jobs()}")
+}
+puts("sum: #{(0...200).to_list().par_map { |x| x * 2 }.sum()}")
+puts("jobs: #{pool_jobs()}")
+"#;
+    for threads in ["1", "4"] {
+        let o = run_with(src, &[("CATX_THREADS", threads)]);
+        assert_eq!(o.code, Some(0), "{}", o.ctx());
+        assert_eq!(o.stdout.matches("join: internal error: boom from a native").count(), 3, "{}", o.ctx());
+        assert_eq!(o.stdout.matches("jobs: 0\n").count(), 4, "{}", o.ctx());
+        assert!(o.stdout.contains("sum: 39800\n"), "{}", o.ctx());
+    }
+}
+
 /// A fiber that panics inside the runtime ends like a fiber that panics.
 #[test]
 fn fiber() {
@@ -212,6 +268,46 @@ puts("unreachable")
     assert!(!o.stdout.contains("unreachable"), "{}", o.ctx());
     assert!(o.stderr.contains("panic: internal error: boom from a native\n"), "{}", o.ctx());
     assert!(o.stderr.contains("    at explode ("), "{}", o.ctx());
+    // Rust's own report is left out; its location follows the message (issue #198).
+    assert!(!o.stderr.contains("panicked at"), "{}", o.ctx());
+    let first = o.stderr.lines().skip_while(|l| !l.starts_with("panic: ")).nth(1).unwrap_or_default();
+    assert!(
+        first.starts_with("    at ") && first.ends_with(" (Rust)") && first.contains("internal_panic.rs:"),
+        "{}",
+        o.ctx()
+    );
+    // `CATX_RUST_PANIC=1` brings Rust's report back.
+    let o = run_with(&src, &[("CATX_RUST_PANIC", "1")]);
+    assert_eq!(o.code, Some(101), "{}", o.ctx());
+    assert!(o.stderr.contains("panicked at") && o.stderr.contains("boom from a native"), "{}", o.ctx());
+    assert!(o.stderr.contains("panic: internal error: boom from a native\n"), "{}", o.ctx());
+}
+
+/// A Rust panic inside a major collection, with another thread stopped for it: the program
+/// ends with its output flushed, the message and the Rust location, and status 101, instead of
+/// hanging with the world stopped (issue #198).
+#[test]
+fn collector_panic() {
+    let src = r#"native fn poison_roots() -> Nil
+started: Channel[Int] = Channel.new()
+t = spawn {
+  started.send(1)
+  n = 0
+  while true { n += 1 }
+}
+started.recv()
+puts("before")
+poison_roots()
+gc()
+puts("after")
+"#;
+    let o = run(src);
+    assert_eq!(o.code, Some(101), "{}", o.ctx());
+    assert!(o.stdout.contains("before\n") && !o.stdout.contains("after"), "{}", o.ctx());
+    assert!(o.stderr.contains("panic: internal error: root source failed\n"), "{}", o.ctx());
+    assert!(o.stderr.contains("    during a garbage collection; the program cannot continue\n"), "{}", o.ctx());
+    assert!(o.stderr.contains("internal_panic.rs:") && o.stderr.contains(" (Rust)"), "{}", o.ctx());
+    assert!(!o.stderr.contains("panicked at"), "{}", o.ctx());
 }
 
 /// The reproduction from #155: `with lock` nested deeper than the lock's recursion count used to

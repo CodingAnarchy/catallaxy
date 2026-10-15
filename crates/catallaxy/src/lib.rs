@@ -174,7 +174,7 @@ fn run_program(program: &Program) -> i32 {
     }
     // A Rust panic in the runtime (an internal error) ends the program like a Catallaxy panic:
     // with the program's output flushed and a message saying what happened where.
-    let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Option<i32> {
+    let run = catallaxy_stdlib::catch_internal(|| -> Option<i32> {
         for &fid in &program.entry {
             match vm.call_func(fid, &[]) {
                 Ok(_) => {}
@@ -210,13 +210,17 @@ fn run_program(program: &Program) -> i32 {
         // The program ends when its fibers do.
         catallaxy_stdlib::fiber::drain(&mut vm);
         None
-    }));
+    });
     match run {
         Ok(Some(code)) => return code,
         Ok(None) => {}
         Err(payload) => {
             let msg = catallaxy_stdlib::internal_error_message(&*payload).unwrap_or_else(|| "internal error".into());
-            let trace = vm.backtrace();
+            let mut trace = vm.backtrace();
+            // Innermost first: where in the runtime the Rust panic happened.
+            if let Some(loc) = catallaxy_stdlib::take_rust_location() {
+                trace.insert(0, format!("{loc} (Rust)"));
+            }
             catallaxy_stdlib::flush();
             eprintln!("panic: {msg}");
             for line in trace.iter().take(30) {

@@ -63,6 +63,13 @@ fn flush_locked(g: &mut Option<std::io::BufWriter<std::io::Stdout>>) {
     }
 }
 
+/// Flushes unless another thread holds the buffer (for a process that is about to die).
+pub(crate) fn try_flush() {
+    if let Some(mut g) = STDOUT.try_lock() {
+        flush_locked(&mut g);
+    }
+}
+
 /// Whether standard output's reader has gone away; a program that ends normally then exits
 /// with [`BROKEN_PIPE_STATUS`].
 pub fn stdout_broken() -> bool {

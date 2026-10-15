@@ -5,7 +5,7 @@
 
 mod coll;
 mod conc;
-pub use conc::report_unjoined_panics;
+pub use conc::{pending_parallel_jobs, report_unjoined_panics};
 mod core;
 mod data;
 pub mod fiber;
@@ -26,6 +26,71 @@ use catallaxy_vm::{NativeFn, Vm};
 
 /// Command-line arguments passed to the program (after the script path).
 pub static ARGS: OnceLock<Vec<String>> = OnceLock::new();
+
+thread_local! {
+    /// How many [`catch_internal`] scopes the thread is in.
+    static CATCHING: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Where the thread's last caught Rust panic happened (see [`take_rust_location`]).
+    static RUST_LOCATION: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `f`, catching a Rust panic (an internal error) out of it, at a thread's, pool worker's
+/// or fiber's entry, or around a program. Inside such a scope Rust's own panic report
+/// (`thread '...' panicked at ...`) is not printed, so the Catallaxy message comes first; the
+/// panic's Rust location is kept for the report (see [`take_rust_location`]). With
+/// `CATX_RUST_PANIC=1` Rust's report is printed as well, as it happens (`RUST_BACKTRACE` then
+/// works as usual). Also installs the collector's fatal handler (see [`collector_fatal`]).
+pub fn catch_internal<R>(f: impl FnOnce() -> R) -> std::thread::Result<R> {
+    install_panic_hook();
+    struct Scope;
+    impl Drop for Scope {
+        fn drop(&mut self) {
+            CATCHING.with(|c| c.set(c.get() - 1));
+        }
+    }
+    CATCHING.with(|c| c.set(c.get() + 1));
+    let _scope = Scope;
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+}
+
+/// The Rust source location of the last panic [`catch_internal`] caught on this thread, once.
+pub fn take_rust_location() -> Option<String> {
+    RUST_LOCATION.with(|l| l.borrow_mut().take())
+}
+
+fn install_panic_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let rust_report = std::env::var_os("CATX_RUST_PANIC").is_some_and(|v| v != "0");
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let caught = CATCHING.try_with(|c| c.get() > 0).unwrap_or(false);
+            if caught {
+                let loc = info.location().map(|l| l.to_string());
+                let _ = RUST_LOCATION.try_with(|l| *l.borrow_mut() = loc);
+            }
+            if !caught || rust_report {
+                prev(info);
+            }
+        }));
+        catallaxy_gc::set_fatal_handler(collector_fatal);
+    });
+}
+
+/// Ends the process after a Rust panic inside a garbage collection (issue #198): the heap is in
+/// an unknown state and other threads may be stopped for the collection, so the program cannot
+/// go on. Flushes the program's output (unless another thread is writing it), prints the message
+/// and exits with status 101, as an internal error on the main thread does.
+fn collector_fatal(payload: &(dyn std::any::Any + Send)) -> ! {
+    let msg = internal_error_message(payload).unwrap_or_else(|| "internal error".into());
+    out::try_flush();
+    eprintln!("panic: {msg}");
+    eprintln!("    during a garbage collection; the program cannot continue");
+    if let Some(loc) = take_rust_location() {
+        eprintln!("    at {loc} (Rust)");
+    }
+    std::process::exit(101);
+}
 
 /// The Catallaxy panic message for a Rust panic caught at a thread's or fiber's entry (an
 /// internal error of the runtime), or `None` if the payload is not a panic message (such as the

@@ -1,0 +1,49 @@
+# A run-time interface test (`is`, `as?`, `name: Iface =>`) checks method signatures, not just
+# method names: a class whose `area` takes other parameters or returns another type fails it.
+interface Shape {
+  fn area(self) -> Float
+}
+
+interface Sized {
+  fn length(self) -> Int
+}
+
+class Circle {
+  r: Float
+  fn area(self) -> Float { 3.0 * self.r * self.r }
+}
+
+class Scaled {
+  fn area(self, scale: Int) -> Float { 1.0 * scale }
+}
+
+class Named {
+  fn area(self) -> String { "big" }
+}
+
+enum Tile {
+  Unit
+  Wide(Float)
+  fn area(self) -> Float {
+    match self {
+      .Unit => 1.0
+      .Wide(w) => w
+    }
+  }
+}
+
+values: List[Dyn] = [Circle.new(1.0), Scaled.new(), Named.new(), Tile.Wide(2.5), 5, "abcd", [1, 2]]
+for x in values {
+  shape = if let s = x as? Shape { "area #{s.area()}" } else { "not a shape" }
+  sized = match x {
+    s: Sized => "length #{s.length()}"
+    _ => "no length"
+  }
+  puts("#{x is Shape} #{shape}, #{sized}")
+}
+
+u: Circle | Scaled = Scaled.new()
+match u {
+  s: Shape => puts("shape #{s.area()}")
+  w: Scaled => puts("scaled #{w.area(2)}")
+}
