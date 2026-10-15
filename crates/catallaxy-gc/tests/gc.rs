@@ -29,7 +29,7 @@ unsafe fn size_cons(_obj: *const Header) -> usize {
 }
 
 static CONS_VT: GcVTable =
-    GcVTable { trace: trace_cons, finalize: Some(fin_cons), size: size_cons, trace_remembered: None };
+    GcVTable { trace: trace_cons, finalize: Some(fin_cons), size: size_cons, trace_remembered: None, leaf: false };
 
 #[repr(C)]
 struct Big {
@@ -40,7 +40,8 @@ unsafe fn trace_none(_: *const Header, _: &mut Tracer) {}
 unsafe fn size_big(_: *const Header) -> usize {
     std::mem::size_of::<Big>()
 }
-static BIG_VT: GcVTable = GcVTable { trace: trace_none, finalize: None, size: size_big, trace_remembered: None };
+static BIG_VT: GcVTable =
+    GcVTable { trace: trace_none, finalize: None, size: size_big, trace_remembered: None, leaf: true };
 
 /// A mutator: a shadow stack of roots plus a local heap.
 struct Mutator {
@@ -286,5 +287,75 @@ fn object_lock_excludes() {
     assert!(!h.is_locked());
     assert!(h.identity_hash() != 0);
     assert_eq!(h.identity_hash(), h.identity_hash());
+    m.finish();
+}
+
+fn tree(m: &mut Mutator, depth: u32, val: usize) -> *mut Cons {
+    if depth == 0 {
+        return std::ptr::null_mut();
+    }
+    let l = tree(m, depth - 1, val * 2);
+    // Rooted while the right subtree is built: allocation does not collect, but be explicit.
+    let r = tree(m, depth - 1, val * 2 + 1);
+    m.cons(l, r, val)
+}
+
+fn tree_sum(p: *mut Cons) -> usize {
+    if p.is_null() {
+        return 0;
+    }
+    unsafe { (*p).val + tree_sum((*p).car) + tree_sum((*p).cdr) }
+}
+
+/// Resets the mark stack limit even if the test fails.
+struct StackLimit;
+impl Drop for StackLimit {
+    fn drop(&mut self) {
+        set_mark_stack_limit(0);
+    }
+}
+
+/// A mark stack that cannot grow (here: capped at 4 entries) leaves objects unmarked and the
+/// collection rescans until it has marked everything live, in major and minor collections
+/// (issue #139).
+#[test]
+fn marking_survives_a_mark_stack_that_cannot_grow() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut m = Mutator::new();
+    let depth = if cfg!(miri) { 6 } else { 12 };
+    let want: usize = (1..1 << depth).sum();
+    let _limit = StackLimit;
+    set_mark_stack_limit(4);
+    // A young tree: a minor collection marks it from the roots.
+    let a = tree(&mut m, depth, 1);
+    m.roots().0.borrow_mut().push(a);
+    let before = stats::mark_rescans();
+    collect_minor(&m.rec);
+    assert!(stats::mark_rescans() > before, "the minor collection rescanned");
+    // An old tree, and a young one hung under an old node (found through the remembered set
+    // only if the barrier ran; here the old root is rooted, so through the roots).
+    let before = stats::mark_rescans();
+    collect_now(&m.rec);
+    assert!(stats::mark_rescans() > before, "the major collection rescanned");
+    let b = tree(&mut m, depth, 1);
+    m.roots().0.borrow_mut().push(b);
+    for round in 0..3 {
+        // Garbage, then collections; then reuse what they freed, overwriting anything wrongly
+        // freed.
+        for i in 0..scale(100_000) {
+            let _ = m.cons(std::ptr::null_mut(), std::ptr::null_mut(), i);
+        }
+        if round == 1 {
+            collect_now(&m.rec);
+        } else {
+            collect_minor(&m.rec);
+        }
+        for i in 0..scale(100_000) {
+            let _ = m.cons(std::ptr::null_mut(), std::ptr::null_mut(), i);
+        }
+        assert_eq!(tree_sum(a), want);
+        assert_eq!(tree_sum(b), want);
+    }
+    m.roots().0.borrow_mut().clear();
     m.finish();
 }
