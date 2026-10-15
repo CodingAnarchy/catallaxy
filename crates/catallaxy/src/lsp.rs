@@ -163,6 +163,8 @@ fn serve(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Syn
     let ws = Arc::new(Workspace::new(initial_roots(&params), watching));
     let progress = params["capabilities"]["window"]["workDoneProgress"] == true;
     let related = params["capabilities"]["textDocument"]["publishDiagnostics"]["relatedInformation"] == true;
+    let tx = conn.sender.clone();
+    ws.set_diagnoser(Arc::new(move |m| drop(tx.send(m))), unit_diagnostics(related));
     let mut s = Server { conn, docs: FxHashMap::default(), ws, progress, related };
     s.warm();
     let r = s.serve();
@@ -392,11 +394,26 @@ impl Server<'_> {
         } else {
             return None;
         };
-        let mut message = d.message.clone();
         let own = (d.span.file == ck.file).then(|| Self::location(c, d.span)).flatten();
+        Some(to_lsp_diagnostic(d, range, own, &|sp| Self::location(c, sp), related))
+    }
+}
+
+/// A diagnostic in LSP form, at `range` (`own` as a location). Notes become related information
+/// (at their own place, or at the diagnostic's) when the client shows it (`related`), else lines
+/// of the message; fixes are `help:` lines of the message.
+fn to_lsp_diagnostic(
+    d: &catallaxy_compiler::diag::Diagnostic,
+    range: lt::Range,
+    own: Option<lt::Location>,
+    location: &dyn Fn(catallaxy_compiler::diag::Span) -> Option<lt::Location>,
+    related: bool,
+) -> lt::Diagnostic {
+    {
+        let mut message = d.message.clone();
         let mut infos = Vec::new();
         for (note, sp) in &d.notes {
-            match sp.and_then(|sp| Self::location(c, sp)).or_else(|| own.clone()).filter(|_| related) {
+            match sp.and_then(location).or_else(|| own.clone()).filter(|_| related) {
                 Some(loc) => infos.push(lt::DiagnosticRelatedInformation { location: loc, message: note.clone() }),
                 None => {
                     message.push_str("\nnote: ");
@@ -408,7 +425,7 @@ impl Server<'_> {
             message.push_str("\nhelp: ");
             message.push_str(&f.message);
         }
-        Some(lt::Diagnostic {
+        lt::Diagnostic {
             range,
             severity: Some(match d.severity {
                 Severity::Error => lt::DiagnosticSeverity::ERROR,
@@ -419,9 +436,31 @@ impl Server<'_> {
             message,
             related_information: if infos.is_empty() { None } else { Some(infos) },
             ..Default::default()
-        })
+        }
     }
+}
 
+/// The diagnostics of a workspace unit's own file (one that is not open), for
+/// `Workspace::diagnose`.
+fn unit_diagnostics(related: bool) -> workspace::Diagnose {
+    Arc::new(move |path: &Path, u: &Unit| {
+        let uri = path_to_uri(path)?;
+        let Some(f) = u.file(ENTRY_FILE) else { return Some((uri, Vec::new())) };
+        let diags = u
+            .diags
+            .iter()
+            .filter(|d| d.span.file == ENTRY_FILE)
+            .map(|d| {
+                let range = Server::range(&f.sf, d.span.start, d.span.end);
+                let own = Server::unit_location(u, d.span);
+                to_lsp_diagnostic(d, range, own, &|sp| Server::unit_location(u, sp), related)
+            })
+            .collect();
+        Some((uri, diags))
+    })
+}
+
+impl Server<'_> {
     fn publish(&self, path: &Path) {
         let Some((uri, _)) = self.docs.get(path) else { return };
         let ck = self.compile(path, None);
@@ -438,6 +477,8 @@ impl Server<'_> {
         for p in paths {
             self.publish(&p);
         }
+        // Files that are not open but import an edited one may have changed too.
+        self.ws.diagnose();
     }
 
     fn notify(&self, method: &str, params: impl serde::Serialize) {
@@ -473,6 +514,7 @@ impl Server<'_> {
             "textDocument/didOpen" => {
                 let Ok(p) = serde_json::from_value::<lt::DidOpenTextDocumentParams>(n.params) else { return };
                 let Some(path) = uri_to_path(&p.text_document.uri) else { return };
+                self.ws.forget_published(&path);
                 self.docs.insert(path, (p.text_document.uri, p.text_document.text));
                 self.docs_changed();
                 self.publish_all();
@@ -492,6 +534,7 @@ impl Server<'_> {
                 let Ok(p) = serde_json::from_value::<lt::DidCloseTextDocumentParams>(n.params) else { return };
                 if let Some(path) = uri_to_path(&p.text_document.uri) {
                     self.docs.remove(&path);
+                    self.ws.forget_published(&path);
                 }
                 self.docs_changed();
                 let params =
@@ -1067,10 +1110,11 @@ impl Server<'_> {
             let Some(old) = before.get(&entry) else { continue };
             // New diagnostics: a code reported more often than before.
             let mut counts: FxHashMap<&str, i64> = FxHashMap::default();
-            for (code, ..) in &old.diags {
-                *counts.entry(code).or_default() += 1;
+            for d in &old.diags {
+                *counts.entry(d.code).or_default() += 1;
             }
-            for (code, msg, sp) in &after.diags {
+            for d in &after.diags {
+                let (code, msg, sp) = (d.code, &d.message, &d.span);
                 let n = counts.entry(code).or_default();
                 *n -= 1;
                 if *n < 0 {

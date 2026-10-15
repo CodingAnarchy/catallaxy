@@ -155,6 +155,9 @@ async function main() {
   const demo = fs.readFileSync(demoPath, "utf8");
   const demoUri = uriOf(demoPath);
   const geometryUri = uriOf(path.join(dir, "lib/geometry.cx"));
+  // A broken file that is never opened: the workspace's diagnostics report it.
+  fs.writeFileSync(path.join(dir, "unopened_broken.cx"), 'zz: Int = "not an int"\n');
+  const brokenUri = uriOf(path.join(dir, "unopened_broken.cx"));
   const doc = (uri) => ({ textDocument: { uri } });
   const at = (uri, text, needle, nth = 0, delta = 0) => ({ ...doc(uri), position: pos(text, needle, nth, delta) });
 
@@ -219,6 +222,13 @@ async function main() {
       assert(ns.length > 0, "no diagnostics published");
       return ns[ns.length - 1].params.diagnostics;
     };
+
+    await check("diagnostics: a workspace file that is not open gets them too", async () => {
+      const n = await c.waitFor(
+        (m) => m.method === "textDocument/publishDiagnostics" && m.params.uri === brokenUri && m.params.diagnostics.length > 0,
+      );
+      assert.strictEqual(n.params.diagnostics[0].code, "E0300");
+    });
 
     await check("diagnostics: an edit with a type error publishes it, and fixing it clears it", async () => {
       const broken = shapes + '\nzz: Int = "not an int"\n';

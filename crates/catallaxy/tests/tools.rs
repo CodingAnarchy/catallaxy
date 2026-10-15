@@ -1085,6 +1085,51 @@ fn lsp_highlight_folding_tokens_range_formatting() {
 }
 
 #[test]
+fn lsp_diagnostics_of_unopened_files() {
+    let dir = scratch_dir("lsp-unopened-diags");
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    let lib = "pub fn greet(name: String) -> String { \"hi #{name}\" }\n";
+    std::fs::write(dir.join("lib/greeting.cx"), lib).unwrap();
+    let user = "import lib.greeting\nputs(greeting.greet(\"ada\"))\n";
+    std::fs::write(dir.join("greeting_test.cx"), user).unwrap();
+    std::fs::write(dir.join("broken.cx"), "x: Int = \"no\"\n").unwrap();
+    let mut lsp = Lsp::init_workspace(&dir, &[]);
+    let diags_for = |lsp: &Lsp, uri: &str, nonempty: bool| {
+        let u = uri.to_string();
+        lsp.wait("publishDiagnostics", move |v| {
+            v["method"] == "textDocument/publishDiagnostics"
+                && v["params"]["uri"] == json!(u)
+                && v["params"]["diagnostics"].as_array().is_some_and(|a| a.is_empty() != nonempty)
+        })
+    };
+    // After the warm-up, a broken file nobody opened has its error.
+    let broken = path_uri(&dir.join("broken.cx"));
+    let d = diags_for(&lsp, &broken, true);
+    assert_eq!(d["params"]["diagnostics"][0]["code"], "E0300", "{d}");
+
+    // A breaking edit to the library shows up in its unopened importer, and fixing it clears it.
+    let lib_uri = lsp.open_unsaved(&dir.join("lib/greeting.cx"), lib);
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": lib_uri, "version": 2},
+        "contentChanges": [{"text": "pub fn greet(name: Int) -> String { \"hi\" }\n"}]
+    }}));
+    let user_uri = path_uri(&dir.join("greeting_test.cx"));
+    let d = diags_for(&lsp, &user_uri, true);
+    assert_eq!(d["params"]["diagnostics"][0]["range"]["start"]["line"], 1, "{d}");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+        "textDocument": {"uri": lib_uri, "version": 3}, "contentChanges": [{"text": lib}]
+    }}));
+    diags_for(&lsp, &user_uri, false);
+
+    // Once opened, a document's own diagnostics take over; closed, the workspace's come back.
+    let b = lsp.open_unsaved(&dir.join("broken.cx"), "x: Int = 1\n");
+    lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {"textDocument": {"uri": b}}}));
+    let d = diags_for(&lsp, &broken, true);
+    assert_eq!(d["params"]["diagnostics"][0]["code"], "E0300", "{d}");
+    lsp.finish();
+}
+
+#[test]
 fn lsp_notes_stay_in_the_message_without_related_information_support() {
     let (mut lsp, _) = Lsp::init();
     let text = "s = \"\"\nfor x in [1, 2] { s = s + \"a\" }\nputs(s)\n";
