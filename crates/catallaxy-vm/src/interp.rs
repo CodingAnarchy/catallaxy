@@ -260,7 +260,9 @@ impl Vm {
     /// Unregisters the thread and frees its register stack. The VM must not be used afterwards.
     pub fn shutdown(&mut self) {
         catallaxy_gc::enter_native(&self.m.rec);
-        // Unregister first so no collection can touch the heap while it is being released.
+        // Unregistering hands the heap's pages back, with no collection running (#218's
+        // crash: a collection must never run while live objects sit in pages it does not
+        // know); releasing them again afterwards finds nothing left.
         catallaxy_gc::unregister_thread(&self.m.rec);
         self.m.release_pages();
         if !self.stack.is_null() {

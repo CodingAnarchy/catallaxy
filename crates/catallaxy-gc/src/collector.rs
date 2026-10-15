@@ -191,13 +191,24 @@ pub unsafe fn install(rec: &ThreadRecord, roots: *const dyn RootSource, heap: *m
     }
 }
 
-/// Removes the thread from the registry. The thread must be in native state, and its heap pages
-/// must already have been released.
+/// Removes the thread from the registry. The thread must be in native state. The pages of its
+/// installed heap go back to the global lists here, with no collection running: objects in them
+/// may still be reachable (a value the thread published or handed on), and a collection must
+/// know every page that holds them. One that ran while they were in neither the thread's heap
+/// nor the global lists could not rescan them after a mark-stack overflow, and could sweep them
+/// with a color they were never marked in. Releasing the heap's pages again afterwards (as
+/// `Vm::shutdown` does) finds nothing left to release.
 pub fn unregister_thread(rec: &Arc<ThreadRecord>) {
     debug_assert!(matches!(rec.state(), ThreadState::InNative | ThreadState::Blocked));
     {
         // A collector holds `threads` for the whole collection, so this waits it out.
         let mut threads = GLOBAL.threads.lock();
+        let heap = unsafe { *rec.heap.get() };
+        if !heap.is_null() {
+            // SAFETY: the heap stays valid until unregistration, and its thread is in native
+            // state, so it does not touch the heap; no collection runs while `threads` is held.
+            unsafe { (*heap).release_pages() };
+        }
         threads.retain(|t| !Arc::ptr_eq(t, rec));
         GLOBAL.pollers.lock().retain(|t| !Arc::ptr_eq(t, rec));
         unsafe {
