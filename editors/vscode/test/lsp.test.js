@@ -18,8 +18,8 @@ const catx = process.env.CATX || exe;
 // ---- a minimal JSON-RPC client --------------------------------------------------------------
 
 class Client {
-  constructor(command) {
-    this.proc = spawn(command, ["lsp"], { stdio: ["pipe", "pipe", "inherit"] });
+  constructor(command, env = {}) {
+    this.proc = spawn(command, ["lsp"], { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env, ...env } });
     this.buf = Buffer.alloc(0);
     this.nextId = 1;
     this.pending = new Map();
@@ -158,7 +158,9 @@ async function main() {
   const doc = (uri) => ({ textDocument: { uri } });
   const at = (uri, text, needle, nth = 0, delta = 0) => ({ ...doc(uri), position: pos(text, needle, nth, delta) });
 
-  const c = new Client(catx);
+  // The prelude's sources are written under the cache directory for go to definition.
+  const cacheHome = fs.mkdtempSync(path.join(os.tmpdir(), "catx-cache-"));
+  const c = new Client(catx, { XDG_CACHE_HOME: cacheHome });
   try {
     const init = await c.request("initialize", {
       processId: process.pid,
@@ -231,6 +233,19 @@ async function main() {
       assert.strictEqual(slice(shapes, h.range), "by_area");
     });
 
+    await check("hover: pattern bindings and block parameters show their own type", async () => {
+      for (const [needle, delta, want] of [
+        ["for s in shapes", 4, /s: Shape/],
+        ["if let big", 7, /big: ByArea/],
+        ["{ |acc, s|", 3, /acc: Float/],
+      ]) {
+        const h = await c.request("textDocument/hover", at(shapesUri, shapes, needle, 0, delta));
+        assert(h && h.contents, `${needle}: ${JSON.stringify(h)}`);
+        assert.match(h.contents.value, want);
+        assert.strictEqual(slice(shapes, h.range), want.source.split(":")[0]);
+      }
+    });
+
     await check("hover: a method call shows its signature", async () => {
       const h = await c.request("textDocument/hover", at(shapesUri, shapes, "describe()", 0, 1));
       assert(h, "no hover");
@@ -253,6 +268,16 @@ async function main() {
       assert.strictEqual(loc.uri, geometryUri);
       const geo = fs.readFileSync(path.join(dir, "lib/geometry.cx"), "utf8");
       assert.match(geo.split("\n")[loc.range.start.line], /fn area/);
+    });
+
+    await check("definition: a prelude function goes to a read-only copy of the prelude", async () => {
+      const d = await c.request("textDocument/definition", at(shapesUri, shapes, "puts(", 0));
+      const loc = Array.isArray(d) ? d[0] : d;
+      assert(loc, "no definition");
+      const file = require("url").fileURLToPath(loc.uri);
+      assert(fs.realpathSync(file).startsWith(fs.realpathSync(cacheHome)), file);
+      assert.match(fs.readFileSync(file, "utf8").split("\n")[loc.range.start.line], /fn puts/);
+      assert.throws(() => fs.accessSync(file, fs.constants.W_OK));
     });
 
     await check("completion: members after `.`", async () => {
@@ -482,6 +507,7 @@ async function main() {
   } finally {
     c.proc.kill();
     fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(cacheHome, { recursive: true, force: true });
   }
 
   console.log(`\n${passed} passed, ${failures} failed`);

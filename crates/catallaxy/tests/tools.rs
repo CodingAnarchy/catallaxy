@@ -628,6 +628,92 @@ fn lsp_rename_interface_member_implemented_by_builtin() {
     lsp.finish();
 }
 
+const BINDINGS: &str = "xs = [1, 2]
+for x in xs { puts(x) }
+for (y, i) in xs.with_index() { puts(i + y) }
+o: Int? = 3
+if let v = o { puts(v) }
+r: Result[Int, String] = Ok(1)
+match r { Ok(w) => puts(w), Err(e) => puts(e) }
+ys = xs.map { |z| z + 1 }
+fn half(n: Int, s: String) -> Int { n / 2 }
+match o { k: Int => puts(k), _ => {} }
+";
+
+#[test]
+fn lsp_hover_pattern_bindings() {
+    let (mut lsp, _) = Lsp::init();
+    let uri = lsp.open("bindings.cx", BINDINGS);
+    let t = BINDINGS;
+    // (line, name, nth occurrence on the line, expected hover)
+    let cases: [(usize, &str, usize, &str); 11] = [
+        (1, "x", 0, "x: Int"),
+        (2, "i", 0, "i: Int"),
+        (2, "y", 0, "y: Int"),
+        (4, "v", 0, "v: Int"),
+        (6, "w", 0, "w: Int"),
+        (6, "e", 0, "e: String"),
+        (7, "z", 0, "z: Int"),
+        (7, "z", 1, "z: Int"),
+        (8, "n", 1, "n: Int"),
+        (8, "s", 0, "s: String"),
+        (9, "k", 0, "k: Int"),
+    ];
+    for (i, (line, name, nth, want)) in cases.into_iter().enumerate() {
+        let p = pos(t, line, name, nth);
+        let h = lsp.request(10 + i as i64, "textDocument/hover", json!({"textDocument": {"uri": uri}, "position": p}));
+        let value = h["result"]["contents"]["value"].as_str().unwrap_or_default();
+        assert!(value.contains(want), "{name} on line {line}: {h}");
+        // The range is the name's own.
+        assert_eq!(h["result"]["range"]["start"], p, "{name} on line {line}: {h}");
+        let width = h["result"]["range"]["end"]["character"].as_u64().unwrap() - p["character"].as_u64().unwrap();
+        assert_eq!(width, name.len() as u64, "{name} on line {line}: {h}");
+    }
+    lsp.finish();
+}
+
+#[test]
+fn lsp_definition_in_the_prelude() {
+    let cache = std::env::temp_dir().join(format!("catx-lsp-prelude-cache-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cache);
+    let mut lsp = Lsp::start_with(&[("XDG_CACHE_HOME", cache.to_str().unwrap())]);
+    lsp.request(1, "initialize", json!({"processId": null, "rootUri": null, "capabilities": {}}));
+    lsp.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
+    let text = "puts([3, 1].sorted())\n";
+    let uri = lsp.open("prelude_def.cx", text);
+    let at = |p: Value| json!({"textDocument": {"uri": uri}, "position": p});
+    for (i, (needle, decl)) in [("puts", "fn puts"), ("sorted", "fn sorted")].into_iter().enumerate() {
+        let d = lsp.request(2 + i as i64, "textDocument/definition", at(pos(text, 0, needle, 0)));
+        let target = d["result"]["uri"].as_str().unwrap_or_else(|| panic!("{needle}: {d}"));
+        // A real file, under the cache directory, holding the declaration at the range given.
+        let path = std::fs::read_dir(cache.join("catallaxy"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .flat_map(|e| std::fs::read_dir(e.path()).unwrap().filter_map(Result::ok).map(|f| f.path()))
+            .find(|f| path_uri(f) == target || path_uri(&f.canonicalize().unwrap()) == target)
+            .unwrap_or_else(|| panic!("{needle}: {target} is not in the cache"));
+        assert!(std::fs::metadata(&path).unwrap().permissions().readonly(), "{}", path.display());
+        let src = std::fs::read_to_string(&path).unwrap();
+        let line = d["result"]["range"]["start"]["line"].as_u64().unwrap() as usize;
+        assert!(src.lines().nth(line).unwrap().contains(decl), "{needle}: line {line} of {}", path.display());
+        // Opening the copy publishes nothing and adds nothing to the workspace.
+        lsp.send(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+            "textDocument": {"uri": target, "languageId": "catallaxy", "version": 1, "text": src}
+        }}));
+        let (h, seen) = lsp.request_seeing(
+            10 + i as i64,
+            "textDocument/hover",
+            json!({"textDocument": {"uri": target}, "position": {"line": line, "character": 4}}),
+        );
+        assert!(h["result"].is_null(), "{h}");
+        assert!(!seen.iter().any(|m| m["params"]["uri"] == json!(target)), "{seen:?}");
+    }
+    let r = lsp.request(20, "workspace/symbol", json!({"query": "puts"}));
+    assert_eq!(r["result"], json!([]), "{r}");
+    lsp.finish();
+    let _ = std::fs::remove_dir_all(&cache);
+}
+
 #[test]
 fn lsp_signature_help() {
     let (mut lsp, caps) = Lsp::init();
@@ -1226,7 +1312,7 @@ fn fmt_and_check_walk_directories() {
     // A file named directly is never skipped.
     assert_eq!(catx(&["fmt".as_ref(), "--check".as_ref(), dir.join("reject/bad.cx").as_os_str()]).0, 2);
 
-    // `check` walks everything, `reject/` included.
+    // `check` skips `reject/` too (see `cli.rs`); without the file the directory is clean.
     std::fs::remove_file(dir.join("reject/bad.cx")).unwrap();
     let (code, _, err) = catx(&["check".as_ref(), dir.as_os_str()]);
     assert_eq!(code, 0, "{err}");

@@ -92,6 +92,10 @@ catx repl                       interactive session
 catx lsp                        language server (stdio)
 ```
 
+`catx <command> --help` describes each command. The exit status is 0 on success, 1 when problems
+were found (errors, failed tests, unformatted files) and 2 for usage errors and unreadable files;
+`catx run` exits with the program's status. See the reference, §10.
+
 For VS Code, [`editors/vscode`](editors/vscode) has an extension with syntax highlighting that runs
 `catx lsp`.
 
@@ -162,7 +166,7 @@ Environment variables tune the runtime:
 | `CATX_GC_STATS=1` | print collection count, heap size and pause times at exit |
 | `CATX_GC_TRACE=1` | print the phases of every major and minor collection |
 | `CATX_GC_STRESS=1` | collect very often (every 64 KB allocated), to flush out rooting bugs |
-| `CATX_MAX_HEAP` | heap limit in bytes (suffixes `K`, `M`, `G`): a collection that finds more live data panics with a `MemoryError` |
+| `CATX_MAX_HEAP` | heap limit in bytes (suffixes `K`, `M`, `G`; default three quarters of physical memory, `0` or `off` for none): a collection that finds more live data panics with a `MemoryError`, and so does growing a list, dict or `StringBuilder` buffer, or parsing or writing JSON, past it |
 | `CATX_TEST_TIMEOUT` | seconds `catx test` gives each program before failing it (default 120) |
 
 Validation: a conformance suite of 133 programs (run + reject), 42 example programs with checked

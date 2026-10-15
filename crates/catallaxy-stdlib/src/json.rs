@@ -44,7 +44,9 @@ pub(crate) fn parse(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     catallaxy_runtime::stack::check_extra(JSON_STACK)?;
     vm.m.collect_if_refused();
     let base = vm.extra_roots().len();
-    let mut r = Reader { text, b: text.as_bytes(), pos: 0, depth: 0, buf: String::new(), keys: Default::default() };
+    let handles = vm.m.handle_mark();
+    let mut r =
+        Reader { text, b: text.as_bytes(), pos: 0, depth: 0, buf: String::new(), keys: Default::default(), values: 0 };
     let parsed = r.document(vm);
     let v = vm.extra_roots().get(base).copied();
     let out = match parsed {
@@ -61,6 +63,7 @@ pub(crate) fn parse(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
         Err(e) => Err(e),
     };
     vm.extra_roots().truncate(base);
+    vm.m.release_handles(handles);
     out
 }
 
@@ -75,9 +78,17 @@ struct Reader<'a> {
     /// The decoded text of the last string read.
     buf: String,
     /// Object keys read so far, so that records with the same keys share their key strings.
-    /// Every key ends up in a dict the result (or the root stack) holds, so these stay alive.
+    /// Each is rooted with a handle for the rest of the parse: a dict in shape mode keeps the
+    /// key its shape was first made with, not this one, so no dict need hold it, and a
+    /// collection during the parse would free it.
     keys: rustc_hash::FxHashMap<Box<str>, Value>,
+    /// Values read, for the periodic safepoint.
+    values: usize,
 }
+
+/// Values a parse reads between checks of the heap limit. Everything it built is rooted, so it
+/// may collect, and the limit applies to a large document as it does to a program (issue #158).
+const VALUES_PER_SAFEPOINT: usize = 4096;
 
 impl Reader<'_> {
     /// A whole document: one value, surrounded by nothing but whitespace.
@@ -109,6 +120,10 @@ impl Reader<'_> {
 
     /// Reads a value and pushes it on the extra roots.
     fn value(&mut self, vm: &mut Vm) -> RtResult<bool> {
+        self.values += 1;
+        if self.values % VALUES_PER_SAFEPOINT == 0 {
+            vm.m.check_heap_limit()?;
+        }
         self.ws();
         let v = match self.peek() {
             Some(b'n') if self.word(b"null") => Value::NIL,
@@ -191,6 +206,7 @@ impl Reader<'_> {
                     None => {
                         let k = vm.m.try_alloc_str(&self.buf)?;
                         if self.keys.len() < MAX_KEYS {
+                            vm.m.root(k);
                             self.keys.insert(self.buf.as_str().into(), k);
                         }
                         k
@@ -486,6 +502,11 @@ fn close(out: &mut String, indent: Option<usize>, bracket: char) {
 fn write(vm: &mut Vm, v: Value, out: &mut String, indent: Option<usize>, depth: usize) -> RtResult<()> {
     if depth > MAX_WRITE_DEPTH {
         return panic("JSON nesting too deep");
+    }
+    // The text is about to outgrow a large buffer: growing it doubles it, which must fit
+    // under the heap limit (issue #158).
+    if out.capacity() >= 1 << 20 && out.capacity() - out.len() < 4096 {
+        catallaxy_runtime::check_cap(out.capacity(), "Json.stringify")?;
     }
     if v.is_nil() {
         out.push_str("null");

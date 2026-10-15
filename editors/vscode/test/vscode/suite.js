@@ -84,6 +84,18 @@ async function run() {
     assert.strictEqual(range.start.line, posOf(doc, "class Square").line);
   });
 
+  await check("definition of a prelude function opens the prelude's source", async () => {
+    const d = await exec("vscode.executeDefinitionProvider", uri, posOf(doc, "puts("));
+    const loc = d[0];
+    const target = loc.targetUri || loc.uri;
+    const range = loc.targetRange || loc.range;
+    const pdoc = await vscode.workspace.openTextDocument(target);
+    assert.match(pdoc.lineAt(range.start.line).text, /fn puts/);
+    // It is not a program: no diagnostics.
+    await sleep(500);
+    assert.deepStrictEqual(vscode.languages.getDiagnostics(target), []);
+  });
+
   await check("references", async () => {
     const r = await exec("vscode.executeReferenceProvider", uri, posOf(doc, "fn total_area", 0, 3));
     assert.strictEqual(r.length, 2);
