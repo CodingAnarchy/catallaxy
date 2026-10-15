@@ -122,7 +122,9 @@ checker is sure of, such as adding `.new` to `Point(1)`. Add `--dry-run` to only
 ## Testing
 
 `catx test dir` runs every `.cx` file under `dir` as a separate program, skipping `lib/`
-directories, where modules live. There are two kinds of test:
+directories, where modules live. It also takes files and several paths (`catx test a_test.cx b/`),
+and with no path it runs the current directory. A path that does not exist, or a run that finds
+no tests, is an error rather than a silent `0 passed`. There are two kinds of test:
 
 - A program with a `.out` file next to it must print exactly that to standard output, and exit
   with status 0. A `# exit: N` line expects status `N` instead, and a `.in` file next to the

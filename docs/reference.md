@@ -292,6 +292,9 @@ method `f`; to call a function stored in a field, wrap the callee in parentheses
 parenthesized callee (`(xs[0])(x)`, `(make())(x)`) is evaluated first and then called. Closures capture
 variables by reference.
 
+The names in one parameter list, block parameter list, type parameter list or pattern must differ
+(E0228); only `_` may repeat.
+
 A bare `{ ... }` in value position is a block that runs immediately, so `inc = { count += 1 }` would
 store `nil`; that is error E0372. Write `inc = { || count += 1 }` or `fn() { count += 1 }` for code to run
 later.
@@ -445,6 +448,11 @@ pub fn total(xs: Enumerable[Int]) -> Int { xs.reduce(0) { |a, b| a + b } }   # a
 A parameter of an interface type accepts a value of any type that satisfies the interface; each such
 parameter (`fn f(a: I, b: I)`) may get a different type. To require the same type, use a type parameter
 (`fn f[T: I](a: T, b: T)`); an interface with `Self` parameters must be used that way (E0375).
+
+Bounds hold for every instantiation, of functions and of generic classes, enums and interfaces
+(`class SortedList[T: Comparable]`): type arguments written in types (`SortedList[P]`) and type arguments
+inferred for a construction (`SortedList.new()`, `Heap.Node(x, .Leaf)`), including ones inferred from
+later uses, must meet them (E0368). A type parameter used as such an argument needs the bound itself.
 
 Type arguments are erased at run time: one compiled body serves every instantiation, and a type test
 cannot check them (see §4.4 and E0374).
@@ -636,11 +644,13 @@ expected and actual types: `xs[0].length` panics with `TypeError: expected Strin
 ## 10. Tooling
 
 `catx run file.cx [args]`, `catx check [--json] paths...`, `catx fmt [--check] paths...`, `catx repl`,
-`catx lsp`, `catx test dir`. `check` and `fmt` take files and directories; a directory stands for
+`catx lsp`, `catx test [paths...]`. `check` and `fmt` take files and directories; a directory stands for
 every `*.cx` file under it, skipping hidden directories and `target/`.
 
-`catx test dir` runs every `*.cx` file under `dir` (except those in `lib/` directories, which hold
-modules for tests to import) in its own process. A file whose first line is `# expect: CODE[, CODE...]`
+`catx test paths...` runs each named `*.cx` file, and every `*.cx` file under each named directory
+(skipping hidden directories, `target/`, and `lib/` directories, which hold modules for tests to
+import), each in its own process. With no path it runs the tests under the current directory. A
+path that does not exist is an error (exit status 2), and so is finding no tests at all. A file whose first line is `# expect: CODE[, CODE...]`
 must fail `catx check` with those diagnostic codes (if every code is a warning, `W...`, it need only
 report them). Any other file must run with standard output
 equal to its `.out` file and exit with status 0, or with the status given by a `# exit: N` line; a

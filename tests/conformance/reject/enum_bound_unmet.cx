@@ -1,0 +1,9 @@
+# expect: E0368
+enum Heap[T: Comparable] {
+  Leaf
+  Node(T, Heap[T])
+}
+class P {
+  n: Int = 0
+}
+h: Heap[P] = .Leaf
