@@ -782,7 +782,15 @@ unsaved edits. It provides:
   same-named methods of every type whose values are used as that interface (passed, assigned,
   returned, put in a list or dict, or checked against a generic bound), so those types keep
   conforming; renaming such a method renames the member too. They cover the workspace (below);
-  names from the prelude cannot be renamed, nor can a member that a built-in type implements;
+  names from the prelude cannot be renamed, nor can a member that a built-in type implements.
+  A rename is refused (error `-32803`, naming what it would collide with) when the new name is
+  taken: by another variable of the same scope, by a variable of an enclosing or nested scope
+  whose uses (or the renamed variable's) would change meaning, by a function or variable used in
+  the renamed variable's scope, by an item, import or prelude name visible where a renamed item is
+  declared or used, or by a method, field or constant of the same class (its superclasses and
+  subclasses included), enum or interface. The server then checks the renamed workspace, every
+  compilation that includes an edited file, and refuses if a diagnostic appears that was not
+  there before, or if any name now refers to something other than it did;
 - signature help for function, method and constructor calls, showing default values and marking
   the trailing-block parameter, with the active parameter following commas and named arguments;
 - inlay hints with the inferred types of unannotated variables, `for`/`let`/`if let` bindings and
