@@ -11,10 +11,11 @@ mod data;
 pub mod fiber;
 mod json;
 mod net;
+mod out;
+pub use out::{flush, install_signal_flush, stdout_broken, write_out, BROKEN_PIPE_STATUS};
 mod script;
 mod sys;
 
-use std::io::Write;
 use std::sync::OnceLock;
 
 use catallaxy_runtime::class::class_of;
@@ -23,26 +24,9 @@ use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership;
 use catallaxy_runtime::{panic, try_push, try_vec, RtResult, Trap, Value};
 use catallaxy_vm::{NativeFn, Vm};
-use parking_lot::Mutex;
 
 /// Command-line arguments passed to the program (after the script path).
 pub static ARGS: OnceLock<Vec<String>> = OnceLock::new();
-
-static STDOUT: Mutex<Option<std::io::BufWriter<std::io::Stdout>>> = Mutex::new(None);
-
-/// Writes to the buffered standard output.
-pub fn write_out(s: &str) {
-    let mut g = STDOUT.lock();
-    let w = g.get_or_insert_with(|| std::io::BufWriter::with_capacity(1 << 16, std::io::stdout()));
-    let _ = w.write_all(s.as_bytes());
-}
-
-/// Flushes buffered standard output (at exit, before reading input, before errors).
-pub fn flush() {
-    if let Some(w) = STDOUT.lock().as_mut() {
-        let _ = w.flush();
-    }
-}
 
 thread_local! {
     /// How many [`catch_internal`] scopes the thread is in.
@@ -100,11 +84,7 @@ fn install_panic_hook() {
 /// and exits with status 101, as an internal error on the main thread does.
 fn collector_fatal(payload: &(dyn std::any::Any + Send)) -> ! {
     let msg = internal_error_message(payload).unwrap_or_else(|| "internal error".into());
-    if let Some(mut g) = STDOUT.try_lock() {
-        if let Some(w) = g.as_mut() {
-            let _ = w.flush();
-        }
-    }
+    out::try_flush();
     eprintln!("panic: {msg}");
     eprintln!("    during a garbage collection; the program cannot continue");
     if let Some(loc) = take_rust_location() {
