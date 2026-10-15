@@ -77,7 +77,9 @@ impl Checker {
     }
 
     pub fn check_expr(&mut self, e: &Expr, expected: Option<TyId>) -> TyId {
+        let outer = std::mem::replace(&mut self.expr_span, e.span);
         let t = self.check_expr_inner(e, expected);
+        self.expr_span = outer;
         self.record_ty(e.id, t);
         if self.may_mutate(e) {
             self.clear_unstable_paths();
@@ -2590,6 +2592,9 @@ impl Checker {
 
     /// Owned values passed to a `move` parameter must be fresh or explicitly moved.
     fn check_move_arg(&mut self, expr: &Expr, t: TyId) {
+        if !self.check_not_pinned(t, "a value", expr.span) {
+            return;
+        }
         if self.cap_of(t) != Cap::Owned {
             return;
         }
@@ -3675,6 +3680,10 @@ impl Checker {
             }
         }
         let (slots, ret) = self.check_args(e, &m, args, block, expected, parallel);
+        if parallel {
+            // The block's results come back from the other threads.
+            self.check_not_pinned(ret, "the result", e.span);
+        }
         self.note_self_call(&m, recv);
         if matches!(m.dispatch, Dispatch::Dynamic(..)) && matches!(f.owner, Owner::Iface(_)) {
             self.dyn_targets.insert(e.id, m.fid);
@@ -4309,6 +4318,8 @@ impl Checker {
                 continue;
             }
             if is_move {
+                let what = format!("`{}`", info.name);
+                self.check_not_pinned(t, &what, span);
                 self.mark_moved(l, span);
                 self.moved_captures.insert((node, l));
                 continue;
@@ -4336,6 +4347,8 @@ impl Checker {
             _ => self.types.error,
         };
         let ret = self.types.resolve(ret);
+        // The result is handed to the thread that joins it.
+        self.check_not_pinned(ret, "the thread's result", e.span);
         self.types.class(builtin::THREAD, vec![ret])
     }
 
@@ -4421,6 +4434,33 @@ impl Checker {
         self.types.nil
     }
 
+    /// E0614 for each kept conversion of a frozen value to an interface whose members it
+    /// implements with a mutating method: calling it through the interface would panic.
+    fn check_frozen_conformances(&mut self) {
+        let mut seen: FxHashSet<(Span, FnId)> = FxHashSet::default();
+        for i in 0..self.conform_log.len() {
+            let (s, iid) = self.conform_log[i];
+            if !matches!(self.types.get(self.types.shallow_resolve(s)), Ty::Frozen(_)) {
+                continue;
+            }
+            let span = self.conform_spans[i];
+            let impls = self.conform_impls.get(&(s, iid)).cloned().unwrap_or_default();
+            for (member, fid) in impls {
+                if !self.fns[fid as usize].mutating || !seen.insert((span, fid)) {
+                    continue;
+                }
+                let iface = self.ifaces[iid as usize].name.clone();
+                let name = self.fns[member as usize].name.clone();
+                let msg = format!("`{}` cannot be used as `{iface}`: its method `{name}` mutates it", self.show(s));
+                let mut d = Diag::error("E0614", msg, span);
+                if !self.mods[self.fns[fid as usize].module as usize].is_prelude {
+                    d = d.note_at(format!("`{name}` is defined here"), self.fns[fid as usize].span);
+                }
+                self.emit(d.note("frozen values are deeply immutable; use `.dup()` for a mutable copy"));
+            }
+        }
+    }
+
     /// Mutating-method inference: propagate through calls on `self`, then validate calls on
     /// frozen receivers.
     pub fn finish_mutating(&mut self) {
@@ -4446,6 +4486,7 @@ impl Checker {
                 break;
             }
         }
+        self.check_frozen_conformances();
         for (span, fid, ty) in std::mem::take(&mut self.frozen_calls) {
             if self.fns[fid as usize].mutating {
                 let msg = format!("cannot call mutating method `{}` on frozen `{}`", self.fns[fid as usize].name, ty);

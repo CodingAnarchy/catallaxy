@@ -167,6 +167,10 @@ pub struct Checker {
     /// For each conversion of `conform_log`, the methods of the type that implement the
     /// interface's members: (interface member, implementing method).
     pub conform_impls: FxHashMap<(TyId, IfaceId), Vec<(FnId, FnId)>>,
+    /// Where each conversion of `conform_log` happened (the innermost expression being checked).
+    pub conform_spans: Vec<Span>,
+    /// The innermost expression being checked, for diagnostics found later (`conform_spans`).
+    pub expr_span: Span,
     pub bins: FxHashMap<NodeId, BinRes>,
     pub fors: FxHashMap<NodeId, ForKind>,
     pub assigns: FxHashMap<NodeId, AssignRes>,
@@ -309,6 +313,8 @@ pub struct LoopCtx {
 #[derive(Default, Clone)]
 pub struct WellKnown {
     pub result: Option<EnumId>,
+    /// `Fiber`: pinned to the thread that started it (see `Checker::pinned_in`).
+    pub fiber: Option<ClassId>,
     pub enumerable: Option<IfaceId>,
     pub comparable: Option<IfaceId>,
     pub display: Option<IfaceId>,
@@ -340,6 +346,8 @@ impl Checker {
             dyn_targets: FxHashMap::default(),
             conform_log: Vec::new(),
             conform_impls: FxHashMap::default(),
+            conform_spans: Vec::new(),
+            expr_span: Span::default(),
             bins: FxHashMap::default(),
             fors: FxHashMap::default(),
             assigns: FxHashMap::default(),
@@ -614,6 +622,7 @@ impl Checker {
             self.types.vars[v as usize] = None;
         }
         self.conform_log.truncate(cp.conforms);
+        self.conform_spans.truncate(cp.conforms);
     }
 
     /// The (interface member, implementing method) pairs of every kept conversion to an

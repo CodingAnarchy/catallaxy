@@ -1,0 +1,10 @@
+# expect: E0617
+# A fiber belongs to the thread that started it: another thread cannot join it.
+ch: Channel[Fiber[Int]] = Channel.new()
+t = spawn {
+  f = ch.recv()
+  f!.join()
+}
+f = Fiber.start { 1 }
+ch.send(move f)
+puts(t.join())
