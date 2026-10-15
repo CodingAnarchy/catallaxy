@@ -9,8 +9,8 @@
 //! recompiles only the units that fail that check, in parallel. Disk files are re-read only when
 //! their modification time or size changes. Open documents' text takes precedence over the disk.
 //!
-//! Every compilation starts from the same checked prelude (`driver::Prelude`) instead of checking
-//! it again, which was most of the work of compiling a typical file.
+//! Every compilation starts from the process's shared checked prelude (`driver::shared_prelude`)
+//! instead of checking it again, which was most of the work of compiling a typical file.
 //!
 //! After `initialized`, and when workspace folders change, the cache is warmed in the background
 //! on half the cores (see [`Workspace::warm`]), so the first request seldom compiles anything.
@@ -22,7 +22,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
 use catallaxy_compiler::diag::{SourceFile, Span};
-use catallaxy_compiler::driver::{compile_path_from, Compilation, Options, Prelude, SourceLoader, PRELUDE};
+use catallaxy_compiler::driver::{compile_path, Compilation, Options, SourceLoader, PRELUDE};
 use catallaxy_compiler::query;
 use catallaxy_compiler::symbols::{self, Index, OutlineKind, Symbol};
 use lsp_server::{Message, Notification, Request};
@@ -819,16 +819,10 @@ impl Progress {
 
 type Built = Option<(Unit, Vec<(PathBuf, (Stamp, u64))>)>;
 
-/// The prelude, checked once for every compilation of the workspace (see `driver::Prelude`).
-fn prelude() -> &'static Prelude {
-    static PRELUDE_CHECKED: std::sync::OnceLock<Prelude> = std::sync::OnceLock::new();
-    PRELUDE_CHECKED.get_or_init(Prelude::new)
-}
-
 fn compile_one(overlay: &Overlay, path: &Path) -> Built {
     let run = || {
         let loader = Recording { overlay, log: Mutex::new(Vec::new()) };
-        let comp = compile_path_from(prelude(), path, &loader, &Options { check_only: true });
+        let comp = compile_path(path, &loader, &Options { check_only: true });
         let log = loader.log.into_inner().unwrap();
         let stamps = log.iter().filter_map(|(p, h, st)| Some((p.clone(), ((*st)?, (*h)?)))).collect();
         let deps = log.into_iter().map(|(p, h, _)| (p, h)).collect();

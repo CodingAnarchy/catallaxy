@@ -732,7 +732,8 @@ ignored. On Windows, Ctrl-C, Ctrl-Break and closing the console also write the b
 import), each in its own process. With no path it runs the tests under the current directory. A
 path that does not exist is an error (exit status 2), and so is finding no tests at all. A file whose first line is `# expect: CODE[, CODE...]`
 must fail `catx check` with those diagnostic codes (if every code is a warning, `W...`, it need only
-report them). Any other file must run with standard output
+report them); such files are checked within the `catx test` process, which checks the prelude
+once for all of them. Any other file must run with standard output
 equal to its `.out` file and exit with status 0, or with the status given by a `# exit: N` line; a
 `.in` file next to it is fed to standard input. Line endings are not compared (`\r\n` in the `.out`
 file or the output counts as `\n`). A difference is shown as a unified diff of the expected and
@@ -807,8 +808,7 @@ plus every open document, each with the modules it imports, whether or not the f
 Directories named `target` or `node_modules` and hidden directories (`.git` and the like) are
 skipped. An open document's text takes precedence over the file on disk. Each file's compilation is
 cached and reused while the files it loaded are unchanged, so after the first request only edited
-files and the files that import them are checked again. These compilations share one checked copy
-of the prelude rather than each checking it again. The cache is filled in the background after
+files and the files that import them are checked again. The cache is filled in the background after
 the server starts and whenever workspace folders are added, on half the cores and pausing while
 requests and diagnostics run, so the first request usually finds it ready; a request that comes
 earlier waits only for the files being compiled at that moment and compiles the rest itself. The
@@ -828,6 +828,10 @@ status is 1 if errors remain, 2 if a file could not be read or written.
 Every diagnostic has a code. `docs/errors.md` explains each one with an example and a fix, and
 `catx check` (like `catx run` when a program does not compile) ends its report with a link to the
 entries for the codes it printed.
+
+Every compilation in a process (`catx check` and `catx run`, the checks of `catx test`, and every
+request of the language server) starts from one copy of the prelude checked once, before the
+program, rather than checking the prelude again.
 
 `catx check` reports everything `catx run` would refuse to run, including the code generator's
 limit on live values in one function (E0900). The compiler has limits of its own instead of
