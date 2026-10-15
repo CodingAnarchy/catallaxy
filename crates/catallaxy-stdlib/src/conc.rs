@@ -6,6 +6,7 @@
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
 
 use catallaxy_gc::ObjState;
 use catallaxy_gc::{RootSource, Tracer};
@@ -51,6 +52,12 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             Ok(vm.m.alloc_channel(cap as usize))
         },
         "Channel.send" => chan_send,
+        "Channel.try_send" => chan_try_send,
+        "Channel.recv_timeout" => |vm, a| {
+            let deadline = deadline_after(float(a[1])?);
+            chan_recv_until(vm, a[0], deadline)
+        },
+        "Channel.select" => chan_select,
         "Channel.recv" => |vm, a| chan_recv(vm, a[0], true),
         "Channel.try_recv" => |vm, a| chan_recv(vm, a[0], false),
         "Channel.close" => |_, a| {
@@ -332,6 +339,187 @@ fn chan_recv(vm: &mut Vm, ch: Value, wait: bool) -> RtResult<Value> {
                 inner.not_empty.wait(&mut q);
             }
         });
+    }
+}
+
+/// The instant `secs` seconds from now (negative and NaN mean now), or None if that is too far
+/// to represent (wait forever).
+fn deadline_after(secs: f64) -> Option<Instant> {
+    let d = Duration::try_from_secs_f64(secs.max(0.0)).ok()?;
+    Instant::now().checked_add(d)
+}
+
+/// Takes the next item of a channel: `Some(item)`, `Some(nil)` once it is closed and drained, or
+/// None if it is open and empty.
+fn chan_take(vm: &Vm, inner: &ChannelInner) -> Option<Value> {
+    let mut q = inner.queue.lock();
+    if let Some(v) = q.items.pop_front() {
+        drop(q);
+        inner.not_full.notify_one();
+        inner.wake_fibers();
+        ownership::transfer_deep(v, TRANSIT_TID, vm.tid());
+        return Some(v);
+    }
+    q.closed.then_some(Value::NIL)
+}
+
+/// Registers `wake` on a channel unless it already has an item or is closed (checked under the
+/// same lock as senders use, so no change is missed); returns whether it registered.
+fn chan_arm(inner: &ChannelInner, wake: &Wake) -> bool {
+    let q = inner.queue.lock();
+    if q.closed || !q.items.is_empty() {
+        return false;
+    }
+    inner.waiters.lock().push(wake.clone());
+    true
+}
+
+/// Waits, until `deadline` if given, for a change to one of `chans` after `arm` found none
+/// ready: parks the fiber (or runs the thread's fibers), or else blocks the thread on a signal
+/// that the channels' waker lists fire. Stale registrations left on the other channels only
+/// cause spurious wakeups, which every waiter tolerates.
+fn wait_any(vm: &mut Vm, chans: &[&ChannelInner], deadline: Option<Instant>) {
+    let arm = |wake: Wake| chans.iter().all(|c| chan_arm(c, &wake));
+    if crate::fiber::wait_event_until(vm, deadline, arm).is_some() {
+        return;
+    }
+    let signal = Arc::new((Mutex::new(false), Condvar::new()));
+    let s2 = signal.clone();
+    let wake: Wake = Arc::new(move || {
+        *s2.0.lock() = true;
+        s2.1.notify_all();
+    });
+    if !chans.iter().all(|c| chan_arm(c, &wake)) {
+        return;
+    }
+    blocking(vm, || {
+        let mut fired = signal.0.lock();
+        while !*fired {
+            match deadline {
+                Some(t) => {
+                    if signal.1.wait_until(&mut fired, t).timed_out() {
+                        break;
+                    }
+                }
+                None => signal.1.wait(&mut fired),
+            }
+        }
+    });
+}
+
+fn chan_recv_until(vm: &mut Vm, ch: Value, deadline: Option<Instant>) -> RtResult<Value> {
+    let inner = &channel_of(ch)?.inner;
+    loop {
+        if let Some(v) = chan_take(vm, inner) {
+            return Ok(v);
+        }
+        if deadline.is_some_and(|t| Instant::now() >= t) {
+            return Ok(Value::NIL);
+        }
+        wait_any(vm, &[inner], deadline);
+    }
+}
+
+fn chan_try_send(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
+    let (ch, item) = (a[0], a[1]);
+    let inner = &channel_of(ch)?.inner;
+    let owned = item.header().is_some_and(|h| h.state() == ObjState::Owned);
+    if owned && item.header().is_some_and(|h| h.owner() != vm.tid()) {
+        return panic("OwnershipError: cannot send an object owned by another thread");
+    }
+    let mut q = inner.queue.lock();
+    if q.closed || (inner.capacity != 0 && q.items.len() >= inner.capacity) {
+        return Ok(Value::FALSE);
+    }
+    if owned {
+        ownership::transfer_deep(item, vm.tid(), TRANSIT_TID);
+    } else {
+        ownership::escape(item, vm.tid());
+    }
+    q.items.push_back(item);
+    drop(q);
+    inner.not_empty.notify_one();
+    inner.wake_fibers();
+    Ok(Value::TRUE)
+}
+
+/// Field positions in the prelude's `SelectCase` class.
+const CASE_CHANNEL: usize = 0;
+const CASE_BLOCK: usize = 1;
+
+/// A small per-thread generator for picking among ready cases.
+fn next_random() -> u64 {
+    thread_local! {
+        static STATE: std::cell::Cell<u64> = std::cell::Cell::new(
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1,
+        );
+    }
+    STATE.with(|s| {
+        let mut x = s.get();
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        s.set(x);
+        x
+    })
+}
+
+/// `Channel.select(cases, timeout)`: see the prelude.
+fn chan_select(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
+    let case_class = catallaxy_vm::program::class_named("SelectCase").unwrap_or(u32::MAX);
+    let deadline = match arg(a, 1) {
+        Some(t) => Some(deadline_after(float(t)?)),
+        None => None,
+    };
+    let items = list_read(vm, a[0])?.try_to_vec()?;
+    let mut cases: Vec<(Value, Value)> = Vec::with_capacity(items.len());
+    for &c in &items {
+        let inst = instance_of(c, case_class, "SelectCase")?;
+        let ch = inst.get(CASE_CHANNEL);
+        channel_of(ch)?;
+        cases.push((ch, inst.get(CASE_BLOCK)));
+    }
+    if cases.is_empty() {
+        return panic("ArgumentError: Channel.select needs at least one case");
+    }
+    // The list is this thread's, and a sibling fiber could change it while this one waits:
+    // keep the cases' channels and blocks rooted here.
+    let rooted = vm.extra_roots().len();
+    for &(ch, f) in &cases {
+        vm.extra_roots().push(ch);
+        vm.extra_roots().push(f);
+    }
+    let r = select_loop(vm, &cases, deadline);
+    vm.extra_roots().truncate(rooted);
+    let Some((i, v)) = r? else { return Ok(Value::NIL) };
+    vm.call_value(cases[i].1, &[v])
+}
+
+/// Receives from the first ready case, starting at a random one; None on timeout.
+fn select_loop(
+    vm: &mut Vm,
+    cases: &[(Value, Value)],
+    deadline: Option<Option<Instant>>,
+) -> RtResult<Option<(usize, Value)>> {
+    let mut chans: Vec<&ChannelInner> = Vec::with_capacity(cases.len());
+    for &(ch, _) in cases {
+        chans.push(&channel_of(ch)?.inner);
+    }
+    let n = chans.len();
+    loop {
+        let start = (next_random() % n as u64) as usize;
+        for k in 0..n {
+            let i = (start + k) % n;
+            if let Some(v) = chan_take(vm, chans[i]) {
+                return Ok(Some((i, v)));
+            }
+        }
+        // A timeout too far to represent waits forever.
+        let until = deadline.flatten();
+        if deadline.is_some() && until.is_some_and(|t| Instant::now() >= t) {
+            return Ok(None);
+        }
+        wait_any(vm, &chans, until);
     }
 }
 

@@ -1,7 +1,8 @@
 //! `test` command: runs conformance-style test programs, each in its own process.
 //!
 //! A test is a `*.cx` file. One whose first line is `# expect: CODE[, CODE...]` must fail
-//! `catx check` with those codes (unless every code is a warning). Any other must run with
+//! `catx check` with those codes (unless every code is a warning); it is checked in this process,
+//! from the shared checked prelude, rather than by starting `catx check`. Any other must run with
 //! standard output equal to its `.out` file (empty if there is none; line endings are not
 //! compared) and exit with status 0, or
 //! with the status of a `# exit: N` line; a `.in` file next to it is fed to standard input.
@@ -11,18 +12,20 @@
 
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+
+use catallaxy_compiler::driver::{compile_path, FsLoader, Options};
 use std::time::{Duration, Instant};
 
 /// `catx test --help`.
 pub const HELP: &str = "\
 usage: catx test [options] [path...]
 
-Runs test programs, each in its own process: every named `*.cx` file, and every `*.cx` file
-under each named directory (skipping hidden directories, `target/` and `lib/`), by default
-under the current directory. A program whose first line is `# expect: CODE, ...` must fail
-`catx check` with those codes; any other must print its `.out` file and exit with status 0 (or
-that of a `# exit: N` line), reading its `.in` file as input. A failure shows a diff of the
-expected and actual output. Exits with 1 if a test fails, 2 if a path does not exist or no
+Runs test programs, each in its own process (`# expect:` ones are checked in this one): every
+named `*.cx` file, and every `*.cx` file under each named directory (skipping hidden
+directories, `target/` and `lib/`), by default under the current directory. A program whose
+first line is `# expect: CODE, ...` must fail `catx check` with those codes; any other must
+print its `.out` file and exit with status 0 (or that of a `# exit: N` line), reading its `.in`
+file as input. A failure shows a diff of the expected and actual output. Exits with 1 if a test fails, 2 if a path does not exist or no
 tests are found.
 
     -j, --jobs N       run N tests at a time (default 1); results are reported in order
@@ -217,17 +220,19 @@ fn run_one(exe: &Path, f: &Path, limit: Duration) -> Result<(), String> {
     let first = src.lines().next().unwrap_or("");
     if let Some(codes) = first.strip_prefix("# expect:") {
         let want: Vec<String> = codes.split(',').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect();
-        let mut cmd = Command::new(exe);
-        cmd.args(["check", "--json"]).arg(f);
-        let out = output_within(&mut cmd, limit)?;
-        let text = String::from_utf8_lossy(&out.stdout);
-        let missing: Vec<&String> = want.iter().filter(|c| !text.contains(&format!("\"code\":\"{c}\""))).collect();
+        // As `catx check` would, in this process: it shares the checked prelude.
+        let check = || compile_path(f, &FsLoader, &Options { check_only: true });
+        let comp = std::panic::catch_unwind(std::panic::AssertUnwindSafe(check))
+            .map_err(|_| "checking it panicked".to_string())?;
+        let missing: Vec<&String> = want.iter().filter(|c| !comp.diags.iter().any(|d| d.code == c.as_str())).collect();
         // Warnings alone (`W` codes) do not fail `catx check`.
         let want_failure = want.iter().any(|c| !c.starts_with('W'));
-        if missing.is_empty() && (!want_failure || !out.status.success()) {
+        if missing.is_empty() && (!want_failure || comp.has_errors()) {
             Ok(())
         } else {
-            Err(format!("expected {want:?}, got {}", text.trim()))
+            let got: Vec<&str> = comp.diags.iter().map(|d| d.code).collect();
+            let shown: String = comp.diags.iter().map(|d| comp.sm.render(d, false)).collect();
+            Err(format!("expected {want:?}, got {got:?}\n{}", shown.trim_end()))
         }
     } else {
         let out_file = f.with_extension("out");

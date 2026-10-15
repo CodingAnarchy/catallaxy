@@ -981,6 +981,28 @@ extend Channel[T] {
       if let x = self.recv() { f(x) } else { break }
     }
   }
+  # The next item, waiting at most `secs` seconds for one; nil if none came in time, or once the
+  # channel is closed and drained.
+  native fn recv_timeout(self, secs: Float) -> T?
+  # Queues `item` if that needs no wait: true if it was queued, false if a bounded channel is full
+  # or the channel is closed (the item is dropped either way, as `move` gave it away).
+  native fn try_send(self, move item: T) -> Bool
+  # A case of `Channel.select`: receiving from this channel runs `f` with the item, or with nil
+  # once the channel is closed and drained.
+  fn on_recv[R](self, f: fn(T?) -> R) -> SelectCase[R] { SelectCase.new(self, f, nil) }
+  # Waits until one of the cases' channels has an item (or is closed and drained), receives it
+  # and returns what that case's block returns. Of several ready cases, one is chosen at random.
+  # With a `timeout` (in seconds), returns nil if no case was ready in time; 0 polls.
+  native fn select[R](cases: List[SelectCase[R]], timeout: Float? = nil) -> R?
+}
+
+# One case of `Channel.select`, made by `Channel.on_recv`.
+pub class SelectCase[R] {
+  # Internal: the channel and the block (the runtime reads them by position: 0 and 1), and the
+  # block's result type.
+  _channel: Dyn
+  _block: Dyn
+  _result: R?
 }
 
 extend Thread[T] {
