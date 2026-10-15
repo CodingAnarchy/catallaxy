@@ -11,6 +11,7 @@ pub mod mutator;
 pub mod object;
 pub mod ops;
 pub mod ownership;
+pub mod stack;
 pub mod symbol;
 pub mod value;
 

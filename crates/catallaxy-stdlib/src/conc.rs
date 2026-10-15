@@ -145,6 +145,7 @@ fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let slot = Arc::new(Mutex::new(Some(child)));
     let slot2 = slot.clone();
     let spawned = std::thread::Builder::new().name(format!("catx-{tid}")).stack_size(16 << 20).spawn(move || {
+        catallaxy_runtime::stack::init_thread();
         let mut child = slot2.lock().take().expect("child VM");
         drop(slot2);
         catallaxy_gc::leave_native(&child.m.rec);
@@ -511,6 +512,7 @@ fn mark(t: &mut Tracer, v: Value) {
 }
 
 fn worker_main() {
+    catallaxy_runtime::stack::init_thread();
     let rec = catallaxy_gc::register_thread();
     let Ok(mut vm) = Vm::try_new(rec.clone(), THREAD_STACK) else {
         // No memory for its registers: the pool runs without this worker.

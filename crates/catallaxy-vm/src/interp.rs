@@ -245,6 +245,7 @@ impl Vm {
 
     /// Registers the current thread and creates its VM, leaving it in the running state.
     pub fn for_current_thread(stack_size: usize) -> Box<Vm> {
+        catallaxy_runtime::stack::init_thread();
         let rec = catallaxy_gc::register_thread();
         let vm = Vm::new(rec, stack_size);
         catallaxy_gc::leave_native(&vm.m.rec);
@@ -338,6 +339,9 @@ impl Vm {
     }
 
     fn invoke(&mut self, f: &'static Func, closure: Value, args: &[Value]) -> RtResult<Value> {
+        // Natives re-enter the interpreter through here, so this is where a native recursion
+        // (through `Mutex#lock`, `par_map`, a user `==`) would otherwise overflow the native stack.
+        catallaxy_runtime::stack::check()?;
         if let Some(native) = f.native {
             return native(self, args);
         }
@@ -371,7 +375,7 @@ impl Vm {
     #[inline(always)]
     fn check_stack(&self, need: usize) -> RtResult<()> {
         if need >= self.stack_cap || self.rs().frames.len() >= MAX_FRAMES {
-            return Err(Trap::Panic("SystemStackError: stack level too deep".into()));
+            return Err(Trap::Panic(catallaxy_runtime::stack::OVERFLOW.into()));
         }
         Ok(())
     }
@@ -554,7 +558,7 @@ impl Vm {
                 let base: usize = $base;
                 if base + f.nregs >= self.stack_cap || frames!().len() >= MAX_FRAMES {
                     save!();
-                    return Err(Trap::Panic("SystemStackError: stack level too deep".into()));
+                    return Err(Trap::Panic(catallaxy_runtime::stack::OVERFLOW.into()));
                 }
                 for i in ($nargs)..f.nparams {
                     unsafe { *self.stack.add(base + i) = Value::EMPTY };

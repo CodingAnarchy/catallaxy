@@ -34,7 +34,7 @@ use std::time::{Duration, Instant};
 use catallaxy_runtime::object::Wake;
 use catallaxy_runtime::{RtResult, Trap, Value};
 use catallaxy_vm::Vm;
-use corosensei::stack::DefaultStack;
+use corosensei::stack::{DefaultStack, Stack};
 use corosensei::{Coroutine, CoroutineResult, Yielder};
 use parking_lot::{Condvar, Mutex};
 
@@ -187,6 +187,8 @@ struct Fiber {
     vm: *mut Vm,
     flag: Arc<AtomicBool>,
     yielder: Cell<*const Yielder<(), ()>>,
+    /// The native stack guard's limit on this fiber's stack (see `catallaxy_runtime::stack`).
+    stack_limit: usize,
     /// Dropped after `coro`, whose drop may still switch to the fiber to unwind it.
     tsan: tsan::Handle,
 }
@@ -301,6 +303,8 @@ pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
             )));
         }
     };
+    // The stack's lowest address includes its guard page, which the guard's margin covers.
+    let stack_limit = catallaxy_runtime::stack::limit_for(stack.limit().get(), stack.base().get());
     let fvm = Box::into_raw(vm.new_fiber(FIBER_REGISTERS)?);
     unsafe {
         (*fvm).extra_roots().push(closure);
@@ -357,6 +361,7 @@ pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
                 vm: fvm,
                 flag: Arc::new(AtomicBool::new(false)),
                 yielder: Cell::new(std::ptr::null()),
+                stack_limit,
                 tsan: tsan::Handle::new(),
             },
         );
@@ -373,8 +378,10 @@ fn resume(id: u64) {
     CURRENT.with(|c| c.set(id));
     RUNNING_FLAG.with(|f| *f.borrow_mut() = Some(fiber.flag.clone()));
     let mut fiber = fiber;
+    let prev_limit = catallaxy_runtime::stack::set_limit(fiber.stack_limit);
     tsan::enter(&fiber.tsan);
     let r = fiber.coro.resume(());
+    catallaxy_runtime::stack::set_limit(prev_limit);
     fiber.yielder.set(YIELDER.with(|c| c.get()));
     RUNNING_FLAG.with(|f| *f.borrow_mut() = None);
     CURRENT.with(|c| c.set(ROOT));
