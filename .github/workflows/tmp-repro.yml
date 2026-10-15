@@ -2,27 +2,29 @@ name: tmp-repro (throwaway; delete before merge)
 on: pull_request
 jobs:
   repro:
-    strategy:
-      fail-fast: false
-      matrix:
-        rev: [HEAD, 630b635]
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0 }
-      - name: Check out the revision under test (keep the program)
-        run: cp tmp-repro/crash.cx /tmp/crash.cx && git checkout ${{ matrix.rev }}
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked -p catallaxy
-      - name: Run 300 times under GC stress
+      - run: sudo apt-get install -y -q gdb >/dev/null
+      - name: 8 parallel loops of 100 runs under GC stress, with core dumps
         run: |
-          fails=0
-          for i in $(seq 1 300); do
-            CATX_GC_STRESS=1 RUST_BACKTRACE=1 ./target/release/catx run /tmp/crash.cx > out.txt 2> err.txt
-            c=$?
-            if [ $c -ne 0 ]; then
-              fails=$((fails+1)); echo "run $i exit $c (signal $((c-128)))"; tail -5 err.txt; wc -l < out.txt
-            fi
+          sudo sysctl -w kernel.core_pattern=/tmp/cores/core.%p >/dev/null
+          mkdir -p /tmp/cores
+          ulimit -c unlimited
+          loop() {
+            for i in $(seq 1 100); do
+              CATX_GC_STRESS=1 ./target/release/catx run tmp-repro/crash.cx > /tmp/o$1 2> /tmp/e$1
+              c=$?
+              if [ $c -ne 0 ]; then echo "worker $1 run $i exit $c (signal $((c-128))) after $(wc -l < /tmp/o$1) lines"; tail -3 /tmp/e$1; fi
+            done
+          }
+          for w in 1 2 3 4 5 6 7 8; do loop $w & done
+          wait
+          n=$(ls /tmp/cores | wc -l); echo "CORES: $n"
+          for core in $(ls /tmp/cores | head -2); do
+            echo "===== backtrace for $core"
+            gdb -batch -ex "thread apply all bt 25" ./target/release/catx /tmp/cores/$core 2>/dev/null | grep -v "^\[New LWP" | head -150
           done
-          echo "FAILURES ${{ matrix.rev }}: $fails/300"
