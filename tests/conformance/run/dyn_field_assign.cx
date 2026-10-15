@@ -1,0 +1,18 @@
+# Assigning a field through `Dyn` works on records (dictionaries) only; on a class instance it
+# panics with a message that says so.
+class P {
+  n: Int
+}
+rec: Dyn = ["n": 1]
+rec.n = 2
+puts(rec)
+d: Dyn = P.new(1)
+r = Fiber.start { d.n = 5 }.join()
+match r {
+  Ok(_) => puts("assigned")
+  Err(m) => puts(m.split("\n")[0])
+}
+if let p = d as? P {
+  p.n = 5
+}
+puts(d.n)

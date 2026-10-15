@@ -1595,6 +1595,11 @@ impl Vm {
                     save!();
                     vm_call!(slow::index_set(self, x, i, v));
                 }
+                Op::SetMember => {
+                    let (x, k, v) = (r!(a), r!(b_of(w)), r!(c_of(w)));
+                    save!();
+                    vm_call!(slow::dyn_set_member(self, x, k, v));
+                }
                 Op::TupleGet => {
                     let t = r!(b_of(w));
                     let i = c_of(w);

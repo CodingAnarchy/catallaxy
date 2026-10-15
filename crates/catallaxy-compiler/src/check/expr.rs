@@ -61,12 +61,8 @@ impl Checker {
             d = d.fix("convert to Int", e.span.after(), ".to_i");
         }
         if let Ty::Iface(..) = self.types.get(self.types.shallow_resolve(ty)).clone() {
-            let missing = self.missing_methods(t, ty);
-            if !missing.is_empty() {
-                d = d.note(format!(
-                    "`{got}` is missing: {}",
-                    missing.iter().map(|m| format!("`{m}`")).collect::<Vec<_>>().join(", ")
-                ));
+            for n in self.conformance_notes(t, ty) {
+                d = d.note(n);
             }
         }
         if matches!(self.types.get(tr), Ty::Dyn) {
@@ -2514,12 +2510,8 @@ impl Checker {
                             self.show(b)
                         );
                         let mut d = Diag::error("E0368", msg, call.span);
-                        let missing = self.missing_methods(actual, b);
-                        if !missing.is_empty() {
-                            d = d.note(format!(
-                                "missing: {}",
-                                missing.iter().map(|x| format!("`{x}`")).collect::<Vec<_>>().join(", ")
-                            ));
+                        for n in self.conformance_notes(actual, b) {
+                            d = d.note(n);
                         }
                         self.emit(d);
                     }
@@ -2651,6 +2643,18 @@ impl Checker {
         true
     }
 
+    /// Whether a value of type `t` is or holds a function (a closure), which stays callable only
+    /// unfrozen.
+    fn holds_fn(&self, t: TyId) -> bool {
+        let t = self.types.shallow_resolve(t);
+        match self.types.get(t) {
+            Ty::Fn(..) => true,
+            Ty::Union(ts) | Ty::Tuple(ts) => ts.iter().any(|&x| self.holds_fn(x)),
+            Ty::Class(_, args) => args.iter().any(|&x| self.holds_fn(x)),
+            _ => false,
+        }
+    }
+
     /// Owned values passed to a `move` parameter must be fresh or explicitly moved.
     fn check_move_arg(&mut self, expr: &Expr, t: TyId) {
         if !self.check_not_pinned(t, "a value", expr.span) {
@@ -2662,7 +2666,12 @@ impl Checker {
         match &expr.kind {
             ExprKind::Move(_) => {}
             ExprKind::Ident(name) => {
-                let msg = format!("`{name}` is owned by this thread; pass `move {name}` to transfer it, or `freeze({name})` to share it read-only");
+                let msg = if self.holds_fn(t) {
+                    // A frozen function cannot be called, so freezing is no way to share it.
+                    format!("`{name}` is owned by this thread; pass `move {name}` to transfer it")
+                } else {
+                    format!("`{name}` is owned by this thread; pass `move {name}` to transfer it, or `freeze({name})` to share it read-only")
+                };
                 self.emit(Diag::error("E0612", msg, expr.span).fix("move it", expr.span.empty_at(), "move "));
             }
             ExprKind::Member { .. } | ExprKind::Index { .. } => {
@@ -4419,13 +4428,20 @@ impl Checker {
                 info.name,
                 self.show(t)
             );
+            let help = if self.holds_fn(t) {
+                // A frozen function cannot be called, and one in a `Mutex` would still run with
+                // this thread's captures.
+                "use `spawn move { ... }` to transfer it, or call it here and capture its result instead".to_string()
+            } else {
+                format!(
+                    "use `spawn move {{ ... }}` to transfer it, `freeze({})` to share it read-only, or wrap it in `Mutex.new(...)`",
+                    info.name
+                )
+            };
             self.emit(
                 Diag::error("E0604", msg, span)
                     .note_at(format!("`{}` is captured here", info.name), info.span)
-                    .note(format!(
-                        "use `spawn move {{ ... }}` to transfer it, `freeze({})` to share it read-only, or wrap it in `Mutex.new(...)`",
-                        info.name
-                    )),
+                    .note(help),
             );
         }
     }

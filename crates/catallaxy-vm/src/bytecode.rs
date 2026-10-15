@@ -224,6 +224,9 @@ pub enum Op {
     CheckArgs,
     /// Checks `R[A][R[B]] = R[C]` against the element tags of the collection R[A].
     CheckSet,
+    /// `R[A].name = R[C]` on a `Dyn` value, the name being the string R[B]: sets that key of a
+    /// record (dictionary); other values have no fields assignable through `Dyn`.
+    SetMember,
     /// R[A] = R[B] formatted per the spec packed in two data words (`fmtspec::FormatSpec::encode`)
     Format,
 }

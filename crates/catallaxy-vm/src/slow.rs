@@ -375,6 +375,22 @@ pub fn dyn_index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
     index_get(vm, x, i)
 }
 
+/// `d.name = v` on a `Dyn` value: only a record (dictionary) has fields to assign this way.
+pub fn dyn_set_member(vm: &mut Vm, x: Value, k: Value, v: Value) -> RtResult<()> {
+    if kind_of(x) == ObjKind::Dict {
+        return dict_set(vm, x, k, v);
+    }
+    let name = str_of(k).unwrap_or("?");
+    if x.is_nil() {
+        return panic(format!("NoMethodError: cannot assign field `{name}` of nil (a Dyn value was nil)"));
+    }
+    panic(format!(
+        "TypeError: cannot assign field `{name}` through `Dyn` on a {}: only records (dictionaries) take field assignment through `Dyn`; convert it first (`as? {}`)",
+        class_of(x).name,
+        class_of(x).name
+    ))
+}
+
 pub fn index_set(vm: &mut Vm, x: Value, i: Value, v: Value) -> RtResult<()> {
     match kind_of(x) {
         ObjKind::List => list_set(vm, x, i, v),
