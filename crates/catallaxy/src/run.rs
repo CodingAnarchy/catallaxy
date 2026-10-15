@@ -31,7 +31,8 @@ fn print_code_help<'a>(codes: impl IntoIterator<Item = &'a str>) {
     let mut codes: Vec<&str> = codes.into_iter().collect();
     codes.sort_unstable();
     codes.dedup();
-    let url = concat!(env!("CARGO_PKG_REPOSITORY"), "/blob/main/docs/errors.md");
+    // The index as of this release, which explains exactly the codes this `catx` emits.
+    let url = concat!(env!("CARGO_PKG_REPOSITORY"), "/blob/v", env!("CARGO_PKG_VERSION"), "/docs/errors.md");
     match codes.as_slice() {
         [] => {}
         [one] => eprintln!("help: for more on {one}, see {url}#{}", one.to_lowercase()),
@@ -42,13 +43,14 @@ fn print_code_help<'a>(codes: impl IntoIterator<Item = &'a str>) {
 pub fn cmd_run(args: &[String]) -> i32 {
     let mut i = 0;
     let mut promote = false;
-    while i < args.len() && args[i].starts_with("--") {
+    while i < args.len() && args[i].starts_with('-') {
         match args[i].as_str() {
             "--promote-on-access" => promote = true,
-            other => {
-                eprintln!("unknown option `{other}`");
-                return 2;
+            "--help" | "-h" => {
+                print!("{}", crate::command_help("run").unwrap_or_default());
+                return 0;
             }
+            other => return crate::unexpected("run", other),
         }
         i += 1;
     }
@@ -77,19 +79,29 @@ pub fn cmd_run(args: &[String]) -> i32 {
 pub use catallaxy::execute;
 
 pub fn cmd_check(args: &[String]) -> i32 {
-    let json = args.iter().any(|a| a == "--json");
-    let files: Vec<&str> = args.iter().filter(|a| !a.starts_with("--")).map(|a| a.as_str()).collect();
+    let mut json = false;
+    let mut files: Vec<&str> = Vec::new();
+    for a in args {
+        match a.as_str() {
+            "--json" => json = true,
+            other if other.starts_with('-') && other != "-" => return crate::unexpected("check", other),
+            other => files.push(other),
+        }
+    }
     if files.is_empty() {
         eprintln!("usage: catx check [--json] <file.cx|dir>...");
         return 2;
     }
-    let files = crate::files::expand(&files, &[]);
+    let files = crate::files::expand(&files, crate::files::MEANT_TO_FAIL);
     let mut any_error = false;
+    // A file that cannot be read is a different failure from one with errors (status 2, not 1).
+    let mut unreadable = false;
     let mut all_diags: Vec<Box<RawValue>> = Vec::new();
     let mut codes = Vec::new();
     for f in files {
         let comp = compile_path(&f, &FsLoader, &Options { check_only: true });
         any_error |= comp.has_errors();
+        unreadable |= comp.diags.iter().any(is_unreadable);
         if json {
             all_diags.extend(diagnostics_json(&comp.sm, &comp.diags));
         } else {
@@ -104,11 +116,19 @@ pub fn cmd_check(args: &[String]) -> i32 {
     } else if !any_error {
         eprintln!("ok");
     }
-    if any_error {
+    if unreadable {
+        2
+    } else if any_error {
         1
     } else {
         0
     }
+}
+
+/// Whether `d` says the file named on the command line could not be read (E0001 without a place
+/// in a file; the same code in a file is an unexpected character).
+fn is_unreadable(d: &catallaxy_compiler::diag::Diagnostic) -> bool {
+    d.code == "E0001" && d.span.file == u32::MAX
 }
 
 /// The entries of the `diagnostics` array that [`SourceMap::to_json`] renders for `diags`, kept
@@ -121,8 +141,14 @@ fn diagnostics_json(sm: &SourceMap, diags: &[catallaxy_compiler::diag::Diagnosti
 }
 
 pub fn cmd_disasm(args: &[String]) -> i32 {
+    if let Some(other) = args.iter().find(|a| a.starts_with('-')) {
+        return crate::unexpected("disasm", other);
+    }
+    if args.len() > 2 {
+        return crate::unexpected("disasm", &args[2]);
+    }
     let Some(f) = args.first() else {
-        eprintln!("usage: catx disasm <file.cx>");
+        eprintln!("usage: catx disasm <file.cx> [function]");
         return 2;
     };
     let comp = compile_path(Path::new(f), &FsLoader, &Options::default());

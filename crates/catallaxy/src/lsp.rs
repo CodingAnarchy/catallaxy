@@ -30,7 +30,11 @@ use rustc_hash::FxHashMap;
 use serde_json::Value as Json;
 use workspace::{Notes, Overlay, Unit, Workspace, ENTRY_FILE};
 
-pub fn cmd_lsp(_args: &[String]) -> i32 {
+pub fn cmd_lsp(args: &[String]) -> i32 {
+    // Clients that launch servers over stdio often say so with `--stdio`.
+    if let Some(a) = args.iter().find(|a| *a != "--stdio") {
+        return crate::unexpected("lsp", a);
+    }
     let (conn, io) = Connection::stdio();
     let code = match serve(&conn) {
         Ok(()) => 0,

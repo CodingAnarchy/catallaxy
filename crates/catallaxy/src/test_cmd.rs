@@ -12,19 +12,28 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "usage: catx test [path...]    (default: the current directory)";
+/// `catx test --help`.
+pub const HELP: &str = "\
+usage: catx test [path...]
 
-/// Directories skipped while walking for tests: `lib/` holds modules that tests import.
-const SKIP_DIRS: &[&str] = &["lib"];
+Runs test programs, each in its own process: every named `*.cx` file, and every `*.cx` file
+under each named directory (skipping hidden directories, `target/` and `lib/`), by default
+under the current directory. A program whose first line is `# expect: CODE, ...` must fail
+`catx check` with those codes; any other must print its `.out` file and exit with status 0 (or
+that of a `# exit: N` line), reading its `.in` file as input. Exits with 1 if a test fails, 2
+if a path does not exist or no tests are found.
+
+Environment: CATX_TEST_TIMEOUT   seconds each program may run (default 120)
+";
+
+/// What the walk for tests skips: `lib/` holds modules that tests import.
+const SKIP: crate::files::Skip = crate::files::Skip { dirs: &["lib"], expected_failures: false };
 
 pub fn cmd_test(args: &[String]) -> i32 {
     let mut paths: Vec<&str> = Vec::new();
     for a in args {
         match a.as_str() {
-            other if other.starts_with('-') => {
-                eprintln!("unknown option `{other}`\n{USAGE}");
-                return 2;
-            }
+            other if other.starts_with('-') => return crate::unexpected("test", other),
             other => paths.push(other),
         }
     }
@@ -37,7 +46,7 @@ pub fn cmd_test(args: &[String]) -> i32 {
             return 2;
         }
     }
-    let files = crate::files::expand(&paths, SKIP_DIRS);
+    let files = crate::files::expand(&paths, SKIP);
     if files.is_empty() {
         eprintln!("no tests found in {}", paths.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", "));
         return 2;
