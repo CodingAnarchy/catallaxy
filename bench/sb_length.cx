@@ -1,0 +1,8 @@
+# StringBuilder.length in a growing loop (#176): linear once `length` is O(1).
+sb = StringBuilder.new()
+total = 0
+for i in 0...200000 {
+  sb.push("é#{i % 10}")
+  total += sb.length
+}
+puts(total)

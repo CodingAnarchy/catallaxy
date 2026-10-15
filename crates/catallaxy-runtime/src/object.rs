@@ -742,6 +742,9 @@ pub struct CellObj {
 pub struct StringBuilderObj {
     pub header: Header,
     pub buf: UnsafeCell<String>,
+    /// The number of characters in `buf`, kept up to date by every mutation (under the same
+    /// write access) so that `length` is O(1).
+    pub chars: UnsafeCell<usize>,
 }
 
 #[repr(C)]
