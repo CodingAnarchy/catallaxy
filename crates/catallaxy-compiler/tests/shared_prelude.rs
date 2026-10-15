@@ -1,26 +1,33 @@
-//! Compiling from a shared, checked prelude (`driver::Prelude`) gives the same result as checking
-//! the prelude in each compilation: the same symbol index, interface conformance links and
-//! outlines (what the language server's workspace cache keeps), the same type for every
-//! expression, and the same diagnostics. Checked over every program in `tests/conformance` and
-//! `examples`, and over programs aimed at the cases `Prelude` handles.
-//!
-//! Diagnostics are compared without their notes. A call of a mutating prelude method on a frozen
-//! value is reported with one more note (`use .dup()`) from the shared prelude, whose mutating
-//! flags are final, than from scratch, where they are inferred after the program's bodies are
-//! checked and the call is reported then. This is why only the workspace cache, which keeps no
-//! diagnostics, compiles from a shared prelude.
+//! Compiling from the process's shared checked prelude (`driver::shared_prelude`, which every
+//! `catx` command and the language server use), reused across compilations, gives the same result
+//! as checking a prelude of its own in each compilation (`compile_path_fresh`): the same
+//! diagnostics with their notes and fixes, the same type for every expression, and the same
+//! symbol index, interface conformance links and outlines. Checked over every program in
+//! `tests/conformance` and `examples`, compiled one after another from the same shared prelude,
+//! and over programs aimed at the cases `Prelude` handles.
 
 use std::path::{Path, PathBuf};
 
-use catallaxy_compiler::driver::{compile_path, compile_path_from, Compilation, FsLoader, Options, Prelude};
+use catallaxy_compiler::driver::{
+    compile_path, compile_path_fresh, compile_path_from, compile_source, Compilation, FsLoader, Options, Prelude,
+};
 use catallaxy_compiler::symbols::{decl_span, outline, symbol_name, Index, OutlineItem};
 
 /// Everything compared between the two ways of compiling, as text.
 fn summary(c: &Compilation) -> Vec<String> {
     let mut out = Vec::new();
     for d in &c.diags {
-        let fixes: Vec<&str> = d.fixes.iter().map(|f| f.message.as_str()).collect();
-        out.push(format!("diag {} {:?} {:?}: {} | {}", d.code, d.severity, d.span, d.message, fixes.join("; ")));
+        let fixes: Vec<String> = d.fixes.iter().map(|f| format!("{} {:?}", f.message, f.edits)).collect();
+        let notes: Vec<String> = d.notes.iter().map(|(n, sp)| format!("{n} @{sp:?}")).collect();
+        out.push(format!(
+            "diag {} {:?} {:?}: {} | notes: {} | fixes: {}",
+            d.code,
+            d.severity,
+            d.span,
+            d.message,
+            notes.join("; "),
+            fixes.join("; ")
+        ));
     }
     // Node ids are the same either way: the prelude is parsed first in both.
     let mut tys: Vec<_> = c.ck.expr_ty.iter().map(|(&id, &t)| (id, c.ck.show(t))).collect();
@@ -51,11 +58,19 @@ fn summary(c: &Compilation) -> Vec<String> {
     out
 }
 
+/// Compiles `path` with a prelude of its own, from `prelude`, and from the process's shared one,
+/// and compares the three.
 fn check_same(prelude: &Prelude, path: &Path) {
     let opts = Options { check_only: true };
-    let fresh = compile_path(path, &FsLoader, &opts);
-    let shared = compile_path_from(prelude, path, &FsLoader, &opts);
-    let (a, b) = (summary(&fresh), summary(&shared));
+    let fresh = compile_path_fresh(path, &FsLoader, &opts);
+    let given = compile_path_from(prelude, path, &FsLoader, &opts);
+    compare(path, &fresh, &given);
+    let shared = compile_path(path, &FsLoader, &opts);
+    compare(path, &fresh, &shared);
+}
+
+fn compare(path: &Path, fresh: &Compilation, shared: &Compilation) {
+    let (a, b) = (summary(fresh), summary(shared));
     if a != b {
         let first = a.iter().zip(&b).position(|(x, y)| x != y).unwrap_or(a.len().min(b.len()));
         panic!(
@@ -142,6 +157,19 @@ fn shared_prelude_loop_field_reads() {
             &format!("class C {{\n  n: Int = 0\n  fn {name}(self) -> Int {{ self.n }}\n}}\nputs(C.new().{name}())\n"),
         );
     }
+}
+
+/// A prelude method's mutating flag is final before the program is checked, so calling a mutating
+/// prelude method (one written in Catallaxy, whose flag is inferred) on a frozen value is
+/// reported at the call, with the hint to copy it. (When prelude and program were checked
+/// together, the flag was inferred only after the program's bodies and the hint was missing.)
+#[test]
+fn frozen_call_of_an_inferred_mutating_prelude_method() {
+    let src = "d: Deque[Int] = Deque.new()\nf = freeze(d)\nf.push(1)\nputs(f.length)\n";
+    let c = compile_source(Path::new("frozen.cx"), src, &Options { check_only: true });
+    let d = c.diags.iter().find(|d| d.code == "E0614").unwrap_or_else(|| panic!("{:#?}", c.diags));
+    assert_eq!(&src[d.span.start as usize..d.span.end as usize], "push");
+    assert!(d.notes.iter().any(|(n, _)| n.contains("use `.dup()`")), "{d:#?}");
 }
 
 /// The language server shares one prelude between its compile threads.
