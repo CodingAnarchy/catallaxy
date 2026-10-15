@@ -623,28 +623,82 @@ impl ListObj {
         r
     }
 
-    /// As [`ListObj::modify`], but if the allocator refuses a larger buffer for the result,
-    /// returns the refused layout and leaves the list as it was.
+    /// Replaces the `remove` items starting at `at` with `insert`, editing the buffer in place
+    /// (growing it first if it is too small): the items after them move by memmove when no other
+    /// thread can be reading the list, else one atomic store at a time. Only the slots whose
+    /// contents changed are recorded as written. `at + remove` must not exceed the length.
+    ///
+    /// Lock-free readers of a shared list see, as with every other in-place write, each slot
+    /// holding either its old or its new value, and never a slot past the length they loaded:
+    /// a longer length is published after the slots it covers, a shorter one before the slots
+    /// past it are cleared.
+    ///
+    /// If the allocator refuses a larger buffer, returns the refused layout and leaves the list
+    /// as it was.
     ///
     /// # Safety
     /// See above.
-    pub unsafe fn try_modify<R>(
+    pub unsafe fn try_splice(
         &self,
+        at: usize,
+        remove: usize,
+        insert: &[Value],
         access: Access,
-        f: impl FnOnce(&mut Vec<Value>) -> R,
-    ) -> Result<R, std::alloc::Layout> {
-        // The copy, with room for one more item (`insert`, `unshift`), is refused like the
-        // buffer is.
-        let slots = self.slots();
-        let old = &slots[..self.len().min(slots.len())];
-        let mut items = Vec::new();
-        if items.try_reserve_exact(old.len() + 1).is_err() {
-            return Err(std::alloc::Layout::array::<Value>(old.len() + 1).unwrap_or(std::alloc::Layout::new::<u8>()));
+    ) -> Result<(), std::alloc::Layout> {
+        let n = self.len.load(Ordering::Relaxed);
+        assert!(at <= n && remove <= n - at, "splice out of bounds");
+        let ins = insert.len();
+        let Some(new_n) = (n - remove).checked_add(ins) else {
+            return Err(std::alloc::Layout::new::<[u64; 2]>());
+        };
+        if new_n > WordBuf::cap(self.buf.load(Ordering::Relaxed)) {
+            self.grow(new_n, access)?;
         }
-        items.extend(old.iter().map(|x| Value(x.load(Ordering::Acquire))));
-        let r = f(&mut items);
-        self.try_replace(&items, access)?;
-        Ok(r)
+        let buf = self.buf.load(Ordering::Relaxed);
+        let slots = WordBuf::slots(buf);
+        let (tail, tail_len) = (at + remove, n - at - remove);
+        // Written: the inserted items, and the moved tail.
+        let hi = if ins != remove && tail_len > 0 { new_n } else { at + ins };
+        if at < hi {
+            self.note_written(buf, at, hi);
+        }
+        if new_n < n {
+            self.len.store(new_n, Ordering::Release);
+        }
+        if ins != remove {
+            move_slots(slots, tail, at + ins, tail_len, access);
+        }
+        for (s, v) in slots[at..at + ins].iter().zip(insert) {
+            s.store(v.0, Ordering::Release);
+        }
+        if new_n < n {
+            for s in &slots[new_n..n] {
+                s.store(Value::NIL.0, Ordering::Release);
+            }
+        } else if new_n > n {
+            self.len.store(new_n, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    /// Reverses the items in place.
+    ///
+    /// # Safety
+    /// See above.
+    pub unsafe fn reverse(&self) {
+        let n = self.len.load(Ordering::Relaxed);
+        if n < 2 {
+            return;
+        }
+        let buf = self.buf.load(Ordering::Relaxed);
+        self.note_written(buf, 0, n);
+        let slots = &WordBuf::slots(buf)[..n];
+        let (lo, hi) = slots.split_at(n / 2);
+        for (a, b) in lo.iter().zip(hi.iter().rev()) {
+            let (x, y) = (a.load(Ordering::Relaxed), b.load(Ordering::Relaxed));
+            a.store(y, Ordering::Release);
+            b.store(x, Ordering::Release);
+        }
     }
 
     /// Moves the items to a buffer with room for `need`, or returns the layout the allocator
@@ -675,6 +729,31 @@ impl ListObj {
         // is freed with the list.
         if old != self.inline_addr() {
             crate::buf::release(old, access);
+        }
+    }
+}
+
+/// Moves `count` slots from `from` to `to` (the ranges may overlap). With local access no other
+/// thread can be reading the slots, so this is a memmove; otherwise each slot is moved with an
+/// atomic store, in the order that never loses an item (from the end when moving right).
+unsafe fn move_slots(slots: &[AtomicU64], from: usize, to: usize, count: usize, access: Access) {
+    if count == 0 || from == to {
+        return;
+    }
+    assert!(from.max(to) + count <= slots.len());
+    if access == Access::Local {
+        // SAFETY: in bounds (checked above); `AtomicU64` has the layout of `u64` and is a cell,
+        // so the slots may be written through a pointer derived from a shared reference, and no
+        // other thread accesses them while this thread has local write access.
+        let base = slots.as_ptr() as *mut u64;
+        std::ptr::copy(base.add(from), base.add(to), count);
+    } else if to < from {
+        for i in 0..count {
+            slots[to + i].store(slots[from + i].load(Ordering::Relaxed), Ordering::Release);
+        }
+    } else {
+        for i in (0..count).rev() {
+            slots[to + i].store(slots[from + i].load(Ordering::Relaxed), Ordering::Release);
         }
     }
 }

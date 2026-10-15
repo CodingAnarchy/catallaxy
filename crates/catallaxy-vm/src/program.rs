@@ -92,7 +92,7 @@ static GLOBALS: LazyLock<Box<[AtomicU64]>> =
     LazyLock::new(|| (0..MAX_GLOBALS).map(|_| AtomicU64::new(Value::NIL.0)).collect());
 static GLOBAL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static RT_TYPES: LazyLock<Table<RtType>> = LazyLock::new(|| Table::new(1 << 16));
-static IFACES: LazyLock<Table<Vec<Sym>>> = LazyLock::new(|| Table::new(1 << 14));
+static IFACES: LazyLock<Table<Vec<u32>>> = LazyLock::new(|| Table::new(1 << 14));
 
 #[inline]
 pub fn rt_type(id: u32) -> &'static RtType {
@@ -100,7 +100,7 @@ pub fn rt_type(id: u32) -> &'static RtType {
 }
 
 #[inline]
-pub fn iface(id: u32) -> &'static [Sym] {
+pub fn iface(id: u32) -> &'static [u32] {
     IFACES.get(id as usize)
 }
 
@@ -108,7 +108,7 @@ pub struct ProgramMeta {
     pub files: Vec<String>,
     pub globals: Vec<GlobalProto>,
     pub rt_types: Vec<RtType>,
-    pub ifaces: Vec<Vec<Sym>>,
+    pub ifaces: Vec<Vec<u32>>,
     pub loaded_funcs: usize,
     pub loaded_classes: usize,
     pub loaded_natives: usize,
@@ -327,10 +327,15 @@ fn load_inner(p: &Program, m: &mut Mutator, natives: &NativeLookup) -> Result<()
         RT_TYPES.push_at(i, p.rt_types[i].clone());
     }
     meta.rt_types = p.rt_types.clone();
-    for i in meta.ifaces.len()..p.ifaces.len() {
-        IFACES.push_at(i, p.ifaces[i].iter().map(|n| intern(n)).collect());
+    // A later program (a REPL session with one more input) may add classes that satisfy an
+    // interface tested before, so an entry is replaced when its class set changed. Readers keep
+    // a valid (leaked) old set until they load the new one.
+    for (i, set) in p.ifaces.iter().enumerate() {
+        if meta.ifaces.get(i) != Some(set) {
+            IFACES.push_at(i, set.clone());
+        }
     }
-    meta.ifaces = p.ifaces.iter().map(|names| names.iter().map(|n| intern(n)).collect()).collect();
+    meta.ifaces = p.ifaces.clone();
     Ok(())
 }
 

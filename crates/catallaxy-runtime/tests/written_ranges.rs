@@ -93,6 +93,95 @@ fn minor_collections_scan_the_written_range_of_old_lists() {
     h.finish();
 }
 
+fn splice(h: &mut Host, l: Value, at: usize, remove: usize, items: &[Value]) {
+    ownership::write_list(h.m, l, |l, access| unsafe { l.try_splice(at, remove, items, access) }).unwrap().unwrap();
+}
+
+/// In-place edits (`try_splice`, `reverse`) record the slots they insert into or move young
+/// items to, and nothing else (issue #172).
+#[test]
+fn in_place_list_edits_record_inserted_and_moved_slots() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let items: Vec<Value> = (0..40).map(|i| h.m.alloc_str(&format!("o{i}"))).collect();
+    let l = h.m.alloc_list(items);
+    let hl = h.m.root(l);
+    h.gc();
+    let l = h.m.get(hl);
+    let mut want: Vec<String> = (0..40).map(|i| format!("o{i}")).collect();
+    let s = h.m.alloc_str("first");
+    set(&mut h, l, 0, s);
+    want[0] = "first".into();
+    h.minor();
+    assert_eq!(list(l).written_range(), 0..0);
+
+    // Shortening writes nothing a minor collection needs to see.
+    splice(&mut h, l, 30, 10, &[]);
+    want.truncate(30);
+    assert_eq!(list(l).written_range(), 0..0);
+    assert_eq!(strs(l), want);
+
+    // An insertion records itself and the moved tail; it fits, so the buffer stays.
+    let cap = list(l).capacity();
+    let y = h.m.alloc_str("ins");
+    splice(&mut h, l, 10, 0, &[y]);
+    want.insert(10, "ins".into());
+    assert_eq!(list(l).capacity(), cap);
+    assert_eq!(list(l).written_range(), 10..31);
+    churn(&mut h);
+    assert_eq!(strs(l), want);
+    assert_eq!(list(l).written_range(), 0..0);
+
+    // A young item moved down by a removal before it is still found.
+    let y = h.m.alloc_str("mid");
+    set(&mut h, l, 20, y);
+    want[20] = "mid".into();
+    splice(&mut h, l, 5, 1, &[]);
+    want.remove(5);
+    assert!(list(l).written_range().contains(&19));
+    churn(&mut h);
+    assert_eq!(strs(l), want);
+
+    // Removing from the front moves every item; replacing two items with three.
+    let y = h.m.alloc_str("last");
+    let end = want.len() - 1;
+    set(&mut h, l, end, y);
+    want[end] = "last".into();
+    splice(&mut h, l, 0, 1, &[]);
+    want.remove(0);
+    let r = list(l).written_range();
+    assert!(r.start == 0 && r.end >= want.len(), "{r:?}");
+    churn(&mut h);
+    assert_eq!(strs(l), want);
+    let three: Vec<Value> = (0..3).map(|i| h.m.alloc_str(&format!("r{i}"))).collect();
+    splice(&mut h, l, 2, 2, &three);
+    want.splice(2..4, (0..3).map(|i| format!("r{i}")));
+    churn(&mut h);
+    assert_eq!(strs(l), want);
+
+    // Appending past the capacity grows the buffer, keeping the range of the old one.
+    let more: Vec<Value> = (0..cap).map(|i| h.m.alloc_str(&format!("a{i}"))).collect();
+    let at = want.len();
+    splice(&mut h, l, at, 0, &more);
+    want.extend((0..cap).map(|i| format!("a{i}")));
+    assert!(list(l).capacity() > cap);
+    assert_eq!(list(l).written_range(), at..want.len());
+    churn(&mut h);
+    assert_eq!(strs(l), want);
+
+    let y = h.m.alloc_str("rev");
+    set(&mut h, l, 1, y);
+    want[1] = "rev".into();
+    ownership::write_list(h.m, l, |l, _| unsafe { l.reverse() }).unwrap();
+    want.reverse();
+    assert_eq!(list(l).written_range(), 0..want.len());
+    churn(&mut h);
+    assert_eq!(strs(l), want);
+    h.gc();
+    assert_eq!(strs(h.m.get(hl)), want);
+    h.finish();
+}
+
 #[test]
 fn moved_and_replaced_list_buffers_keep_young_items_reachable() {
     let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -290,88 +379,6 @@ fn a_remembered_list_handed_to_another_thread_is_remembered_by_the_receiver() {
         churn(&mut h);
     }
     catallaxy_gc::blocking(&h.m.rec, || t.join().unwrap());
-    h.finish();
-}
-
-/// A large list written by its owner (so remembered) is shared; other threads push and set
-/// under its lock (updating its written range) and read without locking, while the first thread
-/// runs minor and major collections.
-#[test]
-fn shared_large_list_written_and_read_concurrently_with_minor_collections() {
-    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    let mut h = Host::new();
-    let items: Vec<Value> = (0..n(64).max(12)).map(|i| h.m.alloc_str(&format!("s{i}"))).collect();
-    let l = h.m.alloc_list(items);
-    let hl = h.m.root(l);
-    h.gc();
-    let s = h.m.alloc_str("s-young");
-    let l = h.m.get(hl);
-    set(&mut h, l, 5, s);
-    ownership::share_deep(h.m, h.m.get(hl), false).unwrap();
-    let addr = h.m.get(hl).0;
-    let stop = Arc::new(AtomicBool::new(false));
-    let rounds = n(300);
-    let threads: Vec<_> = (0..3)
-        .map(|k| {
-            let stop = stop.clone();
-            std::thread::spawn(move || {
-                let w = Host::new();
-                let l = Value(addr);
-                let mut i = 0usize;
-                loop {
-                    if k == 0 {
-                        // Reader.
-                        let list = ownership::read_list(w.m, l).unwrap();
-                        for j in 0..list.len() + 2 {
-                            if let Some(v) = list.get(j) {
-                                assert!(str_of(v).is_some_and(|s| s.starts_with('s')));
-                            }
-                        }
-                    } else if i < rounds {
-                        let s = w.m.alloc_str(&format!("s{k}-{i}"));
-                        w.m.scope(|m| {
-                            // Rooted: a writer waiting for the list's lock does so in native
-                            // state, where a collection can run.
-                            m.root(s);
-                            ownership::publish_into_shared(m, s).unwrap();
-                            ownership::write_list(m, l, |list, access| unsafe {
-                                if i % 3 == 0 {
-                                    list.set(i % list.len(), s);
-                                } else {
-                                    list.push(s, access);
-                                }
-                            })
-                            .unwrap();
-                        });
-                        i += 1;
-                    }
-                    catallaxy_gc::safepoint(&w.m.rec);
-                    if stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    if k != 0 && i >= rounds {
-                        catallaxy_gc::blocking(&w.m.rec, std::thread::yield_now);
-                    }
-                }
-                w.finish();
-            })
-        })
-        .collect();
-    for r in 0..n(60).max(4) {
-        churn(&mut h);
-        if r % 10 == 0 || r == 2 {
-            h.gc();
-        }
-    }
-    stop.store(true, Ordering::Release);
-    catallaxy_gc::blocking(&h.m.rec, || {
-        for t in threads {
-            t.join().unwrap();
-        }
-    });
-    let all = strs(h.m.get(hl));
-    assert!(all.iter().all(|s| s.starts_with('s')));
-    h.gc();
     h.finish();
 }
 

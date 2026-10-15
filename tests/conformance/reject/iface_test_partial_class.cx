@@ -1,0 +1,14 @@
+# expect: E0374
+# `Box[T]` satisfies `Shape` only as a `Box[Float]`; the run-time test sees only the class, so a
+# `Box[Int]` would pass it and `area` would return an `Int` typed as `Float`.
+interface Shape {
+  fn area(self) -> Float
+}
+class Box[T] {
+  v: T
+  fn area(self) -> T { self.v }
+}
+x: Dyn = Box.new(2)
+if let s = x as? Shape {
+  puts(s.area() + 0.5)
+}
