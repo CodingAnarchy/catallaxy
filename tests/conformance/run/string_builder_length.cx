@@ -1,0 +1,27 @@
+# StringBuilder.length counts characters, not bytes, and stays right through every mutation.
+sb = StringBuilder.new()
+puts(sb.length)
+sb.push("abc")
+puts(sb.length)
+sb.push("héllo")
+puts(sb.length)
+sb.push_char(0x1F600)
+puts(sb.length)
+sb.push_value(3.5)
+puts(sb.length)
+sb.push_value("ü")
+puts(sb.length)
+puts(sb.length == sb.to_s.length)
+sb.clear()
+puts(sb.length)
+sb.push("")
+puts(sb.length)
+sb.push("日本")
+puts(sb.length)
+total = 0
+for i in 0...1000 {
+  sb.push("é#{i % 10}")
+  total += sb.length
+}
+puts(total)
+puts(sb.length == sb.to_s.length)

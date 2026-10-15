@@ -284,10 +284,17 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "StringBuilder.length" => |vm, a| {
             let sb = sb_of(a[0])?;
-            let n = ownership::with_read(&vm.m, a[0], || unsafe { (*sb.buf.get()).chars().count() })?;
+            let n = ownership::with_read(&vm.m, a[0], || unsafe { *sb.chars.get() })?;
             Ok(Value::small_int(n as i64))
         },
-        "StringBuilder.clear" => |vm, a| sb_write(vm, a[0], |b| b.clear()),
+        "StringBuilder.clear" => |vm, a| {
+            let sb = sb_of(a[0])?;
+            ownership::with_write(&vm.m, a[0], |_| unsafe {
+                (*sb.buf.get()).clear();
+                *sb.chars.get() = 0;
+            })?;
+            Ok(Value::NIL)
+        },
         _ => return None,
     })
 }
@@ -363,7 +370,10 @@ fn sb_push(vm: &Vm, b: Value, x: &str) -> RtResult<Value> {
     for retry in [false, true] {
         let grown = ownership::with_write(&vm.m, b, |_| {
             let buf = unsafe { &mut *sb.buf.get() };
-            buf.try_reserve(x.len()).map(|_| buf.push_str(x))
+            buf.try_reserve(x.len()).map(|_| {
+                buf.push_str(x);
+                unsafe { *sb.chars.get() += char_count(x) };
+            })
         })?;
         if grown.is_ok() {
             return Ok(Value::NIL);
@@ -379,10 +389,13 @@ fn sb_refused() -> RtResult<Value> {
     catallaxy_runtime::refused("cannot grow a StringBuilder")
 }
 
-fn sb_write(vm: &Vm, b: Value, f: impl FnOnce(&mut String)) -> RtResult<Value> {
-    let sb = sb_of(b)?;
-    ownership::with_write(&vm.m, b, |_| f(unsafe { &mut *sb.buf.get() }))?;
-    Ok(Value::NIL)
+/// The number of characters in `x`, without decoding when it is all ASCII.
+fn char_count(x: &str) -> usize {
+    if x.is_ascii() {
+        x.len()
+    } else {
+        x.chars().count()
+    }
 }
 
 /// Sorts values by `<=>` (stable). Fast paths avoid callbacks for primitive lists.
