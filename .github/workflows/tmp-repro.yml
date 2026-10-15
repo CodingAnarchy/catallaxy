@@ -2,10 +2,16 @@ name: tmp-repro (throwaway; delete before merge)
 on: pull_request
 jobs:
   repro:
+    strategy:
+      fail-fast: false
+      matrix:
+        rev: [origin/main, 630b635, f8d3ee4, v0.4.1]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - run: cp tmp-repro/crash.cx /tmp/crash.cx && git fetch -q origin main --tags && git checkout -q ${{ matrix.rev }}
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked -p catallaxy
       - run: sudo apt-get install -y -q gdb >/dev/null
@@ -16,14 +22,14 @@ jobs:
           ulimit -c unlimited
           loop() {
             for i in $(seq 1 100); do
-              CATX_GC_STRESS=1 ./target/release/catx run tmp-repro/crash.cx > /tmp/o$1 2> /tmp/e$1
+              CATX_GC_STRESS=1 ./target/release/catx run /tmp/crash.cx > /tmp/o$1 2> /tmp/e$1
               c=$?
               if [ $c -ne 0 ]; then echo "worker $1 run $i exit $c (signal $((c-128))) after $(wc -l < /tmp/o$1) lines"; tail -3 /tmp/e$1; fi
             done
           }
           for w in 1 2 3 4 5 6 7 8; do loop $w & done
           wait
-          n=$(ls /tmp/cores | wc -l); echo "CORES: $n"
+          n=$(ls /tmp/cores | wc -l); echo "CORES ${{ matrix.rev }}: $n/800"
           for core in $(ls /tmp/cores | head -2); do
             echo "===== backtrace for $core"
             gdb -batch -ex "thread apply all bt 25" ./target/release/catx /tmp/cores/$core 2>/dev/null | grep -v "^\[New LWP" | head -150
