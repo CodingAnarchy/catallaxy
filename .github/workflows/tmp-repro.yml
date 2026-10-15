@@ -6,17 +6,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { rev: a8b80fb, name: control, env: "" }
-          - { rev: a8b80fb, name: nooverflow, env: "CATX_GC_MARK_STACK=1000000000" }
-          - { rev: a8b80fb, name: tinystack, env: "CATX_GC_MARK_STACK=1" }
-          - { rev: a8b80fb, name: nohelpers, env: "CATX_GC_THREADS=0" }
-          - { rev: a8b80fb, name: nogen, env: "CATX_GC_GENERATIONAL=0" }
+          - { rev: origin/main, name: main, env: "" }
+          - { rev: b95d816, name: fix-a, env: "" }
+          - { rev: b95d816, name: fix-b, env: "" }
+          - { rev: b95d816, name: fix-tinystack, env: "CATX_GC_MARK_STACK=1" }
+          - { rev: b95d816, name: fix-nogen, env: "CATX_GC_GENERATIONAL=0" }
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
-      - run: cp tmp-repro/crash.cx /tmp/crash.cx && git fetch -q origin main --tags && git checkout -q ${{ matrix.rev }}
+      - run: cp tmp-repro/crash.cx /tmp/crash.cx && git fetch -q origin main gc/unregister-release-pages --tags && git checkout -q ${{ matrix.rev }}
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked -p catallaxy
       - run: sudo apt-get install -y -q gdb >/dev/null
