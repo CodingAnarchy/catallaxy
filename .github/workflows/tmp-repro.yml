@@ -5,7 +5,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rev: [origin/main, 630b635, f8d3ee4, v0.4.1]
+        rev: [origin/main, a8b80fb, 1e0f6f1, f5ae0ad, b8b0a3a, v0.4.1]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
