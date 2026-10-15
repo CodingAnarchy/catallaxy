@@ -188,7 +188,20 @@ pub struct Checker {
     /// Runtime type descriptors for `is` / `as?` / patterns.
     pub rt_types: Vec<RtType>,
     rt_type_map: FxHashMap<String, u32>,
-    pub rt_ifaces: Vec<Vec<String>>,
+    /// The interface behind each run-time interface test (`RtType::Iface`).
+    pub rt_ifaces: Vec<IfaceId>,
+    /// For each entry of `rt_ifaces`: the run-time class ids that pass the test (sorted), filled
+    /// by [`Checker::finish_rt_ifaces`].
+    pub rt_iface_sets: Vec<Vec<u32>>,
+    /// `(interface, class)`: whether some instantiation of the class satisfies some
+    /// instantiation of the interface, and whether every instantiation does.
+    pub rt_conf_cache: FxHashMap<(IfaceId, ClassId), (bool, bool)>,
+    /// Look up methods as the run time does: every extension and interface, whatever the
+    /// current module imports.
+    pub all_visible: bool,
+    /// `(module, interface, tested type, subject member, span)` of interface tests on subjects
+    /// that may hold any class, for [`Checker::check_iface_tests`].
+    pub pending_iface_tests: Vec<(ModId, IfaceId, TyId, TyId, Span)>,
 
     pub ctxs: Vec<FnCtx>,
     pub cur_module: ModId,
@@ -322,6 +335,10 @@ impl Checker {
             rt_types: Vec::new(),
             rt_type_map: FxHashMap::default(),
             rt_ifaces: Vec::new(),
+            rt_iface_sets: Vec::new(),
+            rt_conf_cache: FxHashMap::default(),
+            all_visible: false,
+            pending_iface_tests: Vec::new(),
             ctxs: Vec::new(),
             cur_module: 0,
             prelude_ifaces: Vec::new(),
@@ -447,16 +464,22 @@ impl Checker {
         if let Some(i) = self.ifaces[iid as usize].rt_index {
             return i;
         }
-        let names: Vec<String> = self.ifaces[iid as usize]
-            .methods
-            .iter()
-            .filter(|&&f| !self.fns[f as usize].is_default)
-            .map(|&f| self.fns[f as usize].name.clone())
-            .collect();
         let i = self.rt_ifaces.len() as u32;
-        self.rt_ifaces.push(names);
+        self.rt_ifaces.push(iid);
         self.ifaces[iid as usize].rt_index = Some(i);
         i
+    }
+
+    /// The run-time class sets of every interface test (`rt_iface_sets`), once every class is
+    /// known.
+    pub fn finish_rt_ifaces(&mut self) {
+        let ids = self.rt_class_ids();
+        let mut sets = Vec::with_capacity(self.rt_ifaces.len());
+        for i in self.rt_ifaces.clone() {
+            let set: Vec<u32> = ids.iter().copied().filter(|&c| self.rt_conforms(i, c).0).collect();
+            sets.push(set);
+        }
+        self.rt_iface_sets = sets;
     }
 
     /// Runtime descriptor for a static type (used by `is`, `as?` and type patterns).

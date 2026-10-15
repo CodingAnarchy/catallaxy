@@ -314,6 +314,7 @@ impl Checker {
             self.ensure_global(g as GlobalId);
         }
         self.check_local_keys();
+        self.check_iface_tests();
     }
 
     pub fn check_fn_body(&mut self, fid: FnId) {

@@ -1412,6 +1412,12 @@ when the value's static type already determines what is not checked (`x: Box[Int
 `Box[Int]`), but not when a value could pass the test without having the tested type. Lists, sets,
 dictionaries and tuples are checked element by element, so `is List[Int]` is allowed.
 
+An interface test checks that the value's class satisfies the interface. A generic class may satisfy it
+only for some type arguments (`class Box[T] { fn area(self) -> T }` is a `Shape` with
+`fn area(self) -> Float` only as a `Box[Float]`), so a test for that interface is an error on a
+`Box[Int]`, and on any value that may be of that class (a `Dyn`, an interface value, a type parameter):
+the note names the class.
+
 ```cx
 class Box[T] {
   v: T
@@ -1424,7 +1430,9 @@ fn h(b: Box[Int] | Box[String]) -> Int {
 
 Test for the class alone (`is Box`, `as? Box`, `b: Box =>`), which keeps the type arguments the static
 type implies (`Box[Int] | Box[String]` here, `Box[Dyn]` for a `Dyn` value), and check the contents; or
-give each case its own class or enum variant and test for that.
+give each case its own class or enum variant and test for that. For an interface test, test for the
+classes themselves, or change the generic class's method so it satisfies the interface for every type
+argument, or not at all.
 
 ## E0375
 
