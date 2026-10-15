@@ -290,7 +290,9 @@ Calls always use parentheses, except that a zero-argument method may be called a
 (`s.upcase`, `xs.length`); fields and zero-argument methods share one namespace. `obj.f(x)` calls the
 method `f`; to call a function stored in a field, wrap the callee in parentheses: `(obj.f)(x)`. Any
 parenthesized callee (`(xs[0])(x)`, `(make())(x)`) is evaluated first and then called. Closures capture
-variables by reference.
+variables by reference. A block passed for an optional function parameter
+(`f: (fn(T) -> Bool)? = nil`) is typed by that function type, so its parameters need no annotations;
+`xs.count` and `xs.each_slice(2)` take such optional blocks.
 
 The names in one parameter list, block parameter list, type parameter list or pattern must differ
 (E0228); only `_` may repeat.
