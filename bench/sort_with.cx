@@ -1,0 +1,15 @@
+# sort_with on 1M ints with a reversing comparator (#175), plus Enumerable sum, min_by and max_by.
+xs: List[Int] = []
+x = 12345
+for i in 0...1000000 {
+  x = (x * 1103515245 + 12345) % 2147483648
+  xs.push(x % 1000000)
+}
+sorted = xs.sort_with { |p, q| q <=> p }
+puts(sorted[0])
+puts(sorted[sorted.length - 1])
+total = 0
+for r in 0...10 { total += xs.sum() }
+puts(total)
+puts(xs.min_by { |v| v % 1000 })
+puts(xs.max_by { |v| v % 1000 })

@@ -405,7 +405,7 @@ pub enum RtType {
     Optional(Box<RtType>),
     Union(Vec<RtType>),
     Fn,
-    /// Structural interface (method names).
+    /// Interface: the value's class is one of those listed in `Program::ifaces`.
     Iface(u32),
 }
 
@@ -427,8 +427,9 @@ pub struct Program {
     pub natives: Vec<String>,
     pub globals: Vec<GlobalProto>,
     pub rt_types: Vec<RtType>,
-    /// Interfaces for runtime checks: required method names.
-    pub ifaces: Vec<Vec<String>>,
+    /// Interfaces for runtime checks: for each, the sorted ids of the classes whose methods
+    /// satisfy it (the checker decides, with the rules of a static conversion).
+    pub ifaces: Vec<Vec<u32>>,
     pub files: Vec<String>,
     /// Functions to run, in order, the last being the entry module's main body.
     pub entry: Vec<u32>,

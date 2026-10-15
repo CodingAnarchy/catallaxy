@@ -15,8 +15,8 @@ pub mod stats;
 
 pub use collector::{
     add_global_roots, collect_minor, collect_now, collect_to_free, enter_native, install, is_gc_requested,
-    leave_native, register_thread, request_gc, retire, safepoint, safepoint_slow, set_mark_stack_limit,
-    unregister_thread, NoGcGuard, RootSource, ThreadRecord, ThreadState, Tracer,
+    leave_native, register_thread, request_gc, retire, safepoint, safepoint_slow, set_fatal_handler,
+    set_mark_stack_limit, unregister_thread, FatalHandler, NoGcGuard, RootSource, ThreadRecord, ThreadState, Tracer,
 };
 pub use header::{GcVTable, Header, ObjLockGuard, ObjState, HEADER_SIZE};
 pub use heap::{set_generational, size_class_of, total_heap_bytes, Allocator, LocalHeap, MAX_SMALL, SIZE_CLASSES};

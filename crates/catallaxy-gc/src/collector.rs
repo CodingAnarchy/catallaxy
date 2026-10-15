@@ -268,7 +268,7 @@ pub fn safepoint_slow(rec: &ThreadRecord) {
     }
     let heap = unsafe { *rec.heap.get() };
     if !heap.is_null() && unsafe { (*heap).minor_wanted } {
-        minor_collect(rec);
+        fatal_on_panic(|| minor_collect(rec));
     }
 }
 
@@ -361,7 +361,7 @@ pub fn collect_minor(rec: &ThreadRecord) {
     if GC_DISABLED.load(Ordering::SeqCst) > 0 {
         return;
     }
-    minor_collect(rec);
+    fatal_on_panic(|| minor_collect(rec));
 }
 
 fn major_safepoint(rec: &ThreadRecord) {
@@ -372,7 +372,7 @@ fn major_safepoint(rec: &ThreadRecord) {
     if !coord.collecting {
         coord.collecting = true;
         drop(coord);
-        collect(rec);
+        fatal_on_panic(|| collect(rec));
         return;
     }
     // Someone else is collecting: park and help mark.
@@ -385,7 +385,7 @@ fn major_safepoint(rec: &ThreadRecord) {
             joined_mark = coord.mark_epoch;
             GLOBAL.mark.workers_in.fetch_add(1, Ordering::SeqCst);
             drop(coord);
-            mark_worker(None);
+            fatal_on_panic(|| mark_worker(None));
             GLOBAL.mark.workers_in.fetch_sub(1, Ordering::SeqCst);
             GLOBAL.cv.notify_all();
             coord = GLOBAL.coord.lock();
@@ -403,6 +403,46 @@ fn major_safepoint(rec: &ThreadRecord) {
     }
     // Still holding the coordination lock: no collection can start until we are running.
     rec.state.store(ThreadState::Running as u8, Ordering::SeqCst);
+}
+
+/// What ends the process after a Rust panic inside the collector (see [`set_fatal_handler`]).
+pub type FatalHandler = fn(&(dyn std::any::Any + Send)) -> !;
+
+static FATAL: std::sync::OnceLock<FatalHandler> = std::sync::OnceLock::new();
+
+/// Sets the function that ends the process when a Rust panic (an internal error) unwinds out of
+/// a collection: out of marking, sweeping or the remembered-set scan of a minor collection, on
+/// the collecting thread or on a thread helping it mark. The heap is in an unknown state by
+/// then and, for a major collection, every other thread is stopped waiting for the world to
+/// restart, so the program cannot go on; the handler reports the panic (its payload is the
+/// argument) and exits. The first handler set stays. Without one, the collector prints the
+/// message and aborts.
+pub fn set_fatal_handler(f: FatalHandler) {
+    let _ = FATAL.set(f);
+}
+
+/// Runs a part of a collection; a panic out of it ends the process (see [`set_fatal_handler`]).
+#[inline]
+fn fatal_on_panic<R>(f: impl FnOnce() -> R) -> R {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(r) => r,
+        Err(payload) => fatal(&*payload),
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn fatal(payload: &(dyn std::any::Any + Send)) -> ! {
+    if let Some(f) = FATAL.get() {
+        f(payload);
+    }
+    let msg = payload
+        .downcast_ref::<&'static str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "internal error".into());
+    eprintln!("fatal: internal error during a garbage collection: {msg}");
+    std::process::abort();
 }
 
 /// Marks the thread as running native code that does not touch the heap.
@@ -499,7 +539,7 @@ fn mark_helper_main() {
             joined = coord.mark_epoch;
             GLOBAL.mark.workers_in.fetch_add(1, Ordering::SeqCst);
             drop(coord);
-            mark_worker(None);
+            fatal_on_panic(|| mark_worker(None));
             GLOBAL.mark.workers_in.fetch_sub(1, Ordering::SeqCst);
             GLOBAL.cv.notify_all();
             coord = GLOBAL.coord.lock();
