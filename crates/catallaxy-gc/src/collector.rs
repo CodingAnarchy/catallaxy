@@ -646,15 +646,18 @@ fn collect(me: &ThreadRecord) {
     if sweep_all || refused {
         POOL.finish_sweeping();
     }
-    let out_of_memory = refused && !(POOL.refill_reserve() && crate::heap::restore_headroom());
+    let reserve_refilled = !refused || POOL.refill_reserve();
+    // Every page is swept now (step 2), so wholly empty segments are known; keep enough empty
+    // pages for the allocation budget until the next collection and return the rest. This comes
+    // before the headroom block is mapped again: under an address-space limit, the segments
+    // released here (a finished thread's heap, say) may be what makes room for it.
+    let released = POOL.release_empty_segments(stats::threshold() + crate::heap::nursery_reserve(threads.len()));
+    stats::note_released(released);
+    let out_of_memory = refused && !(reserve_refilled && crate::heap::restore_headroom());
     crate::limits::note_out_of_memory(out_of_memory);
     if out_of_memory {
         stats::collect_soon();
     }
-    // Every page is swept now (step 2), so wholly empty segments are known; keep enough empty
-    // pages for the allocation budget until the next collection and return the rest.
-    let released = POOL.release_empty_segments(stats::threshold() + crate::heap::nursery_reserve(threads.len()));
-    stats::note_released(released);
 
     // 5. Resume the world.
     for t in threads.iter() {
