@@ -683,7 +683,9 @@ pub fn member_completions(ck: &mut Checker, m: ModId, recv: TyId) -> Vec<Complet
     for x in &ck.exts {
         names.extend(x.methods.keys().cloned());
     }
-    let mut names: Vec<String> = names.into_iter().collect();
+    // Operators (`+`, `[]`, `<=>`) are methods too, but cannot follow a `.`.
+    let mut names: Vec<String> =
+        names.into_iter().filter(|n| n.starts_with(|c: char| c.is_alphabetic() || c == '_')).collect();
     names.sort();
     let saved_module = ck.cur_module;
     ck.cur_module = m;
