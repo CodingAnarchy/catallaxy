@@ -66,6 +66,7 @@ pub interface Enumerable[T] {
     self.each { |x| if let y = f(x) { out.push(y) } }
     out
   }
+  # Folds the elements left to right: `f(f(init, x0), x1)`...; `init` if there are none.
   fn reduce[U](self, init: U, f: fn(U, T) -> U) -> U {
     acc = init
     self.each { |x| acc = f(acc, x) }
@@ -94,10 +95,12 @@ pub interface Enumerable[T] {
     true
   }
   fn none(self, f: fn(T) -> Bool) -> Bool { not self.any(f) }
+  # The first element for which `f` is true, or nil.
   fn find(self, f: fn(T) -> Bool) -> T? {
     for x in self { if f(x) { return x } }
     nil
   }
+  # The position of the first element for which `f` is true, or nil.
   fn find_index(self, f: fn(T) -> Bool) -> Int? {
     i = 0
     for x in self {
@@ -162,6 +165,7 @@ pub interface Enumerable[T] {
     if let h = f { windows.each(h) }
     windows
   }
+  # The first `n` elements (all of them if there are fewer; none if `n <= 0`).
   fn take(self, n: Int) -> List[T] {
     out: List[T] = []
     if n <= 0 { return out }
@@ -179,6 +183,7 @@ pub interface Enumerable[T] {
     }
     out
   }
+  # The elements after the first `n` (all of them if `n <= 0`).
   fn drop(self, n: Int) -> List[T] {
     out: List[T] = []
     i = 0
@@ -200,6 +205,8 @@ pub interface Enumerable[T] {
     }
     out
   }
+  # The elements grouped by `f`'s result, keys in order of first occurrence and each group in
+  # element order.
   fn group_by[K](self, f: fn(T) -> K) -> Dict[K, List[T]] {
     out: Dict[K, List[T]] = [:]
     self.each { |x|
@@ -212,6 +219,7 @@ pub interface Enumerable[T] {
     }
     out
   }
+  # `(matching, rest)`: the elements for which `f` is true, and the others, each in order.
   fn partition(self, f: fn(T) -> Bool) -> (List[T], List[T]) {
     yes: List[T] = []
     no: List[T] = []
@@ -232,11 +240,14 @@ pub interface Enumerable[T] {
     }
     out
   }
+  # The elements sorted by the key `f` computes once per element. The sort is stable: elements
+  # with equal keys keep their order.
   fn sort_by[K: Comparable](self, f: fn(T) -> K) -> List[T] {
     items = self.to_list()
     keys = items.map(f)
     items.sort_by_keys(keys)
   }
+  # The first element with the smallest key, or nil if there are none.
   fn min_by[K: Comparable](self, f: fn(T) -> K) -> T? {
     best: T? = nil
     best_key: K? = nil
@@ -249,6 +260,7 @@ pub interface Enumerable[T] {
     }
     best
   }
+  # The first element with the largest key, or nil if there are none.
   fn max_by[K: Comparable](self, f: fn(T) -> K) -> T? {
     best: T? = nil
     best_key: K? = nil
@@ -290,6 +302,7 @@ pub interface Enumerable[T] {
     }
     sb.to_s
   }
+  # Pairs of elements of this sequence and `other`, as long as the shorter.
   fn zip[U](self, other: List[U]) -> List[(T, U)] {
     out: List[(T, U)] = []
     i = 0
@@ -300,6 +313,7 @@ pub interface Enumerable[T] {
     }
     out
   }
+  # The elements without repeats (keeping first occurrences), compared by `==` and `hash`.
   fn uniq(self) -> List[T] {
     seen: Set[T] = Set.new()
     out: List[T] = []
@@ -445,11 +459,13 @@ pub class Lazy[T] {
 }
 
 extend[T: Comparable] Enumerable[T] {
+  # The smallest element (the first of equals), or nil if there are none.
   fn min(self) -> T? {
     best: T? = nil
     self.each { |x| if best == nil or (x <=> best) < 0 { best = x } }
     best
   }
+  # The largest element (the first of equals), or nil if there are none.
   fn max(self) -> T? {
     best: T? = nil
     self.each { |x| if best == nil or (x <=> best) > 0 { best = x } }
@@ -460,6 +476,7 @@ extend[T: Comparable] Enumerable[T] {
 }
 
 extend Enumerable[Int] {
+  # The total, 0 if there are no elements. `Int`s never overflow (they grow as needed).
   fn sum(self) -> Int {
     # A list is summed natively; other sequences item by item.
     if let s = __list_sum(self, 0) as? Int { return s }
@@ -483,16 +500,37 @@ extend Enumerable[Float] {
 # ---------------------------------------------------------------------------------------------
 # Global functions
 
+# Writes `value.to_s` and a newline to standard output (`puts(nil)` writes `nil`). Output is
+# buffered, and flushed at each newline when stdout is a terminal, before reading input, before
+# writing to stderr and at exit.
 pub native fn puts(value: Dyn = "")
+# As `puts`, without the newline.
 pub native fn print(value: Dyn)
+# Writes `value.to_s` and a newline to standard error, unbuffered, after flushing stdout.
 pub native fn eputs(value: Dyn = "")
+# Ends the current thread or fiber with `message`; the program exits with an error if it is the
+# main one, else `join` returns `Err(message)`.
 pub native fn panic(message: String) -> Never
+# Panics with `message` unless `condition` is true.
 pub native fn assert(condition: Bool, message: String = "assertion failed")
+# Panics unless `actual == expected` (structural equality), with
+# `assertion failed: <message>: expected <expected>, got <actual>`.
 pub native fn assert_eq(actual: Dyn, expected: Dyn, message: String = "")
+# The value as source-like text: strings quoted and escaped, `nil` as `nil`, collections with
+# their items inspected (`["a", 1]`).
 pub native fn inspect(value: Dyn) -> String
+# -1, 0 or 1 by the natural order of two values (an `Int` and a `Float` compare numerically).
+# Panics with an `ArgumentError` if they are not comparable (different types, `nil`, NaN).
 pub native fn compare_values(a: Dyn, b: Dyn) -> Int
+# The next line of standard input without its `\n` or `\r\n`, or nil at end of input. Flushes
+# stdout first, so a prompt written with `print` shows.
 pub native fn read_line() -> String?
+# The command-line arguments after the script path.
 pub native fn args() -> List[String]
+# Ends the whole program with exit status `code`, from any thread; buffered output is flushed.
 pub native fn exit(code: Int = 0) -> Never
+# Pauses the calling fiber or thread for `seconds` (fractions allowed; negative or NaN is 0).
+# Other fibers on the thread run meanwhile.
 pub native fn sleep(seconds: Float)
+# Runs a garbage collection now.
 pub native fn gc()
