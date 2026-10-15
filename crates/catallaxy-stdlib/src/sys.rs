@@ -639,6 +639,7 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
         ObjKind::Str => Ok(Jv::string(s(v)?)),
         ObjKind::List | ObjKind::Tuple => {
             let items: Vec<Value> = if kind_of(v) == ObjKind::Tuple {
+                // SAFETY: checked to be a tuple just above.
                 unsafe { as_tuple(v) }.elems().to_vec()
             } else {
                 list_read(vm, v)?.try_to_vec()?
@@ -670,6 +671,7 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
                 return j;
             }
             if cls.kind == ObjKind::Instance && cls.variant_tag.is_none() {
+                // SAFETY: checked to be an instance just above.
                 let o = unsafe { as_instance(v) };
                 let mut map = std::collections::BTreeMap::new();
                 for i in 0..cls.nfields() {

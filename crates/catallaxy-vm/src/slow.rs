@@ -68,11 +68,10 @@ pub fn cmp_int_imm(op: Op, x: Value, k: i64) -> RtResult<std::cmp::Ordering> {
 #[cold]
 #[inline(never)]
 pub fn get_field(vm: &mut Vm, o: Value, i: usize) -> RtResult<Value> {
-    if !o.is_ptr() {
+    let Some(inst) = instance_with_field(o, i) else {
         return Err(field_on_non_object(o));
-    }
-    let h = unsafe { &*o.as_ptr() };
-    let inst = unsafe { as_instance(o) };
+    };
+    let h = &inst.header;
     Ok(if h.is_local_or_frozen(vm.tid()) {
         inst.get(i)
     } else {
@@ -100,9 +99,26 @@ pub fn f(v: Value) -> RtResult<f64> {
     }
 }
 
+/// The error for a value of the wrong kind reaching an instruction (`want` names the type).
 #[cold]
+#[inline(never)]
+pub fn wrong_type(want: &str, v: Value) -> Trap {
+    Trap::Panic(format!("TypeError: expected {want}, got {}", class_of(v).name))
+}
+
+/// The error for a virtual call on a value whose class has no such method slot.
+#[cold]
+#[inline(never)]
+pub fn virtual_on_wrong_type(v: Value) -> Trap {
+    Trap::Panic(format!("TypeError: method call on a value of type {}", class_of(v).name))
+}
+
+/// The error for a field access on a value without that field (a value of the wrong type, which
+/// only `Dyn` or a hole in the checker lets through).
+#[cold]
+#[inline(never)]
 pub fn field_on_non_object(v: Value) -> Trap {
-    Trap::Panic(format!("internal error: field access on {}", class_of(v).name))
+    Trap::Panic(format!("TypeError: field access on a value of type {}", class_of(v).name))
 }
 
 fn type_name(v: Value) -> String {
@@ -127,10 +143,14 @@ fn norm_index(i: Value, len: usize) -> RtResult<usize> {
     Ok(idx as usize)
 }
 
+/// `ListLen` off its fast path: shared lists, foreign owners and values of other kinds.
+#[cold]
+#[inline(never)]
+pub fn list_len(vm: &mut Vm, l: Value) -> RtResult<usize> {
+    Ok(ownership::read_list(&vm.m, l)?.len())
+}
+
 pub fn list_get(vm: &mut Vm, l: Value, i: Value) -> RtResult<Value> {
-    if kind_of(l) != ObjKind::List {
-        return panic(format!("TypeError: expected List, got {}", type_name(l)));
-    }
     let list = ownership::read_list(&vm.m, l)?;
     let ix = norm_index(i, list.len())?;
     // A racing shrink can leave the index out of bounds after the check.
@@ -138,10 +158,7 @@ pub fn list_get(vm: &mut Vm, l: Value, i: Value) -> RtResult<Value> {
 }
 
 pub fn list_set(vm: &mut Vm, l: Value, i: Value, v: Value) -> RtResult<()> {
-    if kind_of(l) != ObjKind::List {
-        return panic(format!("TypeError: expected List, got {}", type_name(l)));
-    }
-    let h = unsafe { &*l.as_ptr() };
+    let h = &list_of(l)?.header;
     if ownership::check_write(&vm.m, h)? == Access::Shared {
         ownership::publish_into_shared(&vm.m, v)?;
     }
@@ -153,7 +170,7 @@ pub fn list_set(vm: &mut Vm, l: Value, i: Value, v: Value) -> RtResult<()> {
 }
 
 pub fn list_push(vm: &mut Vm, l: Value, v: Value) -> RtResult<()> {
-    let h = unsafe { &*l.as_ptr() };
+    let h = &list_of(l)?.header;
     if ownership::check_write(&vm.m, h)? == Access::Shared {
         ownership::publish_into_shared(&vm.m, v)?;
     }
@@ -191,6 +208,7 @@ pub fn dyn_member(vm: &mut Vm, recv: Value, n: &str) -> RtResult<Value> {
     let cls = class_of(recv);
     if cls.kind == ObjKind::Instance {
         if let Some(i) = cls.field_index(sym) {
+            // SAFETY: the class is an instance class with field `i`.
             return Ok(unsafe { as_instance(recv) }.get(i));
         }
     }
@@ -205,7 +223,8 @@ pub fn dyn_member(vm: &mut Vm, recv: Value, n: &str) -> RtResult<Value> {
 
 pub fn dict_get(vm: &mut Vm, d: Value, k: Value) -> RtResult<Option<Value>> {
     match ops::dict_lookup(vm, d, k)? {
-        Some(idx) => Ok(Some(ownership::read_dict(&vm.m, d, |t| t.entry(idx).value)?)),
+        // SAFETY: the lookup found the key, so `d` is a dict.
+        Some(idx) => Ok(Some(unsafe { ownership::read_dict_unchecked(&vm.m, d, |t| t.entry(idx).value) }?)),
         None => Ok(None),
     }
 }
@@ -222,7 +241,7 @@ pub fn dict_set_unrooted(vm: &mut Vm, d: Value, k: Value, v: Value) -> RtResult<
 }
 
 fn dict_set_with(vm: &mut Vm, d: Value, k: Value, v: Value, may_collect: bool) -> RtResult<()> {
-    let h = unsafe { &*d.as_ptr() };
+    let h = &dict_of(d)?.header;
     if ownership::check_write(&vm.m, h)? == Access::Shared {
         ownership::publish_into_shared(&vm.m, k)?;
         ownership::publish_into_shared(&vm.m, v)?;
@@ -232,9 +251,10 @@ fn dict_set_with(vm: &mut Vm, d: Value, k: Value, v: Value, may_collect: bool) -
     loop {
         // A lookup may run user `==`, which can mutate the table; act only if the version
         // is unchanged since before it.
-        let version = ownership::read_dict(&vm.m, d, |t| t.version())?;
-        let found = ops::dict_lookup_hashed(vm, d, k, hash)?;
-        let done = ownership::write_dict(&vm.m, d, |t, access| -> Result<bool, std::alloc::Layout> {
+        // SAFETY (the unchecked calls): `d` was checked to be a dict or set above.
+        let version = unsafe { ownership::read_dict_unchecked(&vm.m, d, |t| t.version()) }?;
+        let found = unsafe { ops::dict_lookup_hashed_unchecked(vm, d, k, hash) }?;
+        let update = |t: &catallaxy_runtime::dict::DictTable, access| -> Result<bool, std::alloc::Layout> {
             if t.version() != version {
                 return Ok(false);
             }
@@ -245,7 +265,8 @@ fn dict_set_with(vm: &mut Vm, d: Value, k: Value, v: Value, may_collect: bool) -
                 }
             }
             Ok(true)
-        })?;
+        };
+        let done = unsafe { ownership::write_dict_unchecked(&vm.m, d, update) }?;
         match done {
             Ok(true) => return Ok(()),
             Ok(false) => {}
@@ -278,7 +299,7 @@ fn char_at(s: &StrObj, i: Value) -> RtResult<Option<&str>> {
 
 /// The [start, end) bounds selected by a range over a sequence of `len` items, clamped.
 fn range_bounds(r: Value, len: usize) -> RtResult<(usize, usize)> {
-    let inst = unsafe { as_instance(r) };
+    let inst = instance_of(r, ids::RANGE, "Range")?;
     let (first, last, excl) = (inst.get(0), inst.get(1), inst.get(2).is_true());
     let (Some(a), Some(b)) = (ops::int_as_i64(first), ops::int_as_i64(last)) else {
         return panic("RangeError: range bounds too large");
@@ -306,6 +327,7 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
                 return vm.m.try_alloc_list_from_slice(&items[a..b], b - a);
             }
             ObjKind::Str => {
+                // SAFETY: matched on the kind.
                 let s = unsafe { as_str_obj(x) };
                 let (a, b) = range_bounds(i, s.char_count())?;
                 return vm.m.try_alloc_str(s.char_slice(a, b));
@@ -317,6 +339,7 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
         ObjKind::List => list_get(vm, x, i),
         ObjKind::Dict => Ok(dict_get(vm, x, i)?.unwrap_or(Value::NIL)),
         ObjKind::Str => {
+            // SAFETY: matched on the kind.
             let s = unsafe { as_str_obj(x) };
             match char_at(s, i)? {
                 Some(c) => Ok(vm.m.alloc_str(c)),
@@ -324,6 +347,7 @@ pub fn index_get(vm: &mut Vm, x: Value, i: Value) -> RtResult<Value> {
             }
         }
         ObjKind::Tuple => {
+            // SAFETY: matched on the kind.
             let t = unsafe { as_tuple(x) };
             let ix = norm_index(i, t.len)?;
             Ok(t.elems()[ix])
@@ -404,6 +428,7 @@ pub fn generic_arith(vm: &mut Vm, op: Op, x: Value, y: Value) -> RtResult<Value>
     }
     if op == Op::Add {
         if str_of(x).is_some() && str_of(y).is_some() {
+            // SAFETY: both were checked to be strings just above.
             let parts = unsafe { [as_str_obj(x), as_str_obj(y)] };
             return vm.m.try_alloc_concat(2, |i| parts[i]);
         }
@@ -496,6 +521,7 @@ fn conforms_ty(vm: &mut Vm, v: Value, t: &RtType) -> RtResult<bool> {
             if kind_of(v) != ObjKind::Tuple {
                 return Ok(false);
             }
+            // SAFETY: checked to be a tuple just above.
             let elems = unsafe { as_tuple(v) }.elems().to_vec();
             if elems.len() != ts.len() {
                 return Ok(false);
@@ -551,6 +577,7 @@ pub fn make_result(vm: &mut Vm, ok: bool, v: Value) -> Value {
     let (okc, errc) = program::result_classes();
     let cls = catallaxy_runtime::class::class_by_id(if ok { okc } else { errc });
     let r = vm.m.alloc_instance(cls);
+    // SAFETY: `r` was just allocated as an instance of a one-field variant class.
     unsafe { as_instance(r) }.set(0, v);
     r
 }

@@ -39,7 +39,7 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         },
         "Thread.join" => join,
         "Thread.is_done" => |_, a| {
-            let inner = unsafe { as_thread(a[0]) }.inner.clone();
+            let inner = thread_of(a[0])?.inner.clone();
             let done = !matches!(*inner.outcome.lock(), ThreadOutcome::Running);
             Ok(Value::bool(done))
         },
@@ -54,17 +54,15 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         "Channel.recv" => |vm, a| chan_recv(vm, a[0], true),
         "Channel.try_recv" => |vm, a| chan_recv(vm, a[0], false),
         "Channel.close" => |_, a| {
-            let inner = &unsafe { as_channel(a[0]) }.inner;
+            let inner = &channel_of(a[0])?.inner;
             inner.queue.lock().closed = true;
             inner.not_empty.notify_all();
             inner.not_full.notify_all();
             inner.wake_fibers();
             Ok(Value::NIL)
         },
-        "Channel.is_closed" => |_, a| Ok(Value::bool(unsafe { as_channel(a[0]) }.inner.queue.lock().closed)),
-        "Channel.length" => {
-            |_, a| Ok(Value::small_int(unsafe { as_channel(a[0]) }.inner.queue.lock().items.len() as i64))
-        }
+        "Channel.is_closed" => |_, a| Ok(Value::bool(channel_of(a[0])?.inner.queue.lock().closed)),
+        "Channel.length" => |_, a| Ok(Value::small_int(channel_of(a[0])?.inner.queue.lock().items.len() as i64)),
 
         "Mutex.new" => |vm, a| {
             ownership::share_deep(&vm.m, a[0], false)?;
@@ -86,15 +84,17 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             ownership::publish_into_shared(&vm.m, a[0])?;
             Ok(vm.m.alloc_atomic(a[0]))
         },
-        "Atomic.get" => |_, a| Ok(Value(unsafe { as_atomic(a[0]) }.value.load(Ordering::Acquire))),
+        "Atomic.get" => |_, a| Ok(Value(atomic_of(a[0])?.value.load(Ordering::Acquire))),
         "Atomic.set" => |vm, a| {
+            let at = atomic_of(a[0])?;
             ownership::publish_into_shared(&vm.m, a[1])?;
-            unsafe { as_atomic(a[0]) }.value.store(a[1].0, Ordering::Release);
+            at.value.store(a[1].0, Ordering::Release);
             Ok(Value::NIL)
         },
         "Atomic.swap" => |vm, a| {
+            let at = atomic_of(a[0])?;
             ownership::publish_into_shared(&vm.m, a[1])?;
-            Ok(Value(unsafe { as_atomic(a[0]) }.value.swap(a[1].0, Ordering::AcqRel)))
+            Ok(Value(at.value.swap(a[1].0, Ordering::AcqRel)))
         },
         "Atomic.compare_and_set" => atomic_cas,
         "Atomic.add" => atomic_add,
@@ -137,6 +137,7 @@ fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     ownership::transfer_deep(closure, vm.tid(), tid);
     child.extra_roots().push(closure);
     let t = vm.m.alloc_thread();
+    // SAFETY: `t` was just allocated as a thread.
     let inner = unsafe { as_thread(t) }.inner.clone();
     inner.tid.store(tid as u64, Ordering::Relaxed);
     let inner2 = inner.clone();
@@ -212,7 +213,7 @@ fn spawn(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn join(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    let inner = unsafe { as_thread(a[0]) }.inner.clone();
+    let inner = thread_of(a[0])?.inner.clone();
     let handle = crate::fiber::blocking_io(vm, || {
         let mut o = inner.outcome.lock();
         while matches!(*o, ThreadOutcome::Running) {
@@ -242,7 +243,7 @@ fn join(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 
 fn chan_send(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let (ch, item) = (a[0], a[1]);
-    let inner = &unsafe { as_channel(ch) }.inner;
+    let inner = &channel_of(ch)?.inner;
     // Owned values travel without an owner until received.
     let owned = item.header().is_some_and(|h| h.state() == ObjState::Owned);
     if owned {
@@ -295,7 +296,7 @@ fn chan_send(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn chan_recv(vm: &mut Vm, ch: Value, wait: bool) -> RtResult<Value> {
-    let inner = &unsafe { as_channel(ch) }.inner;
+    let inner = &channel_of(ch)?.inner;
     loop {
         {
             let mut q = inner.queue.lock();
@@ -333,7 +334,7 @@ fn chan_recv(vm: &mut Vm, ch: Value, wait: bool) -> RtResult<Value> {
 // ---- mutexes ---------------------------------------------------------------------------------
 
 fn with_mutex(vm: &mut Vm, m: Value, f: impl FnOnce(&mut Vm, &MutexObj) -> RtResult<Value>) -> RtResult<Value> {
-    let mo: &MutexObj = unsafe { as_mutex(m) };
+    let mo: &MutexObj = mutex_of(m)?;
     let guard = match mo.raw.try_lock() {
         Some(g) => g,
         None => {
@@ -376,7 +377,7 @@ fn mutex_update(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 // ---- atomics ---------------------------------------------------------------------------------
 
 fn atomic_cas(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    let at = &unsafe { as_atomic(a[0]) }.value;
+    let at = &atomic_of(a[0])?.value;
     ownership::publish_into_shared(&vm.m, a[2])?;
     loop {
         let cur = Value(at.load(Ordering::Acquire));
@@ -390,7 +391,7 @@ fn atomic_cas(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 }
 
 fn atomic_add(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
-    let at = &unsafe { as_atomic(a[0]) }.value;
+    let at = &atomic_of(a[0])?.value;
     let delta = a[1];
     if !ops::is_int(delta) {
         return panic("TypeError: Atomic#add needs an Int");
@@ -409,7 +410,9 @@ fn atomic_add(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
 
 fn atomic_update(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let (atom, f) = (a[0], a[1]);
+    atomic_of(atom)?;
     loop {
+        // SAFETY (both views): `atom` was checked to be an Atomic above.
         let at = &unsafe { as_atomic(atom) }.value;
         let cur = Value(at.load(Ordering::Acquire));
         // Keep `cur` alive while user code runs (another thread may replace it).

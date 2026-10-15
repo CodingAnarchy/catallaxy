@@ -18,7 +18,7 @@ use crate::class::{heap_class, ids, Class, ObjKind};
 use crate::dict::Probe;
 use crate::mutator::{panic, Mutator, RtResult, Trap};
 use crate::object::*;
-use crate::ownership::{read_dict, read_list, with_read};
+use crate::ownership::{read_dict_unchecked, read_list, with_read};
 use crate::symbol::{intern, Sym};
 use crate::value::{fits_small, Value};
 
@@ -432,13 +432,14 @@ fn write_value(ix: &mut dyn Interop, v: Value, out: &mut String, quoted: bool, d
             }
             out.push(')');
         }
+        // SAFETY (the unchecked reads): matched on the kind.
         ObjKind::Dict | ObjKind::Set => {
             let is_set = cls.kind == ObjKind::Set;
             out.push_str(if is_set { "Set[" } else { "[" });
-            let n = read_dict(m, v, |t| t.raw_len())?;
+            let n = unsafe { read_dict_unchecked(m, v, |t| t.raw_len()) }?;
             let mut first = true;
             for i in 0..n {
-                let e = read_dict(m, v, |t| t.raw_entry(i))?;
+                let e = unsafe { read_dict_unchecked(m, v, |t| t.raw_entry(i)) }?;
                 let Some(e) = e else { continue };
                 if !first {
                     out.push_str(", ");
@@ -570,20 +571,21 @@ pub fn values_eq(ix: &mut dyn Interop, a: Value, b: Value) -> RtResult<bool> {
                 i += 1;
             }
         }
+        // SAFETY (the unchecked reads): matched on the kind, which `b` shares.
         ObjKind::Dict | ObjKind::Set => {
-            let len = |v: Value| read_dict(m, v, |t| t.len());
+            let len = |v: Value| unsafe { read_dict_unchecked(m, v, |t| t.len()) };
             if len(a)? != len(b)? {
                 return Ok(false);
             }
-            let n = read_dict(m, a, |t| t.raw_len())?;
+            let n = unsafe { read_dict_unchecked(m, a, |t| t.raw_len()) }?;
             for i in 0..n {
-                let e = read_dict(m, a, |t| t.raw_entry(i))?;
+                let e = unsafe { read_dict_unchecked(m, a, |t| t.raw_entry(i)) }?;
                 let Some(e) = e else { continue };
                 match dict_lookup(ix, b, e.key)? {
                     None => return Ok(false),
                     Some(idx) => {
                         if ca.kind == ObjKind::Dict {
-                            let bv = read_dict(m, b, |t| t.entry(idx).value)?;
+                            let bv = unsafe { read_dict_unchecked(m, b, |t| t.entry(idx).value) }?;
                             if !values_eq(ix, e.value, bv)? {
                                 return Ok(false);
                             }
@@ -652,11 +654,12 @@ pub fn hash_value(ix: &mut dyn Interop, v: Value) -> RtResult<u64> {
             }
             Ok(acc)
         }
+        // SAFETY (the unchecked reads): matched on the kind.
         ObjKind::Dict | ObjKind::Set => {
             let mut acc = 0x6469_6374_u64;
-            let n = read_dict(m, v, |t| t.raw_len())?;
+            let n = unsafe { read_dict_unchecked(m, v, |t| t.raw_len()) }?;
             for i in 0..n {
-                let e = read_dict(m, v, |t| t.raw_entry(i))?;
+                let e = unsafe { read_dict_unchecked(m, v, |t| t.raw_entry(i)) }?;
                 if let Some(e) = e {
                     let hv = if cls.kind == ObjKind::Dict { hash_value(ix, e.value)? } else { 0 };
                     acc ^= mix(e.hash ^ hv.rotate_left(17));
@@ -690,23 +693,40 @@ pub fn dict_lookup(ix: &mut dyn Interop, dict: Value, key: Value) -> RtResult<Op
     dict_lookup_hashed(ix, dict, key, hash)
 }
 
+/// Raises a `TypeError` if `dict` is not a dict or set.
 pub fn dict_lookup_hashed(ix: &mut dyn Interop, dict: Value, key: Value, hash: u64) -> RtResult<Option<usize>> {
+    dict_of(dict)?;
+    // SAFETY: checked just above.
+    unsafe { dict_lookup_hashed_unchecked(ix, dict, key, hash) }
+}
+
+/// [`dict_lookup_hashed`] without the kind check.
+///
+/// # Safety
+/// `dict` must be a dict or set, checked by the caller (static types are not enough).
+pub unsafe fn dict_lookup_hashed_unchecked(
+    ix: &mut dyn Interop,
+    dict: Value,
+    key: Value,
+    hash: u64,
+) -> RtResult<Option<usize>> {
     let m = unsafe { &*(ix.mutator() as *mut Mutator) };
+    // SAFETY (the reads below): the caller checked that `dict` is a dict or set.
     loop {
-        let (probe, version) = read_dict(m, dict, |t| (t.probe(hash, key), t.version()))?;
+        let (probe, version) = unsafe { read_dict_unchecked(m, dict, |t| (t.probe(hash, key), t.version())) }?;
         match probe {
             Probe::Found(i) => return Ok(Some(i)),
             Probe::Absent => return Ok(None),
             Probe::Check(cands) => {
                 let mut found = None;
                 for idx in cands {
-                    let k = read_dict(m, dict, |t| t.entry(idx).key)?;
+                    let k = unsafe { read_dict_unchecked(m, dict, |t| t.entry(idx).key) }?;
                     if values_eq(ix, k, key)? {
                         found = Some(idx);
                         break;
                     }
                 }
-                let still = read_dict(m, dict, |t| t.version())?;
+                let still = unsafe { read_dict_unchecked(m, dict, |t| t.version()) }?;
                 if still == version {
                     return Ok(found);
                 }

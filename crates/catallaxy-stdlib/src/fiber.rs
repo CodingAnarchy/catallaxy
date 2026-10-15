@@ -283,10 +283,19 @@ thread_local! {
 const ID_FIELD: usize = 0;
 const RESULT_FIELD: usize = 1;
 
+/// Checks that `handle` is an instance of the prelude's `Fiber` (a `TypeError` panic if not), so
+/// its fields may be addressed by position.
+fn check_handle(handle: Value) -> RtResult<()> {
+    let id = catallaxy_vm::program::class_named("Fiber").unwrap_or(u32::MAX);
+    catallaxy_runtime::object::instance_of(handle, id, "Fiber").map(|_| ())
+}
+
 /// Starts a fiber running `closure` on this thread, recording its id in `handle` (a `Fiber`).
 /// It first runs when this thread's main context waits (or when another fiber parks).
 pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
+    check_handle(handle)?;
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    // SAFETY (here and below): `handle` was checked to be a `Fiber` instance above.
     let h = unsafe { &*handle.as_ptr() };
     catallaxy_runtime::ownership::check_write(&vm.m, h)?;
     unsafe { catallaxy_runtime::object::as_instance(handle) }.set(ID_FIELD, Value::small_int(id as i64));
@@ -602,6 +611,8 @@ pub fn yield_now(vm: &mut Vm) {
 /// Waits for the fiber behind `handle` (of this thread) and returns its result, or the panic
 /// message.
 pub fn join(vm: &mut Vm, handle: Value) -> RtResult<Result<Value, String>> {
+    check_handle(handle)?;
+    // SAFETY (here and below): `handle` was checked to be a `Fiber` instance above.
     let id = unsafe { catallaxy_runtime::object::as_instance(handle) }.get(ID_FIELD).as_small_int() as u64;
     let Some(ctl) = with_sched(|s| s.ctl.get(&id).cloned()) else {
         return Err(Trap::Panic(
