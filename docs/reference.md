@@ -604,7 +604,22 @@ object panics with `OwnershipError`; under `catx run --promote-on-access` the ob
 shared instead and a warning is logged. Single operations on shared objects are atomic; compound ones
 (`d[k] += 1`) need `Mutex`, `Atomic` or `with lock`.
 
-### 8.1 Atomics and channels
+### 8.1 Mutexes, atomics and channels
+
+A `Mutex[T]` protects an owned value only inside `lock`. The checker keeps the value from escaping
+to code that does not hold the lock:
+
+- `m.get` and `m.update { ... }` need a frozen or shareable `T` (E0616). For an owned `T`, work on
+  the value inside `m.lock { |v| ... }` and replace it with `m.set(move v)`.
+- A `lock` block may not return the protected value, an owned object inside it, or a shallow copy
+  that shares one, and may not store one in a variable from outside the block (E0617). It may
+  return frozen and shareable values, and fresh values whose owned contents are not taken from
+  the protected value: `m.lock { |l| l.length }`, `m.lock { |l| l.dup }` for a list of numbers,
+  `m.lock { |rows| rows.map { |r| r.dup } }`. The check follows the types a value can hold: a
+  result computed from the block's parameter is rejected when an owned type occurs both in it and
+  in `T`. `Dyn` values are not checked.
+- `Atomic.new` needs a frozen or shareable value (E0618), since `get` hands the value to every
+  thread.
 
 `Atomic.add(n)` returns the new value. `Channel.recv()` blocks until a value arrives and returns
 `nil` once the channel is closed and drained; `for x in ch` iterates until then.

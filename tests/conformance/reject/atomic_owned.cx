@@ -1,0 +1,5 @@
+# expect: E0618
+# An `Atomic` hands its list to every thread that calls `get`.
+a = Atomic.new(["n": 0])
+ts = (1..8).to_list().map { |_i| spawn { d = a.get; 1000.times { d["n"] = d["n"]! + 1 }; nil } }
+ts.each { |t| t.join() }

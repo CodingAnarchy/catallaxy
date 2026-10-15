@@ -11,6 +11,7 @@ pub mod env;
 pub mod expr;
 pub mod lookup;
 pub mod pat;
+pub mod protect;
 pub mod rel;
 
 use rustc_hash::{FxHashMap, FxHashSet};

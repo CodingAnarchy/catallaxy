@@ -1,0 +1,5 @@
+# expect: E0617
+# A `lock` block that returns its argument lets the protected list escape.
+m = Mutex.new(move [1, 2])
+leaked = m.lock { |l| l }
+leaked.push(3)

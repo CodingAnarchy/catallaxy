@@ -1,0 +1,5 @@
+# expect: E0617
+# A shallow copy still shares the protected inner lists.
+m = Mutex.new(move [[1, 2], [3]])
+copy = m.lock { |rows| rows.dup }
+copy[0].push(4)

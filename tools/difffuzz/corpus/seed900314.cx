@@ -100,7 +100,7 @@ ts84 = (1..2).map { |p85|
 }
 for t in ts84 { t.join() }
 puts(atom82.get())
-puts(mtx83.get())
+puts(mtx83.lock { |l| l.dup })
 gch87: Channel[Dict[String, List[Int]]] = Channel.new(0)
 t86 = (0...1).map { |w| spawn {
   rows: List[List[Int]] = []
