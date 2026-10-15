@@ -117,6 +117,20 @@ impl Page {
         (head, free)
     }
 
+    /// Calls `f` with every allocated object in the page.
+    ///
+    /// # Safety
+    /// No thread may allocate from or sweep the page meanwhile.
+    unsafe fn for_each_object(&self, f: &mut impl FnMut(*const Header)) {
+        let size = self.slot_size();
+        for i in 0..self.n_slots() {
+            let h = self.base.add(i * size) as *const Header;
+            if !(*h).is_free() {
+                f(h);
+            }
+        }
+    }
+
     /// Minor sweep: frees `tid`'s young objects that are not minor-marked and tenures the
     /// marked ones; old objects are left alone. Returns the head of a list of every free slot
     /// (only newly freed ones if `only_new`), the number of free slots, and the bytes freed and
@@ -682,6 +696,23 @@ impl PagePool {
         doomed.len() * SEGMENT_SIZE
     }
 
+    /// Calls `f` with every object in the heap: in pages that hold objects and large ones.
+    /// Called by the collector with the world stopped, every thread's pages released and every
+    /// page swept (so all of them are on the full lists).
+    ///
+    /// # Safety
+    /// The world must be stopped.
+    pub(crate) unsafe fn for_each_object(&self, mut f: impl FnMut(*const Header)) {
+        for c in 0..NUM_CLASSES {
+            for p in self.full[c].lock().iter() {
+                p.for_each_object(&mut f);
+            }
+        }
+        for obj in self.large.lock().iter() {
+            f(obj.ptr as *const Header);
+        }
+    }
+
     /// Frees unmarked large objects. World stopped.
     pub(crate) fn sweep_large(&self, live_color: u8) {
         let mut large = self.large.lock();
@@ -1031,6 +1062,32 @@ impl LocalHeap {
         }
         self.note_young(layout.size());
         h
+    }
+
+    /// Calls `f` with each of this thread's young objects that is minor-marked (a minor
+    /// collection's rescan after its mark stack overflowed).
+    ///
+    /// # Safety
+    /// Called by the owning thread during a minor collection.
+    pub(crate) unsafe fn for_each_minor_marked(&self, mut f: impl FnMut(*const Header)) {
+        let tid = self.owner;
+        let mut visit = |h: *const Header| {
+            let m = (*h).meta_relaxed();
+            if m & YOUNG_BIT != 0 && m & MINOR_MARK_BIT != 0 && Header::owner_of(m) == tid {
+                f(h);
+            }
+        };
+        for p in &self.young_pages {
+            p.for_each_object(&mut visit);
+        }
+        for &p in &self.current {
+            if !p.is_null() {
+                (*p).for_each_object(&mut visit);
+            }
+        }
+        for obj in &self.young_large {
+            visit(obj.ptr as *const Header);
+        }
     }
 
     /// Addresses of the young large objects that are minor-marked, sorted. Called after a minor

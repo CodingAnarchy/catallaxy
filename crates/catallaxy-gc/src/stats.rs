@@ -31,6 +31,17 @@ static MINOR_MAX_NS: AtomicUsize = AtomicUsize::new(0);
 static PROMOTED: AtomicUsize = AtomicUsize::new(0);
 static MINOR_FREED: AtomicUsize = AtomicUsize::new(0);
 static PAUSE_MAX_NS: AtomicUsize = AtomicUsize::new(0);
+static MARK_RESCANS: AtomicUsize = AtomicUsize::new(0);
+
+/// Records `passes` rescans of a collection whose mark stack could not grow.
+pub(crate) fn note_mark_overflow(passes: usize) {
+    MARK_RESCANS.fetch_add(passes, Ordering::Relaxed);
+}
+
+/// Rescan passes, in all collections so far, after a mark stack could not grow (issue #139).
+pub fn mark_rescans() -> usize {
+    MARK_RESCANS.load(Ordering::Relaxed)
+}
 
 pub const MIN_THRESHOLD: usize = 8 * 1024 * 1024;
 

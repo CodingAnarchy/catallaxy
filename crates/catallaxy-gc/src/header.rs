@@ -46,6 +46,9 @@ pub struct GcVTable {
     /// Large containers use it to scan only the slots they recorded as written. `None` means
     /// `trace`.
     pub trace_remembered: Option<unsafe fn(obj: *const Header, tracer: &mut Tracer)>,
+    /// The object never holds heap references (`trace` does nothing): marking sets its mark
+    /// without queueing it for tracing.
+    pub leaf: bool,
 }
 
 #[repr(C)]

@@ -1,0 +1,26 @@
+# JSON: stringify and parse 200k records (about 16 MB of text), then three more round trips
+# (#177). Compare with bench/json_rt.py; `/usr/bin/time -l` (macOS) or `-v` (Linux) shows peak RSS.
+records: List[Dyn] = []
+for i in 0...200000 {
+  tags: List[Dyn] = ["t#{i % 7}", "group-#{i % 13}"]
+  r: Dict[String, Dyn] = [
+    "id": i,
+    "name": "record number #{i}",
+    "score": i * 0.25,
+    "active": i % 2 == 0,
+    "tags": tags,
+    "note": "line\nbreak \"quoted\" é",
+    "big": 12345678901234567890123 + i,
+  ]
+  records.push(r)
+}
+t = Time.monotonic()
+text = Json.stringify(records)
+t1 = Time.monotonic()
+doc = Json.parse(text).unwrap()
+t2 = Time.monotonic()
+for round in 0...3 { doc = Json.parse(Json.stringify(doc)).unwrap() }
+t3 = Time.monotonic()
+eputs("stringify #{((t1 - t) * 1000).round} ms, parse #{((t2 - t1) * 1000).round} ms, 3 round trips #{((t3 - t2) * 1000).round} ms")
+puts(text.length)
+puts(Json.stringify(doc).length == text.length)

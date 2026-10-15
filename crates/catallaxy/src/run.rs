@@ -70,6 +70,7 @@ pub fn cmd_run(args: &[String]) -> i32 {
         catallaxy_gc::set_generational(false);
     }
     let _ = catallaxy_stdlib::ARGS.set(prog_args);
+    catallaxy_stdlib::install_signal_flush();
     let code = execute(program);
     #[cfg(feature = "op-profile")]
     eprint!("{}", catallaxy_vm::profile::report(25));

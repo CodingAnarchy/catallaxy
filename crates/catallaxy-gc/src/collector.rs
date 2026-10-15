@@ -18,10 +18,11 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use crossbeam_deque::{Injector, Steal, Stealer, Worker};
+use crossbeam_deque::{Steal, Stealer, Worker};
 use parking_lot::{Condvar, Mutex};
 
 use crate::header::Header;
+use crate::header::{MINOR_MARK_BIT, YOUNG_BIT};
 use crate::heap::{LocalHeap, POOL};
 use crate::stats;
 
@@ -102,8 +103,12 @@ struct Global {
 }
 
 struct MarkShared {
-    injector: Injector<usize>,
+    /// Each marker's shared deque, for stealing. A marker keeps its work on a private stack and
+    /// moves a few items here at a time (see [`mark_worker`]), so these stay small.
     stealers: Mutex<Vec<Stealer<usize>>>,
+    /// Set when a marker's stack could not grow and it left an object unmarked (see
+    /// [`Tracer::mark`]); the collector then rescans (see [`rescan_major`]).
+    overflowed: AtomicBool,
     active: AtomicUsize,
     color: AtomicU8,
     marked_bytes: AtomicUsize,
@@ -122,8 +127,8 @@ static GLOBAL: std::sync::LazyLock<Global> = std::sync::LazyLock::new(|| Global 
     global_roots: Mutex::new(Vec::new()),
     retired: Mutex::new(Vec::new()),
     mark: MarkShared {
-        injector: Injector::new(),
         stealers: Mutex::new(Vec::new()),
+        overflowed: AtomicBool::new(false),
         active: AtomicUsize::new(0),
         color: AtomicU8::new(1),
         marked_bytes: AtomicUsize::new(0),
@@ -281,11 +286,7 @@ fn minor_collect(rec: &ThreadRecord) {
         m.root_large = heap.marked_young_large();
     }
     for &o in heap.remembered() {
-        // Only objects this thread still owns. One it shared, froze or handed to another thread
-        // since remembering it had its young referents tenured first (`escape` in the runtime),
-        // and may be written by other threads now.
-        let meta = unsafe { (*o).meta() };
-        if Header::state_of(meta) != crate::ObjState::Owned || Header::owner_of(meta) != rec.tid {
+        if !remembered_and_owned(o, rec.tid) {
             continue;
         }
         unsafe {
@@ -293,9 +294,39 @@ fn minor_collect(rec: &ThreadRecord) {
             (vt.trace_remembered.unwrap_or(vt.trace))(o, &mut tracer)
         };
     }
-    while let Some(o) = tracer.minor.as_mut().and_then(|m| m.stack.pop()) {
-        let h = o as *const Header;
-        unsafe { ((*(*h).vtable()).trace)(h, &mut tracer) };
+    tracer.drain();
+    // The mark stack could not grow: some young objects were left unmarked, each referenced by
+    // a root, a remembered object or a marked object. Trace all of those again until a pass
+    // completes. Remembered objects get their full trace: the written-range scan above may have
+    // forgotten the slots it visited.
+    let mut rescans = 0;
+    while std::mem::take(&mut tracer.overflowed) {
+        rescans += 1;
+        if let Some(m) = tracer.minor.as_mut() {
+            // The roots are traced again: a root reference does not make a large object
+            // heap-referenced.
+            m.roots_again = true;
+        }
+        unsafe { (*roots).trace_roots(&mut tracer) };
+        if let Some(m) = tracer.minor.as_mut() {
+            m.roots_again = false;
+        }
+        tracer.drain();
+        for &o in heap.remembered() {
+            if remembered_and_owned(o, rec.tid) {
+                unsafe { ((*(*o).vtable()).trace)(o, &mut tracer) };
+                tracer.drain();
+            }
+        }
+        unsafe {
+            heap.for_each_minor_marked(|h| {
+                ((*(*h).vtable()).trace)(h, &mut tracer);
+                tracer.drain();
+            })
+        };
+    }
+    if rescans > 0 {
+        stats::note_mark_overflow(rescans);
     }
     let marked = start.elapsed();
     let remembered = heap.remembered().len();
@@ -314,6 +345,14 @@ fn minor_collect(rec: &ThreadRecord) {
             promoted / 1024
         );
     }
+}
+
+/// Whether the remembered object `o` is still owned by `tid`. One it shared, froze or handed to
+/// another thread since remembering it had its young referents tenured first (`escape` in the
+/// runtime), and may be written by other threads now.
+fn remembered_and_owned(o: *const Header, tid: u16) -> bool {
+    let meta = unsafe { (*o).meta() };
+    Header::state_of(meta) == crate::ObjState::Owned && Header::owner_of(meta) == tid
 }
 
 /// Runs a minor collection of the calling thread now (tests and embedders). The thread must be
@@ -346,7 +385,7 @@ fn major_safepoint(rec: &ThreadRecord) {
             joined_mark = coord.mark_epoch;
             GLOBAL.mark.workers_in.fetch_add(1, Ordering::SeqCst);
             drop(coord);
-            fatal_on_panic(mark_worker);
+            fatal_on_panic(|| mark_worker(None));
             GLOBAL.mark.workers_in.fetch_sub(1, Ordering::SeqCst);
             GLOBAL.cv.notify_all();
             coord = GLOBAL.coord.lock();
@@ -500,7 +539,7 @@ fn mark_helper_main() {
             joined = coord.mark_epoch;
             GLOBAL.mark.workers_in.fetch_add(1, Ordering::SeqCst);
             drop(coord);
-            fatal_on_panic(mark_worker);
+            fatal_on_panic(|| mark_worker(None));
             GLOBAL.mark.workers_in.fetch_sub(1, Ordering::SeqCst);
             GLOBAL.cv.notify_all();
             coord = GLOBAL.coord.lock();
@@ -561,24 +600,17 @@ fn collect(me: &ThreadRecord) {
     GLOBAL.mark.color.store(color, Ordering::SeqCst);
     GLOBAL.mark.marked_bytes.store(0, Ordering::SeqCst);
     GLOBAL.mark.markers_seen.store(0, Ordering::Relaxed);
-    {
-        let mut tracer = Tracer::for_roots(color);
-        for t in threads.iter() {
-            if let Some(r) = unsafe { *t.roots.get() } {
-                unsafe { (*r).trace_roots(&mut tracer) };
-            }
-        }
-        for r in GLOBAL.global_roots.lock().iter() {
-            r.trace_roots(&mut tracer);
-        }
-    }
+    GLOBAL.mark.overflowed.store(false, Ordering::SeqCst);
+    let mut tracer = Tracer::major(color);
+    trace_all_roots(&threads, &mut tracer);
     {
         let mut coord = GLOBAL.coord.lock();
         coord.marking = true;
         coord.mark_epoch += 1;
         GLOBAL.cv.notify_all();
     }
-    mark_worker();
+    // The collector marks from the roots, sharing work with the helpers as it goes.
+    mark_worker(Some(tracer));
     // Wait for helpers to leave the mark loop before ending the phase.
     {
         let mut coord = GLOBAL.coord.lock();
@@ -588,6 +620,14 @@ fn collect(me: &ThreadRecord) {
         }
     }
     GLOBAL.mark.stealers.lock().clear();
+    let mut rescans = 0;
+    while GLOBAL.mark.overflowed.swap(false, Ordering::SeqCst) {
+        rescans += 1;
+        rescan_major(&threads, color);
+    }
+    if rescans > 0 {
+        stats::note_mark_overflow(rescans);
+    }
     let t_marked = start.elapsed();
 
     // 4. Publish the new color; sweeping happens lazily.
@@ -628,12 +668,13 @@ fn collect(me: &ThreadRecord) {
     stats::note_pause(start.elapsed().as_nanos() as usize);
     if trace_enabled() {
         eprintln!(
-            "gc: major #{}: stop {:.2} ms, finish sweep {:.2} ms, mark {:.2} ms ({} markers), total {:.2} ms, released {:.1} MB",
+            "gc: major #{}: stop {:.2} ms, finish sweep {:.2} ms, mark {:.2} ms ({} markers, {} rescans), total {:.2} ms, released {:.1} MB",
             stats::collections(),
             t_stopped.as_secs_f64() * 1e3,
             (t_swept - t_stopped).as_secs_f64() * 1e3,
             (t_marked - t_swept).as_secs_f64() * 1e3,
             GLOBAL.mark.markers_seen.load(Ordering::Relaxed),
+            rescans,
             start.elapsed().as_secs_f64() * 1e3,
             released as f64 / 1e6
         );
@@ -646,29 +687,143 @@ fn collect(me: &ThreadRecord) {
     GLOBAL.cv.notify_all();
 }
 
+fn trace_all_roots(threads: &[Arc<ThreadRecord>], tracer: &mut Tracer) {
+    for t in threads.iter() {
+        if let Some(r) = unsafe { *t.roots.get() } {
+            unsafe { (*r).trace_roots(tracer) };
+        }
+    }
+    for r in GLOBAL.global_roots.lock().iter() {
+        r.trace_roots(tracer);
+    }
+}
+
+/// After a mark phase in which a marker's stack could not grow: every unmarked live object is
+/// referenced by a root or by a marked object, so tracing all of those again (the collector
+/// alone, world still stopped) marks it. Another overflow sets the flag for another pass; each
+/// pass marks at least what its stack held, so passes end.
+fn rescan_major(threads: &[Arc<ThreadRecord>], color: u8) {
+    let mut tracer = Tracer::major(color);
+    trace_all_roots(threads, &mut tracer);
+    let mut bytes = tracer.drain();
+    // SAFETY: the world is stopped; the pool's pages and large objects are all there is.
+    unsafe {
+        POOL.for_each_object(|h| {
+            let vt = &*(*h).vtable();
+            if !vt.leaf && (*h).color() == color {
+                (vt.trace)(h, &mut tracer);
+                bytes += tracer.drain();
+            }
+        })
+    };
+    let m = &GLOBAL.mark;
+    m.marked_bytes.fetch_add(bytes + tracer.leaf_bytes, Ordering::SeqCst);
+    if tracer.overflowed {
+        m.overflowed.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Under `CATX_GC_STRESS`, mark stacks hold at most this many entries, so that the stress runs
+/// exercise the overflow rescans too.
+const STRESS_MARK_STACK: usize = 64;
+
+/// The longest a mark stack may grow (`set_mark_stack_limit`, tests).
+static MARK_STACK_LIMIT: AtomicUsize = AtomicUsize::new(0);
+
+/// Caps every mark stack at `entries` (0: no cap but the allocator's), so that tests can make
+/// marking overflow and rescan without exhausting memory. `CATX_GC_MARK_STACK` sets it too, and
+/// `CATX_GC_STRESS` makes it 64 unless that is set.
+#[doc(hidden)]
+pub fn set_mark_stack_limit(entries: usize) {
+    MARK_STACK_LIMIT.store(entries, Ordering::SeqCst);
+}
+
+fn mark_stack_limit() -> usize {
+    static ENV: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let set = MARK_STACK_LIMIT.load(Ordering::Relaxed);
+    if set != 0 {
+        return set;
+    }
+    let env = *ENV.get_or_init(|| std::env::var("CATX_GC_MARK_STACK").ok().and_then(|v| v.parse().ok()).unwrap_or(0));
+    match env {
+        0 if stats::stress() => STRESS_MARK_STACK,
+        0 => usize::MAX,
+        n => n,
+    }
+}
+
 /// Marks objects and queues them for scanning.
+///
+/// Marking runs when memory is short, so it must not abort for want of memory (issue #139).
+/// Objects without references ([`GcVTable::leaf`](crate::GcVTable::leaf)) are marked without
+/// being queued. The others go on a private stack that grows fallibly: when it cannot grow, the
+/// object is left unmarked and the tracer records an overflow, after which the collection traces
+/// the roots and every marked object again to find what it left (see [`rescan_major`] and
+/// `minor_collect`).
 pub struct Tracer {
     color: u8,
-    local: Option<Worker<usize>>,
+    stack: Vec<usize>,
+    /// Bytes of the leaf objects this tracer marked.
+    leaf_bytes: usize,
+    /// An object was left unmarked because the stack could not grow.
+    overflowed: bool,
     minor: Option<MinorMark>,
 }
 
 /// Minor-collection marking: only `tid`'s young objects.
 struct MinorMark {
     tid: u16,
-    stack: Vec<usize>,
     /// Sorted addresses of young large objects marked from the roots and not (yet) found
     /// referenced by a heap object.
     root_large: Vec<usize>,
+    /// The roots are being traced again after an overflow: their references are not heap ones.
+    roots_again: bool,
 }
 
 impl Tracer {
-    fn for_roots(color: u8) -> Self {
-        Tracer { color, local: None, minor: None }
+    fn major(color: u8) -> Self {
+        Tracer { color, stack: Vec::new(), leaf_bytes: 0, overflowed: false, minor: None }
     }
 
     fn minor(tid: u16) -> Self {
-        Tracer { color: 0, local: None, minor: Some(MinorMark { tid, stack: Vec::new(), root_large: Vec::new() }) }
+        Tracer {
+            color: 0,
+            stack: Vec::new(),
+            leaf_bytes: 0,
+            overflowed: false,
+            minor: Some(MinorMark { tid, root_large: Vec::new(), roots_again: false }),
+        }
+    }
+
+    /// Room on the stack for one more entry, growing it if it can.
+    #[inline(always)]
+    fn reserve(&mut self) -> bool {
+        self.stack.len() < self.stack.capacity() || self.grow()
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn grow(&mut self) -> bool {
+        let room = mark_stack_limit().saturating_sub(self.stack.len());
+        if room == 0 {
+            return false;
+        }
+        let want = self.stack.capacity().max(256).min(room);
+        self.stack.try_reserve_exact(want).is_ok()
+    }
+
+    /// Traces every object on the stack (and what that pushes); returns their bytes.
+    fn drain(&mut self) -> usize {
+        let mut bytes = 0;
+        while let Some(o) = self.stack.pop() {
+            let h = o as *const Header;
+            unsafe {
+                let vt = &*(*h).vtable();
+                bytes += (vt.size)(h);
+                (vt.trace)(h, self);
+            }
+        }
+        bytes
     }
 
     /// Marks `obj` reachable. Null pointers are ignored. Tracers are only handed to root sources
@@ -685,37 +840,74 @@ impl Tracer {
             // Old objects are not traced: their young referents are found through the
             // remembered set.
             let meta = h.meta_relaxed();
-            if meta & crate::header::YOUNG_BIT != 0 && Header::owner_of(meta) == m.tid {
-                if h.try_minor_mark() {
-                    m.stack.push(obj as usize);
-                } else if !m.root_large.is_empty() {
+            if meta & YOUNG_BIT == 0 || Header::owner_of(meta) != m.tid {
+                return;
+            }
+            if meta & MINOR_MARK_BIT != 0 {
+                if !m.roots_again && !m.root_large.is_empty() {
                     // A heap reference to a large object the roots also reach.
                     if let Ok(i) = m.root_large.binary_search(&(obj as usize)) {
                         m.root_large.remove(i);
                     }
                 }
+                return;
+            }
+            let leaf = unsafe { (*h.vtable()).leaf };
+            if !leaf && !self.reserve() {
+                self.overflowed = true;
+                return;
+            }
+            if h.try_minor_mark() && !leaf {
+                self.stack.push(obj as usize);
             }
             return;
         }
-        if h.try_mark(self.color) {
-            match &self.local {
-                Some(w) => w.push(obj as usize),
-                None => GLOBAL.mark.injector.push(obj as usize),
+        if h.color() == self.color {
+            return;
+        }
+        let vt = unsafe { &*h.vtable() };
+        if vt.leaf {
+            if h.try_mark(self.color) {
+                self.leaf_bytes += unsafe { (vt.size)(obj) };
             }
+            return;
+        }
+        if !self.reserve() {
+            self.overflowed = true;
+            return;
+        }
+        if h.try_mark(self.color) {
+            self.stack.push(obj as usize);
         }
     }
 }
 
-fn mark_worker() {
+/// How many entries a marker moves to its shared deque at a time, when that is empty.
+const SHARE_BATCH: usize = 16;
+
+/// Marks until every marker is out of work. Each marker traces from its private stack (the
+/// collector's starts with what the roots reached) and, every few objects, moves a few entries
+/// to its shared deque if that is empty, for idle markers to steal. The deques stay at most a
+/// batch or two long, so their buffers never grow past their initial size.
+fn mark_worker(start: Option<Tracer>) {
     let m = &GLOBAL.mark;
     let worker = Worker::new_lifo();
     m.stealers.lock().push(worker.stealer());
-    let mut tracer = Tracer { color: m.color.load(Ordering::SeqCst), local: Some(worker), minor: None };
+    let mut tracer = start.unwrap_or_else(|| Tracer::major(m.color.load(Ordering::SeqCst)));
     m.markers_seen.fetch_add(1, Ordering::Relaxed);
     m.active.fetch_add(1, Ordering::SeqCst);
     let mut bytes = 0usize;
+    let mut n = 0usize;
     loop {
-        let next = tracer.local.as_ref().unwrap().pop().or_else(|| steal(m, tracer.local.as_ref().unwrap()));
+        if n % 32 == 0 && tracer.stack.len() > 1 && worker.is_empty() {
+            for _ in 0..SHARE_BATCH.min(tracer.stack.len() / 2) {
+                if let Some(o) = tracer.stack.pop() {
+                    worker.push(o);
+                }
+            }
+        }
+        n += 1;
+        let next = tracer.stack.pop().or_else(|| worker.pop()).or_else(|| steal(m, &worker));
         match next {
             Some(obj) => {
                 let h = obj as *const Header;
@@ -734,7 +926,10 @@ fn mark_worker() {
                         break;
                     }
                     if m.active.load(Ordering::SeqCst) == 0 {
-                        m.marked_bytes.fetch_add(bytes, Ordering::SeqCst);
+                        m.marked_bytes.fetch_add(bytes + tracer.leaf_bytes, Ordering::SeqCst);
+                        if tracer.overflowed {
+                            m.overflowed.store(true, Ordering::SeqCst);
+                        }
                         return;
                     }
                     std::hint::spin_loop();
@@ -747,11 +942,6 @@ fn mark_worker() {
 
 fn steal(m: &MarkShared, local: &Worker<usize>) -> Option<usize> {
     loop {
-        match m.injector.steal_batch_and_pop(local) {
-            Steal::Success(o) => return Some(o),
-            Steal::Retry => continue,
-            Steal::Empty => {}
-        }
         let stealers = m.stealers.lock();
         let mut retry = false;
         for s in stealers.iter() {
@@ -768,5 +958,5 @@ fn steal(m: &MarkShared, local: &Worker<usize>) -> Option<usize> {
 }
 
 fn has_work(m: &MarkShared) -> bool {
-    !m.injector.is_empty() || m.stealers.lock().iter().any(|s| !s.is_empty())
+    m.stealers.lock().iter().any(|s| !s.is_empty())
 }

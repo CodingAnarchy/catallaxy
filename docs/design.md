@@ -152,8 +152,8 @@ v1 uses a non-moving, parallel, stop-the-world mark-sweep collector with thread-
 **Collection cycle.**
 
 1. The requesting thread sets `gc_requested` and waits until every thread is parked or `in_native`.
-2. All parked threads become mark workers, sharing a work-stealing deque (crossbeam). Roots are split per thread.
-3. Marking flips the mark bit with an atomic `fetch_or`; whoever sets it pushes the object.
+2. All parked threads, and the collector's helper threads, become mark workers. Each one works from a private stack and every 32 objects moves up to 16 entries to its small crossbeam deque, if that deque is empty, for idle workers to steal. The collecting thread starts with what the roots reach.
+3. Marking sets the mark color with an atomic compare-and-swap, and whoever sets it pushes the object. Objects that hold no references (strings, big integers, builders, native handles: `GcVTable::leaf`) are only marked, never pushed. Marking runs when memory is short, so it must not abort for want of memory. A mark stack grows only by a fallible reservation, and if that fails the object is left unmarked and the worker records an overflow. Once the workers are done, the collector traces the roots and every marked object again, alone, until a pass ends without overflow; each pass marks at least what its stack held. A minor collection does the same with its roots, its remembered set (traced in full, since the written-range scan forgets what it visited) and its minor-marked young objects. `CATX_GC_STRESS` caps mark stacks at 64 entries so that the stress runs exercise this path.
 4. Threads resume immediately. Sweeping happens lazily: a page is swept the next time a thread wants to allocate from it.
 5. Any page still unswept is swept at the start of the next collection. At that point every wholly empty segment is known, and the collector returns them to the OS (`munmap`, or `VirtualFree` on Windows). It keeps enough empty pages for the allocation budget until the following collection, so a program in a steady state does not unmap segments only to map them again.
 

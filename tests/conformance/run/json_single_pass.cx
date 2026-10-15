@@ -1,0 +1,72 @@
+# Json.parse reads straight into values and Json.stringify writes straight into one string
+# (#177). Output, key order, numbers and error messages are as before.
+enum Shape {
+  Circle(Float)
+  Square(Float)
+}
+
+class Point {
+  y: Int
+  x: Int
+  label: String
+}
+
+class Money {
+  cents: Int
+  fn to_json(self) -> Dyn { "$#{self.cents / 100}.#{self.cents % 100}" }
+}
+
+# Parsing: duplicate keys (the last wins), key order, whitespace, escapes, numbers.
+d = Json.parse(" {\"b\": 1, \"a\": [true, false, null], \"b\": 2, \"c\": {\"z\": \"\\u00e9\\ud83d\\ude00\\n\", \"y\": -0.5e1}} ").unwrap()
+puts(Json.stringify(d))
+puts(d["b"])
+puts(Json.stringify(Json.parse("[0, -0, 1e2, 1E-2, 123456789012345678901234567890, 1.5, \"\\\"\\\\\\/\\b\\f\\r\\t\"]").unwrap()))
+puts(Json.parse("\"top\"").unwrap())
+puts(Json.parse("  42  ").unwrap())
+
+# Errors keep serde_json's wording.
+for bad in ["", "[1,]", "{\"a\" 1}", "01", "1e400", "\"\\ud800\"", "\"a\u{1}\"", "[1] x", "{1: 2}", "[" * 128 + "]" * 128, "nul"] {
+  match Json.parse(bad) {
+    Ok(v) => puts("ok #{Json.stringify(v)}")
+    Err(e) => puts(e)
+  }
+}
+puts(Json.parse("[" * 127 + "]" * 127).is_ok)
+
+# Records with the same keys share their key strings; the values stay separate.
+rows = Json.parse("[{\"id\": 1, \"name\": \"a\"}, {\"id\": 2, \"name\": \"b\"}, {\"name\": \"c\", \"id\": 3}]").unwrap()
+puts(rows[2]["name"])
+puts(Json.stringify(rows))
+
+# Stringify: dict keys sorted (non-string keys by their text; of equal texts the last wins),
+# instance fields sorted, to_json, enums, tuples, floats and strings as before.
+mixed: Dict[Dyn, Dyn] = [2: "two", "10": "ten", 1: "one", "1": "string one", "b": [], "a": [:]]
+puts(Json.stringify(mixed))
+puts(Json.pretty(mixed))
+p = Point.new(2, 1, "tab\there \u{7f} é 😀")
+puts(Json.stringify(p))
+puts(Json.pretty([p, p]))
+puts(Json.stringify([Money.new(1234), Money.new(5)]))
+puts(Json.stringify([Shape.Circle(1.5), Shape.Square(2.0)]))
+puts(Json.stringify((1, "two", nil)))
+puts(Json.stringify([1.0, 0.1, -0.0, 1e21, 1e-7, 2.0 ** 70, 0.0 / 0.0, 1.0 / 0.0]))
+puts(Json.stringify(["\u{1}\u{1f}\"\\/", "日本語"]))
+puts(Json.pretty([]))
+puts(Json.pretty([[], [:], [1, [2, [3]]]]))
+dq = Deque.new()
+dq.push(1)
+dq.push(2)
+puts(Json.stringify(["q": dq]))
+
+# A larger document, so that collections run while it is read and written.
+big: List[Dyn] = []
+for i in 0...3000 {
+  tags: List[Dyn] = ["t#{i % 7}", i * 1.5]
+  r: Dict[String, Dyn] = ["id": i, "name": "row #{i}", "tags": tags, "big": 2 ** 80 + i]
+  big.push(r)
+}
+text = Json.stringify(big)
+back = Json.parse(text).unwrap()
+puts(text.length)
+puts(Json.stringify(back) == text)
+puts(back[2999]["big"] == 2 ** 80 + 2999)

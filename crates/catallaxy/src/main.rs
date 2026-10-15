@@ -1,5 +1,6 @@
 //! `catx`: the Catallaxy command-line tool.
 
+mod diff;
 mod files;
 mod fix_cmd;
 mod fmt_cmd;

@@ -549,9 +549,9 @@ Annotate the parameter to use any of these.
 - What is not covered: other allocations inside the runtime get one retry with the headroom released
   and then a `MemoryError` at the next safepoint. If that retry fails too, the process aborts
   (`memory allocation of N bytes failed`). These include the scratch buffer of a stable sort (which
-  `sorted` checks can be had just before), the text `Json.stringify` and `Csv.format` build, the keys
-  of a parsed JSON object, and the collector's mark stack, which needs 8 bytes for each object in
-  the longest list it marks (a list of 100,000 strings: 800 KB). The same happens when the reserve is used up before a
+  `sorted` checks can be had just before), the text `Json.stringify` and `Csv.format` build, and the keys
+  of a parsed JSON object. (The collector's own marking does not abort: when its mark stack cannot
+  grow, it rescans instead.) The same happens when the reserve is used up before a
   safepoint is reached. The retry comes from the global allocator `catallaxy_gc::Allocator`, which
   `catx` and the C API libraries use; a Rust program embedding the runtime gets it only if it opts in
   (section 11). On Linux with memory overcommit, and under memory pressure on macOS, a program that
@@ -673,6 +673,17 @@ The exit status means the same for every command:
 The `help:` line after errors links to the error index (`docs/errors.md`) at the tag of the
 running version, so an installed release explains exactly the codes it reports.
 
+A program's standard output (`puts`, `print`) is buffered: it is written when 64 KB have collected,
+when the program ends, before it reads standard input, sleeps or waits for I/O, and before anything
+is written to standard error. When standard output is a terminal it is also written at
+the end of each line, so progress output shows up while the program runs. If the reader of
+standard output goes away (`catx run prog.cx | head -2`), the program ends quietly with exit status
+141 at its next write (or at its end), as a process killed by `SIGPIPE` would; it does not keep
+running. `SIGINT` (Ctrl-C), `SIGTERM` and `SIGHUP` write out the buffered output before the program
+dies of the signal, so nothing printed is lost and the exit status still names the signal (a shell
+shows 130, 143 or 129). Signals the program inherited as ignored (`nohup`, background jobs) stay
+ignored. On Windows, Ctrl-C, Ctrl-Break and closing the console also write the buffer out first.
+
 `catx test paths...` runs each named `*.cx` file, and every `*.cx` file under each named directory
 (skipping hidden directories, `target/`, and `lib/` directories, which hold modules for tests to
 import), each in its own process. With no path it runs the tests under the current directory. A
@@ -680,9 +691,12 @@ path that does not exist is an error (exit status 2), and so is finding no tests
 must fail `catx check` with those diagnostic codes (if every code is a warning, `W...`, it need only
 report them). Any other file must run with standard output
 equal to its `.out` file and exit with status 0, or with the status given by a `# exit: N` line; a
-`.in` file next to it is fed to standard input. A program still running after `CATX_TEST_TIMEOUT`
-seconds (default 120) is killed and fails with its output so far. The exit status is 1 if anything
-failed.
+`.in` file next to it is fed to standard input. Line endings are not compared (`\r\n` in the `.out`
+file or the output counts as `\n`). A difference is shown as a unified diff of the expected and
+actual output, with tabs as `→`, carriage returns as `␍`, other control characters as `\u{..}` and
+trailing spaces as `·`, and a missing final newline noted. A program still running after
+`CATX_TEST_TIMEOUT` seconds (default 120) is killed and fails with its output so far. The exit
+status is 1 if anything failed.
 
 `catx fmt` rewrites files in place (`catx fmt -` filters stdin to stdout). It keeps comments and the
 program's line structure; it re-indents with two spaces, normalizes spacing between tokens, and breaks a
@@ -690,6 +704,8 @@ program's line structure; it re-indents with two spaces, normalizes spacing betw
 would change and exits with status 1 if there are any. Files with syntax errors are left untouched and
 reported (exit status 2). When walking a directory, `fmt` skips `reject/` directories, whose
 conformance programs are meant to be wrong; a file named on the command line is always formatted.
+A file keeps its line endings: one whose first line ends in `\r\n` is written with `\r\n`
+throughout, any other with `\n`.
 
 `catx lsp` is a language server over stdio. Open buffers overlay the file system, so imports see
 unsaved edits. It provides:
