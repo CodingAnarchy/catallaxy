@@ -10,10 +10,11 @@ mod core;
 mod data;
 pub mod fiber;
 mod net;
+mod out;
+pub use out::{flush, install_signal_flush, stdout_broken, write_out, BROKEN_PIPE_STATUS};
 mod script;
 mod sys;
 
-use std::io::Write;
 use std::sync::OnceLock;
 
 use catallaxy_runtime::class::class_of;
@@ -22,26 +23,9 @@ use catallaxy_runtime::ops;
 use catallaxy_runtime::ownership;
 use catallaxy_runtime::{panic, try_push, try_vec, RtResult, Trap, Value};
 use catallaxy_vm::{NativeFn, Vm};
-use parking_lot::Mutex;
 
 /// Command-line arguments passed to the program (after the script path).
 pub static ARGS: OnceLock<Vec<String>> = OnceLock::new();
-
-static STDOUT: Mutex<Option<std::io::BufWriter<std::io::Stdout>>> = Mutex::new(None);
-
-/// Writes to the buffered standard output.
-pub fn write_out(s: &str) {
-    let mut g = STDOUT.lock();
-    let w = g.get_or_insert_with(|| std::io::BufWriter::with_capacity(1 << 16, std::io::stdout()));
-    let _ = w.write_all(s.as_bytes());
-}
-
-/// Flushes buffered standard output (at exit, before reading input, before errors).
-pub fn flush() {
-    if let Some(w) = STDOUT.lock().as_mut() {
-        let _ = w.flush();
-    }
-}
 
 /// The Catallaxy panic message for a Rust panic caught at a thread's or fiber's entry (an
 /// internal error of the runtime), or `None` if the payload is not a panic message (such as the
