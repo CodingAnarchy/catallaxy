@@ -936,7 +936,7 @@ pub fn fn_decl(ck: &Checker, f: FnId) -> Option<&FnDecl> {
 }
 
 /// Source text of parameter `k`'s default value (`Class.new` takes field defaults).
-fn default_text(ck: &Checker, sm: &SourceMap, f: FnId, k: usize) -> Option<String> {
+pub fn default_text(ck: &Checker, sm: &SourceMap, f: FnId, k: usize) -> Option<String> {
     let fi = &ck.fns[f as usize];
     let span = match (&fi.synth, fn_decl(ck, f)) {
         (_, Some(d)) => d.params.get(k)?.default.as_ref()?.span,
