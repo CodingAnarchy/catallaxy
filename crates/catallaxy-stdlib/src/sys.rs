@@ -190,18 +190,8 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
         }
 
         "Json.parse" => json_parse,
-        "Json.stringify" => |vm, a| {
-            let v = to_json(vm, a[0], 0)?;
-            let mut text = String::new();
-            v.write(&mut text, None);
-            vm.m.try_alloc_str(&text)
-        },
-        "Json.pretty" => |vm, a| {
-            let v = to_json(vm, a[0], 0)?;
-            let mut text = String::new();
-            v.write(&mut text, Some(0));
-            vm.m.try_alloc_str(&text)
-        },
+        "Json.stringify" => |vm, a| json_text(vm, a[0], None),
+        "Json.pretty" => |vm, a| json_text(vm, a[0], Some(0)),
 
         "__dyn_member" => dyn_member,
         _ => return None,
@@ -345,6 +335,50 @@ fn next_u64() -> u64 {
 /// levels: about 80 KB in all on aarch64 macOS, part of which the margin covers.
 const JSON_STACK: usize = 64 << 10;
 
+/// Bytes of temporaries a native builds outside the heap (JSON trees), checked against the
+/// heap cap as they grow, once per megabyte (issue #158). Estimates: what the tree's nodes,
+/// strings and map entries take, and as much again for what is built from it (the values
+/// `Json.parse` returns, the text `Json.stringify` writes).
+struct Temps {
+    what: &'static str,
+    used: usize,
+    next: usize,
+}
+
+impl Temps {
+    const STEP: usize = 1 << 20;
+
+    fn new(what: &'static str) -> Temps {
+        Temps { what, used: 0, next: Self::STEP }
+    }
+
+    #[inline]
+    fn add(&mut self, bytes: usize) -> RtResult<()> {
+        self.used = self.used.saturating_add(bytes);
+        if self.used >= self.next {
+            return self.check();
+        }
+        Ok(())
+    }
+
+    #[cold]
+    fn check(&mut self) -> RtResult<()> {
+        self.next = self.used.saturating_add(Self::STEP);
+        catallaxy_runtime::check_cap(self.used.saturating_mul(2), self.what)
+    }
+}
+
+/// What a map entry of a JSON tree takes besides its key and value (a B-tree's share).
+const MAP_ENTRY: usize = 32;
+
+fn json_text(vm: &mut Vm, v: Value, indent: Option<usize>) -> RtResult<Value> {
+    let mut temps = Temps::new("Json.stringify");
+    let v = to_json(vm, v, 0, &mut temps)?;
+    let mut text = String::new();
+    v.write(&mut text, indent);
+    vm.m.try_alloc_str(&text)
+}
+
 fn json_parse(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
     let text = s(a[0])?;
     catallaxy_runtime::stack::check_extra(JSON_STACK)?;
@@ -354,7 +388,7 @@ fn json_parse(vm: &mut Vm, a: &[Value]) -> RtResult<Value> {
         return Ok(err(vm, &format!("invalid JSON: {e}")));
     }
     vm.m.collect_if_refused();
-    let j = Pj::parse(text)?;
+    let j = Pj::parse(text, &mut Temps::new("Json.parse"))?;
     let v = from_json(vm, j)?;
     vm.extra_roots().push(v);
     let r = ok(vm, v);
@@ -426,9 +460,9 @@ impl<'a> Pj<'a> {
     /// Parses text that serde_json has already accepted, so it does no error checking
     /// (and nests no deeper than serde_json's recursion limit). Arrays raise a `MemoryError`
     /// if they cannot grow.
-    fn parse(text: &'a str) -> RtResult<Pj<'a>> {
+    fn parse(text: &'a str, temps: &mut Temps) -> RtResult<Pj<'a>> {
         let mut pos = 0;
-        Pj::value(text, &mut pos)
+        Pj::value(text, &mut pos, temps)
     }
 
     fn skip_ws(b: &[u8], pos: &mut usize) {
@@ -437,9 +471,10 @@ impl<'a> Pj<'a> {
         }
     }
 
-    fn value(text: &'a str, pos: &mut usize) -> RtResult<Pj<'a>> {
+    fn value(text: &'a str, pos: &mut usize, temps: &mut Temps) -> RtResult<Pj<'a>> {
         let b = text.as_bytes();
         Pj::skip_ws(b, pos);
+        temps.add(std::mem::size_of::<Pj>())?;
         Ok(match b[*pos] {
             b'n' => {
                 *pos += 4;
@@ -453,7 +488,11 @@ impl<'a> Pj<'a> {
                 *pos += 5;
                 Pj::Bool(false)
             }
-            b'"' => Pj::Str(Pj::string(text, pos)),
+            b'"' => {
+                let s = Pj::string(text, pos);
+                temps.add(s.len())?;
+                Pj::Str(s)
+            }
             b'[' => {
                 *pos += 1;
                 let mut items = Vec::new();
@@ -465,7 +504,7 @@ impl<'a> Pj<'a> {
                             return Ok(Pj::Arr(items));
                         }
                         b',' => *pos += 1,
-                        _ => try_push(&mut items, Pj::value(text, pos)?)?,
+                        _ => try_push(&mut items, Pj::value(text, pos, temps)?)?,
                     }
                 }
             }
@@ -482,9 +521,10 @@ impl<'a> Pj<'a> {
                         b',' => *pos += 1,
                         _ => {
                             let k = Pj::string(text, pos);
+                            temps.add(k.len() + MAP_ENTRY)?;
                             Pj::skip_ws(b, pos);
                             *pos += 1; // the `:`
-                            map.insert(k, Pj::value(text, pos)?);
+                            map.insert(k, Pj::value(text, pos, temps)?);
                         }
                     }
                 }
@@ -623,10 +663,19 @@ impl Jv {
     }
 }
 
-fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
+fn to_json(vm: &mut Vm, v: Value, depth: usize, temps: &mut Temps) -> RtResult<Jv> {
     if depth > 200 {
         return panic("JSON nesting too deep");
     }
+    let j = to_json_node(vm, v, depth, temps)?;
+    if let Jv::Scalar(t) = &j {
+        temps.add(t.len())?;
+    }
+    temps.add(std::mem::size_of::<Jv>())?;
+    Ok(j)
+}
+
+fn to_json_node(vm: &mut Vm, v: Value, depth: usize, temps: &mut Temps) -> RtResult<Jv> {
     if depth == 0 {
         // Covers this recursion and the printing of what it builds.
         catallaxy_runtime::stack::check_extra(JSON_STACK)?;
@@ -656,7 +705,7 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
             };
             let mut out = try_vec(items.len())?;
             for x in items {
-                out.push(to_json(vm, x, depth + 1)?);
+                out.push(to_json(vm, x, depth + 1, temps)?);
             }
             Ok(Jv::Arr(out))
         }
@@ -666,7 +715,8 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
             let mut map = std::collections::BTreeMap::new();
             for (k, x) in pairs {
                 let key = to_s(vm, k)?;
-                map.insert(key, to_json(vm, x, depth + 1)?);
+                temps.add(key.len() + MAP_ENTRY)?;
+                map.insert(key, to_json(vm, x, depth + 1, temps)?);
             }
             Ok(Jv::Obj(map))
         }
@@ -676,7 +726,7 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
             if cls.kind == ObjKind::Instance && cls.lookup(intern("to_json")).is_some() {
                 let r = vm.call_method_named(v, intern("to_json"), &[])?;
                 vm.extra_roots().push(r);
-                let j = to_json(vm, r, depth + 1);
+                let j = to_json(vm, r, depth + 1, temps);
                 vm.extra_roots().pop();
                 return j;
             }
@@ -686,7 +736,8 @@ fn to_json(vm: &mut Vm, v: Value, depth: usize) -> RtResult<Jv> {
                 let mut map = std::collections::BTreeMap::new();
                 for i in 0..cls.nfields() {
                     let fv = o.get(i);
-                    map.insert(cls.field_names[i].to_string(), to_json(vm, fv, depth + 1)?);
+                    temps.add(MAP_ENTRY)?;
+                    map.insert(cls.field_names[i].to_string(), to_json(vm, fv, depth + 1, temps)?);
                 }
                 return Ok(Jv::Obj(map));
             }

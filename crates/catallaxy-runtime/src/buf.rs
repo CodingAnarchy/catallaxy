@@ -83,9 +83,13 @@ impl WordBuf {
             .checked_add(1 + PREFIX)
             .and_then(|n| Layout::array::<u64>(n).ok())
             .ok_or_else(|| Layout::from_size_align(isize::MAX as usize & !7, 8).unwrap())?;
+        if !crate::cap_allows(layout.size()) {
+            return Err(layout);
+        }
         unsafe {
             let base = std::alloc::alloc(layout) as *mut Prefixed;
             if base.is_null() {
+                crate::allocator_refused();
                 return Err(layout);
             }
             std::ptr::addr_of_mut!((*base).written).write(AtomicU64::new(WRITTEN_ALL));
@@ -142,10 +146,16 @@ impl WordBuf {
                 std::alloc::dealloc(ptr as *mut u8, old);
                 return Err(old);
             };
+            // The vector's own bytes are not counted yet either.
+            if !crate::cap_allows(new.size()) {
+                std::alloc::dealloc(ptr as *mut u8, old);
+                return Err(new);
+            }
             let base = std::alloc::realloc(ptr as *mut u8, old, new.size()) as *mut Prefixed;
             if base.is_null() {
                 // The vector's allocation is still valid; free it before reporting.
                 std::alloc::dealloc(ptr as *mut u8, old);
+                crate::allocator_refused();
                 return Err(new);
             }
             let words = base as *mut u64;

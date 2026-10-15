@@ -52,6 +52,7 @@ pub fn check_alloc(count: usize, size: usize) -> RtResult<usize> {
         return panic(format!("MemoryError: cannot allocate {count} items of {size} bytes"));
     };
     catallaxy_gc::limits::check_request(bytes).map_err(|e| Trap::Panic(format!("MemoryError: {e}")))?;
+    check_cap(bytes, format_args!("cannot allocate {bytes} bytes"))?;
     Ok(bytes)
 }
 
@@ -68,10 +69,45 @@ pub fn try_vec<T>(n: usize) -> RtResult<Vec<T>> {
 
 /// The `MemoryError` for a request the allocator refused (`what` says which). Hands the
 /// collector's headroom back to the OS first, so that reporting the error does not fail too.
+/// If the request was refused because it would pass the heap cap (see [`cap_allows`]), says so
+/// instead.
 #[cold]
 pub fn refused<T>(what: impl std::fmt::Display) -> RtResult<T> {
+    if let Some(why) = CAP_REFUSAL.with(|r| r.take()) {
+        return panic(format!("MemoryError: {what}: {why}"));
+    }
     catallaxy_gc::limits::release_headroom();
     panic(format!("MemoryError: {what} (the allocator refused)"))
+}
+
+thread_local! {
+    /// Why this thread's last buffer request was refused, if the heap cap refused it.
+    static CAP_REFUSAL: std::cell::Cell<Option<String>> = const { std::cell::Cell::new(None) };
+}
+
+/// Whether memory outside the heap may grow by `bytes` (a list, dict or builder buffer)
+/// without passing the heap cap (`catallaxy_gc::limits::check_cap`). If not, the caller treats
+/// the request as refused (collecting and retrying where it can), and [`refused`] then names
+/// the cap as the reason.
+#[inline]
+pub fn cap_allows(bytes: usize) -> bool {
+    let r = catallaxy_gc::limits::check_cap(bytes);
+    let ok = r.is_ok();
+    // Also clears a reason left from an earlier refusal.
+    CAP_REFUSAL.with(|c| c.set(r.err()));
+    ok
+}
+
+/// For a request the allocator itself refused: the reason [`refused`] gives is the allocator's.
+#[inline]
+pub fn allocator_refused() {
+    CAP_REFUSAL.with(|c| c.set(None));
+}
+
+/// A `MemoryError` panic if `bytes` more memory outside the heap would pass the heap cap (see
+/// [`cap_allows`]); `what` names what needs it. For natives that cannot collect first.
+pub fn check_cap(bytes: usize, what: impl std::fmt::Display) -> RtResult<()> {
+    catallaxy_gc::limits::check_cap(bytes).map_err(|why| Trap::Panic(format!("MemoryError: {what}: {why}")))
 }
 
 /// Pushes `x` onto a vector a native is building, raising a `MemoryError` panic if the vector
@@ -90,8 +126,10 @@ pub fn try_push<T>(v: &mut Vec<T>, x: T) -> RtResult<()> {
 #[inline(never)]
 fn grow_vec<T>(v: &mut Vec<T>) -> RtResult<()> {
     // `try_reserve` grows amortized (to at least twice the capacity), as `push` would.
+    let bytes = v.capacity().max(4).saturating_mul(2).saturating_mul(std::mem::size_of::<T>());
+    check_cap(bytes, format_args!("cannot allocate {bytes} bytes"))?;
     if v.try_reserve(1).is_err() {
-        let bytes = v.capacity().max(4).saturating_mul(2).saturating_mul(std::mem::size_of::<T>());
+        allocator_refused();
         return refused(format!("cannot allocate {bytes} bytes"));
     }
     Ok(())
