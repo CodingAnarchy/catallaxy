@@ -1,9 +1,10 @@
 //! The register-based interpreter.
 //!
-//! One [`Vm`] runs per OS thread. Frames live in a fixed-size register stack that never moves, so
-//! raw pointers into it stay valid across nested calls (natives receive their arguments as a slice
-//! of the caller's registers). Calls between bytecode functions do not recurse on the Rust stack;
-//! only natives calling back into bytecode do.
+//! One [`Vm`] runs per OS thread (and one per fiber). Frames live in a register stack that starts
+//! small and grows on demand up to the VM's limit; see [`Vm::grow_stack`] for how growing keeps
+//! the raw pointers into it sound (natives receive their arguments as a slice of the caller's
+//! registers). Calls between bytecode functions do not recurse on the Rust stack; only natives
+//! calling back into bytecode do.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -46,8 +47,15 @@ pub struct Frame {
 
 pub struct Vm {
     pub m: Mutator,
+    /// The register stack: `stack_cap` values, growing up to `stack_max` (see [`Vm::grow_stack`]).
     stack: *mut Value,
     stack_cap: usize,
+    stack_max: usize,
+    /// Register stacks replaced by a larger one, kept until no native can still be reading its
+    /// arguments from them (see [`Vm::grow_stack`]).
+    retired: Vec<(*mut Value, usize)>,
+    /// `CATX_GC_STRESS` is on (see [`Vm::stress_move`]).
+    stress: bool,
     /// Frames, locks and extra roots: read by the collector while this thread is stopped, so
     /// they live in a separate allocation reached only through this raw pointer.
     rs: *mut RootState,
@@ -64,15 +72,34 @@ pub struct Vm {
 
 /// VM state the collector scans.
 pub(crate) struct RootState {
+    /// The register stack (a copy of [`Vm::stack`], which moves when it grows).
+    stack: *mut Value,
     pub(crate) frames: Vec<Frame>,
     /// Objects locked by `with lock`, with the frame depth that locked them.
     held_locks: Vec<(usize, Value)>,
     /// Extra values rooted by the runtime (thread-pool jobs and the like).
     extra_roots: Vec<Value>,
-    /// Roots of the thread's fiber VMs (main VM only).
+    /// Roots of the thread's fiber VMs (main VM only). A fiber's root state records its index
+    /// here, so it is removed in O(1).
     children: Vec<VmRoots>,
+    /// This fiber VM's index in its thread's `children`.
+    child_index: usize,
     /// Values held for the thread's fibers, by fiber id (results awaiting `join`).
-    pinned: Vec<(u64, Value)>,
+    pinned: std::collections::HashMap<u64, Value>,
+}
+
+impl RootState {
+    fn new(stack: *mut Value, frames: usize) -> Box<RootState> {
+        Box::new(RootState {
+            stack,
+            frames: Vec::with_capacity(frames),
+            held_locks: Vec::new(),
+            extra_roots: Vec::new(),
+            children: Vec::new(),
+            child_index: usize::MAX,
+            pinned: std::collections::HashMap::new(),
+        })
+    }
 }
 
 // SAFETY: a Vm is used by one thread at a time; it is created by a parent thread and handed to
@@ -81,19 +108,18 @@ unsafe impl Send for Vm {}
 
 #[derive(Clone, Copy)]
 struct VmRoots {
-    stack: *const Value,
-    rs: *const RootState,
+    rs: *mut RootState,
     handles: *const Vec<Value>,
 }
 
 impl RootSource for VmRoots {
     fn trace_roots(&self, t: &mut Tracer) {
-        // SAFETY: called only while the owning thread is stopped; all three pointers are owned
+        // SAFETY: called only while the owning thread is stopped; both pointers are owned
         // allocations that the thread itself also reaches only through raw pointers.
         let rs = unsafe { &*self.rs };
         let top = rs.frames.last().map(|f| f.top).unwrap_or(0);
         for i in 0..top {
-            ops_mark(t, unsafe { *self.stack.add(i) });
+            ops_mark(t, unsafe { *rs.stack.add(i) });
         }
         for f in &rs.frames {
             ops_mark(t, f.closure);
@@ -110,7 +136,7 @@ impl RootSource for VmRoots {
         for child in &rs.children {
             child.trace_roots(t);
         }
-        for &(_, v) in &rs.pinned {
+        for &v in rs.pinned.values() {
             ops_mark(t, v);
         }
     }
@@ -140,8 +166,39 @@ fn stack_refused<T>(n: usize) -> RtResult<T> {
     ))
 }
 
+/// Register stack limits, in values. A VM's stack starts at [`INITIAL_STACK`] values (or its
+/// limit, if smaller) and grows on demand up to its limit.
 pub const MAIN_STACK: usize = 4 << 20;
 pub const THREAD_STACK: usize = 1 << 20;
+pub const INITIAL_STACK: usize = 1024;
+/// The initial register stack under `CATX_GC_STRESS`, which also moves small stacks on every
+/// call back into the interpreter from a native (see [`Vm::grow_stack`]).
+const STRESS_INITIAL_STACK: usize = 16;
+/// Under stress, stacks up to this many values move on every call back from a native.
+const STRESS_MOVE_LIMIT: usize = 64 * 1024;
+/// Under stress, stacks stop moving while the ones kept for natives hold this many values.
+const STRESS_RETIRED_LIMIT: usize = 2 << 20;
+
+/// Whether `CATX_GC_STRESS` is on: register stacks then start tiny and move often, so that a
+/// stale pointer into one shows up in the conformance suite.
+fn stack_stress() -> bool {
+    static STRESS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *STRESS.get_or_init(|| std::env::var("CATX_GC_STRESS").is_ok_and(|v| v != "0"))
+}
+
+/// The register stack a VM with limit `max` starts with.
+fn initial_stack(max: usize, initial: usize) -> usize {
+    let initial = if stack_stress() { STRESS_INITIAL_STACK } else { initial };
+    initial.clamp(1, max.max(1))
+}
+
+/// Frees a register stack of `n` values made by [`alloc_stack`].
+///
+/// # Safety
+/// `p` came from `alloc_stack(n)` and nothing uses it any more.
+unsafe fn free_stack(p: *mut Value, n: usize) {
+    std::alloc::dealloc(p as *mut u8, std::alloc::Layout::array::<Value>(n).unwrap());
+}
 
 impl Vm {
     /// Creates a VM for a thread registered with the collector. The thread record must be in the
@@ -155,29 +212,27 @@ impl Vm {
     /// As [`Vm::new`], but a register stack the allocator refuses is a `MemoryError` panic.
     /// The thread record is left registered either way.
     pub fn try_new(rec: Arc<ThreadRecord>, stack_size: usize) -> RtResult<Box<Vm>> {
-        let stack = alloc_stack(stack_size);
+        let cap = initial_stack(stack_size, INITIAL_STACK);
+        let stack = alloc_stack(cap);
         if stack.is_null() {
-            return stack_refused(stack_size);
+            return stack_refused(cap);
         }
         let m = Mutator::new(rec);
-        let rs = Box::into_raw(Box::new(RootState {
-            frames: Vec::with_capacity(256),
-            held_locks: Vec::new(),
-            extra_roots: Vec::new(),
-            children: Vec::new(),
-            pinned: Vec::new(),
-        }));
+        let rs = Box::into_raw(RootState::new(stack, 256));
         let vm = Box::new(Vm {
             m,
             stack,
-            stack_cap: stack_size,
+            stack_cap: cap,
+            stack_max: stack_size,
+            retired: Vec::new(),
+            stress: stack_stress(),
             rs,
             next_serial: 1,
             panic_trace: None,
             root_rs: rs,
             no_park: 0,
         });
-        let roots: Box<dyn RootSource> = Box::new(VmRoots { stack: vm.stack, rs: vm.rs, handles: vm.m.handles_ptr() });
+        let roots: Box<dyn RootSource> = Box::new(VmRoots { rs: vm.rs, handles: vm.m.handles_ptr() });
         let roots_ptr = Box::into_raw(roots);
         let heap_ptr = vm.m.heap_ptr();
         unsafe { catallaxy_gc::install(&vm.m.rec, roots_ptr, heap_ptr) };
@@ -186,60 +241,84 @@ impl Vm {
     }
 
     /// Creates a VM for a fiber of this VM's thread: it shares the thread's heap and collector
-    /// record, and its roots are scanned as part of the thread's. Release it with
-    /// [`Vm::release_fiber`] on the same thread.
-    /// A register stack the allocator refuses is a `MemoryError` panic.
-    pub fn new_fiber(&mut self, stack_size: usize) -> RtResult<Box<Vm>> {
-        let stack = alloc_stack(stack_size);
+    /// record, and its roots are scanned as part of the thread's. Its register stack starts at
+    /// `initial` values and grows up to `max`. Release it with [`Vm::release_fiber`] on the same
+    /// thread. A register stack the allocator refuses is a `MemoryError` panic.
+    pub fn new_fiber(&mut self, initial: usize, max: usize) -> RtResult<Box<Vm>> {
+        let cap = initial_stack(max, initial);
+        let stack = alloc_stack(cap);
         if stack.is_null() {
-            return stack_refused(stack_size);
+            return stack_refused(cap);
         }
-        let rs = Box::into_raw(Box::new(RootState {
-            frames: Vec::with_capacity(16),
-            held_locks: Vec::new(),
-            extra_roots: Vec::new(),
-            children: Vec::new(),
-            pinned: Vec::new(),
-        }));
+        let rs = Box::into_raw(RootState::new(stack, 16));
         let vm = Box::new(Vm {
             m: Mutator::sharing(&self.m),
             stack,
-            stack_cap: stack_size,
+            stack_cap: cap,
+            stack_max: max,
+            retired: Vec::new(),
+            stress: stack_stress(),
             rs,
             next_serial: 1,
             panic_trace: None,
             root_rs: self.root_rs,
             no_park: 0,
         });
-        let roots = VmRoots { stack: vm.stack, rs: vm.rs, handles: vm.m.handles_ptr() };
-        // SAFETY: the root state belongs to this thread, which is running (not being scanned).
-        unsafe { (*self.root_rs).children.push(roots) };
+        let roots = VmRoots { rs: vm.rs, handles: vm.m.handles_ptr() };
+        // SAFETY: the root states belong to this thread, which is running (not being scanned).
+        unsafe {
+            let children = &mut (*self.root_rs).children;
+            (*vm.rs).child_index = children.len();
+            children.push(roots);
+        }
         Ok(vm)
     }
 
-    /// Unregisters a fiber VM from its thread's roots and frees it. It takes the box
+    /// Unregisters a fiber VM from its thread's roots and frees it, in O(1). It takes the box
     /// `new_fiber` returned: the VM's address was handed to the fiber's coroutine.
     #[allow(clippy::boxed_local)]
     pub fn release_fiber(mut vm: Box<Vm>) {
+        // SAFETY: the root states belong to this thread, which is running (not being scanned).
         unsafe {
-            (*vm.root_rs).children.retain(|c| !std::ptr::eq(c.rs, vm.rs));
-            let layout = std::alloc::Layout::array::<Value>(vm.stack_cap).unwrap();
-            std::alloc::dealloc(vm.stack as *mut u8, layout);
+            let children = &mut (*vm.root_rs).children;
+            let i = (*vm.rs).child_index;
+            debug_assert!(std::ptr::eq(children[i].rs, vm.rs));
+            children.swap_remove(i);
+            if let Some(moved) = children.get(i) {
+                (*moved.rs).child_index = i;
+            }
+            vm.free_stacks();
             drop(Box::from_raw(vm.rs));
             vm.m.free_handles();
         }
     }
 
+    /// Frees the register stack and the retired ones. The VM must not run code afterwards.
+    fn free_stacks(&mut self) {
+        self.free_retired();
+        if !self.stack.is_null() {
+            // SAFETY: allocated by `alloc_stack` with this capacity; no collection scans it now.
+            unsafe { free_stack(self.stack, self.stack_cap) };
+            self.stack = std::ptr::null_mut();
+        }
+    }
+
+    fn free_retired(&mut self) {
+        for (p, n) in self.retired.drain(..) {
+            // SAFETY: a retired stack is no longer the VM's, and the caller made sure no native
+            // still reads its arguments from it.
+            unsafe { free_stack(p, n) };
+        }
+    }
+
     /// Keeps `v` alive under `key` in the thread's main VM until [`Vm::unpin`].
     pub fn pin(&mut self, key: u64, v: Value) {
-        unsafe { (*self.root_rs).pinned.push((key, v)) };
+        unsafe { (*self.root_rs).pinned.insert(key, v) };
     }
 
     /// Removes and returns the value pinned under `key`.
     pub fn unpin(&mut self, key: u64) -> Option<Value> {
-        let pinned = unsafe { &mut (*self.root_rs).pinned };
-        let i = pinned.iter().position(|&(k, _)| k == key)?;
-        Some(pinned.swap_remove(i).1)
+        unsafe { (*self.root_rs).pinned.remove(&key) }
     }
 
     /// Whether a fiber running on this VM may park: not while it holds `with lock` object
@@ -265,13 +344,7 @@ impl Vm {
         // know); releasing them again afterwards finds nothing left.
         catallaxy_gc::unregister_thread(&self.m.rec);
         self.m.release_pages();
-        if !self.stack.is_null() {
-            // SAFETY: allocated by `alloc_stack` with this capacity; no collection scans it now.
-            unsafe {
-                std::alloc::dealloc(self.stack as *mut u8, std::alloc::Layout::array::<Value>(self.stack_cap).unwrap())
-            };
-            self.stack = std::ptr::null_mut();
-        }
+        self.free_stacks();
     }
 
     #[inline(always)]
@@ -352,6 +425,7 @@ impl Vm {
         if let Some(native) = f.native {
             return native(self, args);
         }
+        self.stress_move()?;
         let mut base = self.stack_top();
         if !closure.is_nil() {
             // Keep the closure rooted below the callee's frame.
@@ -379,10 +453,83 @@ impl Vm {
         self.execute(stop)
     }
 
+    /// Makes room for `need` registers, for a call from native code.
     #[inline(always)]
-    fn check_stack(&self, need: usize) -> RtResult<()> {
+    fn check_stack(&mut self, need: usize) -> RtResult<()> {
         if need >= self.stack_cap || self.rs().frames.len() >= MAX_FRAMES {
+            // With no frames, no interpreter loop runs on this VM, so no native called from
+            // bytecode does either.
+            let idle = self.rs().frames.is_empty();
+            return self.grow_stack(need, idle);
+        }
+        Ok(())
+    }
+
+    /// Makes the register stack hold more than `need` values, or fails with a stack overflow
+    /// past the VM's limit (or `MAX_FRAMES` frames). The stack at least doubles, so a deep
+    /// recursion copies it O(log n) times.
+    ///
+    /// Growing moves the stack, and code may hold raw pointers into the old one: each running
+    /// interpreter loop's register window, and the argument slices of natives that called back
+    /// into the interpreter. Interpreter loops reload their window after anything that may call
+    /// back (see `vm_call!` in `run`). Natives only read their argument slices, so the old
+    /// stack is kept, values and all, unless `safe` says no native called from bytecode can be
+    /// running on this VM (the outermost interpreter loop is asking, or none runs). Kept stacks
+    /// are freed by the next safe growth, or with the VM; growth at least doubles the stack, so
+    /// together they are smaller than it.
+    ///
+    /// Under `CATX_GC_STRESS` a small stack also moves (to a copy of the same size) on calls
+    /// back into the interpreter, so that a missed reload shows up in the test suites.
+    #[cold]
+    #[inline(never)]
+    fn grow_stack(&mut self, need: usize, safe: bool) -> RtResult<()> {
+        if self.rs().frames.len() >= MAX_FRAMES || need >= self.stack_max {
             return Err(Trap::Panic(catallaxy_runtime::stack::OVERFLOW.into()));
+        }
+        let cap = if need < self.stack_cap {
+            self.stack_cap
+        } else {
+            (need + 1).max(self.stack_cap.saturating_mul(2)).min(self.stack_max)
+        };
+        let stack = alloc_stack(cap);
+        if stack.is_null() {
+            return stack_refused(cap);
+        }
+        // SAFETY: both are valid for `stack_cap` values, and the new one is at least as large.
+        unsafe { std::ptr::copy_nonoverlapping(self.stack, stack, self.stack_cap) };
+        let old = std::mem::replace(&mut self.stack, stack);
+        let old_cap = std::mem::replace(&mut self.stack_cap, cap);
+        // No safepoint since the copy: the collector sees one stack or the other, both complete.
+        self.rs().stack = stack;
+        if safe {
+            self.free_retired();
+            // SAFETY: no native runs on this VM, so nothing reads the old stack.
+            unsafe { free_stack(old, old_cap) };
+        } else {
+            self.retired.push((old, old_cap));
+        }
+        Ok(())
+    }
+
+    /// Under `CATX_GC_STRESS`, moves a small register stack on a call back from a native (until
+    /// the stacks kept for natives add up to [`STRESS_RETIRED_LIMIT`] values).
+    #[inline(always)]
+    fn stress_move(&mut self) -> RtResult<()> {
+        if self.stress {
+            self.stress_move_slow()?;
+        }
+        Ok(())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn stress_move_slow(&mut self) -> RtResult<()> {
+        if self.rs().frames.is_empty() {
+            self.free_retired();
+        } else if self.stack_cap <= STRESS_MOVE_LIMIT
+            && self.retired.iter().map(|&(_, n)| n).sum::<usize>() < STRESS_RETIRED_LIMIT
+        {
+            self.grow_stack(0, false)?;
         }
         Ok(())
     }
@@ -463,6 +610,8 @@ impl Vm {
         self.unwind_to(0);
         self.panic_trace = None;
         self.no_park = 0;
+        // Nothing runs on this VM now, so no native reads a retired stack.
+        self.free_retired();
         if self.m.rec.state() != catallaxy_gc::ThreadState::Running {
             catallaxy_gc::leave_native(&self.m.rec);
         }
@@ -580,7 +729,8 @@ impl Vm {
                 let base: usize = $base;
                 if base + f.nregs >= self.stack_cap || frames!().len() >= MAX_FRAMES {
                     save!();
-                    return Err(Trap::Panic(catallaxy_runtime::stack::OVERFLOW.into()));
+                    // May move the stack; `regs` is reset below.
+                    tri!(self.grow_stack(base + f.nregs, stop == 0));
                 }
                 for i in ($nargs)..f.nparams {
                     unsafe { *self.stack.add(base + i) = Value::EMPTY };
@@ -631,11 +781,21 @@ impl Vm {
                 unsafe { *self.stack.add(ret) = v };
             }};
         }
+        // Calls something that may run bytecode on this VM (a native, a user `==` or `to_s`, a
+        // `Dyn` dispatch...), which may grow the register stack and so move it: reloads the
+        // register window afterwards. Every call that takes `self` goes through here.
+        macro_rules! vm_call {
+            ($e:expr) => {{
+                let v = tri!($e);
+                regs = unsafe { self.stack.add(fr.base) };
+                v
+            }};
+        }
         macro_rules! call_native {
             ($nf:expr, $a:expr, $nargs:expr) => {{
                 save!();
                 let args = unsafe { std::slice::from_raw_parts(regs.add($a), $nargs) };
-                let v = tri!(($nf)(self, args));
+                let v = vm_call!(($nf)(self, args));
                 set!($a, v);
             }};
         }
@@ -886,21 +1046,21 @@ impl Vm {
                 Op::Eq | Op::Ne => {
                     let (x, y) = (r!(b_of(w)), r!(c_of(w)));
                     save!();
-                    let eq = if x.0 == y.0 && !x.is_float() { true } else { tri!(ops::values_eq(self, x, y)) };
+                    let eq = if x.0 == y.0 && !x.is_float() { true } else { vm_call!(ops::values_eq(self, x, y)) };
                     let res = if Op::from_u8(op_of(w)) == Op::Eq { eq } else { !eq };
                     set!(a, Value::bool(res));
                 }
                 Op::Lt | Op::Le => {
                     let (x, y) = (r!(b_of(w)), r!(c_of(w)));
                     save!();
-                    let o = tri!(ops::compare_or_panic(self, x, y));
+                    let o = vm_call!(ops::compare_or_panic(self, x, y));
                     let res = if Op::from_u8(op_of(w)) == Op::Lt { o.is_lt() } else { o.is_le() };
                     set!(a, Value::bool(res));
                 }
                 Op::Cmp => {
                     let (x, y) = (r!(b_of(w)), r!(c_of(w)));
                     save!();
-                    let o = tri!(ops::compare_or_panic(self, x, y));
+                    let o = vm_call!(ops::compare_or_panic(self, x, y));
                     set!(a, Value::small_int(o as i64));
                 }
                 Op::Not => set!(a, Value::bool(!r!(b_of(w)).is_true())),
@@ -908,7 +1068,7 @@ impl Vm {
                     let d = data!();
                     let x = r!(b_of(w));
                     save!();
-                    let ok = tri!(slow::conforms(self, x, d));
+                    let ok = vm_call!(slow::conforms(self, x, d));
                     set!(a, Value::bool(ok));
                 }
                 Op::IsIface => {
@@ -926,13 +1086,13 @@ impl Vm {
                 Op::Add | Op::Sub | Op::Mul | Op::Div | Op::Mod | Op::Pow => {
                     let (x, y) = (r!(b_of(w)), r!(c_of(w)));
                     save!();
-                    let v = tri!(slow::generic_arith(self, Op::from_u8(op_of(w)), x, y));
+                    let v = vm_call!(slow::generic_arith(self, Op::from_u8(op_of(w)), x, y));
                     set!(a, v);
                 }
                 Op::Neg => {
                     let x = r!(b_of(w));
                     save!();
-                    let v = tri!(slow::generic_neg(self, x));
+                    let v = vm_call!(slow::generic_neg(self, x));
                     set!(a, v);
                 }
 
@@ -963,7 +1123,7 @@ impl Vm {
                         set!(a, x);
                     } else {
                         save!();
-                        let s = tri!(ops::to_s(self, x));
+                        let s = vm_call!(ops::to_s(self, x));
                         let v = self.m.alloc_str(&s);
                         set!(a, v);
                     }
@@ -972,7 +1132,7 @@ impl Vm {
                     let spec = FormatSpec::decode([data!(), data!()]);
                     let x = r!(b_of(w));
                     save!();
-                    let s = tri!(fmtspec::format_value(self, x, &spec));
+                    let s = vm_call!(fmtspec::format_value(self, x, &spec));
                     let v = self.m.alloc_str(&s);
                     set!(a, v);
                 }
@@ -1126,7 +1286,7 @@ impl Vm {
                     if let Some(nf) = f.native {
                         save!();
                         let args = unsafe { std::slice::from_raw_parts(regs.add(a + 1), nargs) };
-                        let v = tri!(nf(self, args));
+                        let v = vm_call!(nf(self, args));
                         set!(a, v);
                     } else {
                         let base = fr.base + a + 1;
@@ -1224,9 +1384,9 @@ impl Vm {
                         }
                     }
                     save!();
-                    let v1 = tri!(slow::get_field(self, o1, i));
+                    let v1 = vm_call!(slow::get_field(self, o1, i));
                     set!(a, v1);
-                    let v2 = tri!(slow::get_field(self, o2, j));
+                    let v2 = vm_call!(slow::get_field(self, o2, j));
                     set!(a + 1, v2);
                 }
                 Op::SetField => {
@@ -1277,6 +1437,8 @@ impl Vm {
                             err = Some(e);
                             break;
                         }
+                        // A user `hash` or `==` may have moved the register stack.
+                        regs = unsafe { self.stack.add(fr.base) };
                     }
                     self.extra_roots().pop();
                     if let Some(e) = err {
@@ -1315,13 +1477,13 @@ impl Vm {
                         }
                     }
                     save!();
-                    let v = tri!(slow::list_get(self, l, i));
+                    let v = vm_call!(slow::list_get(self, l, i));
                     set!(a, v);
                 }
                 Op::ListSet => {
                     let (l, i, v) = (r!(a), r!(b_of(w)), r!(c_of(w)));
                     save!();
-                    tri!(slow::list_set(self, l, i, v));
+                    vm_call!(slow::list_set(self, l, i, v));
                 }
                 Op::ListLen => {
                     let l = r!(b_of(w));
@@ -1331,14 +1493,14 @@ impl Vm {
                         unsafe { as_list(l) }.len()
                     } else {
                         save!();
-                        tri!(slow::list_len(self, l))
+                        vm_call!(slow::list_len(self, l))
                     };
                     set!(a, Value::small_int(n as i64));
                 }
                 Op::ListPush => {
                     let (l, v) = (r!(a), r!(b_of(w)));
                     save!();
-                    tri!(slow::list_push(self, l, v));
+                    vm_call!(slow::list_push(self, l, v));
                 }
                 Op::DynGet => {
                     let d = data!() as usize;
@@ -1361,19 +1523,19 @@ impl Vm {
                         }
                     }
                     save!();
-                    let v = tri!(slow::dyn_get(self, recv, ic));
+                    let v = vm_call!(slow::dyn_get(self, recv, ic));
                     set!(a, v);
                 }
                 Op::Index => {
                     let (x, i) = (r!(b_of(w)), r!(c_of(w)));
                     save!();
-                    let v = tri!(slow::index_get(self, x, i));
+                    let v = vm_call!(slow::index_get(self, x, i));
                     set!(a, v);
                 }
                 Op::SetIndex => {
                     let (x, i, v) = (r!(a), r!(b_of(w)), r!(c_of(w)));
                     save!();
-                    tri!(slow::index_set(self, x, i, v));
+                    vm_call!(slow::index_set(self, x, i, v));
                 }
                 Op::TupleGet => {
                     let t = r!(b_of(w));
@@ -1423,7 +1585,7 @@ impl Vm {
                     let d = data!();
                     let x = r!(b_of(w));
                     save!();
-                    let ok = tri!(slow::conforms(self, x, d));
+                    let ok = vm_call!(slow::conforms(self, x, d));
                     set!(a, if ok { x } else { Value::NIL });
                 }
                 Op::TagElems => {
@@ -1439,13 +1601,13 @@ impl Vm {
                         // heap objects and runs no code, so they stay valid and unchanged.
                         let args: &[Value] = unsafe { std::slice::from_raw_parts(regs.add(b), n) };
                         save!();
-                        tri!(slow::check_args(self, c, args, d));
+                        vm_call!(slow::check_args(self, c, args, d));
                     }
                 }
                 Op::CheckSet => {
                     let (k, v) = (r!(b_of(w)), r!(c_of(w)));
                     save!();
-                    tri!(slow::check_set(self, r!(a), k, v));
+                    vm_call!(slow::check_set(self, r!(a), k, v));
                 }
                 Op::FrameId => {
                     let next = self.next_serial;

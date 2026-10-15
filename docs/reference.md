@@ -617,6 +617,9 @@ shared instead and a warning is logged. Single operations on shared objects are 
 ### 8.2 Fibers
 
 A fiber is a lightweight cooperative thread for I/O-bound work. Thousands can run on one OS thread.
+A waiting fiber costs about 20 KB: the touched pages of its 256 KB native stack, and a register
+stack that starts at 2 KB and grows as its calls nest. Starting and finishing one takes O(1) time,
+and a thread reuses the native stacks of its finished fibers.
 
 ```
 fs = urls.map { |u| Fiber.start { fetch(u) } }     # fetch waits on files, channels, sleep...

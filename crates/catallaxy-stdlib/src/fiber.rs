@@ -40,8 +40,13 @@ use parking_lot::{Condvar, Mutex};
 
 /// Native stack per fiber. Interpreted calls do not use it; only nested native calls do.
 const FIBER_NATIVE_STACK: usize = 256 * 1024;
-/// Register stack per fiber, in values (lazily committed).
+/// Register stack per fiber, in values: it starts small and grows up to the limit.
+const FIBER_REGISTERS_INITIAL: usize = 256;
 const FIBER_REGISTERS: usize = 64 * 1024;
+/// Native stacks of finished fibers kept for reuse, per thread. Mapping a fresh stack (and its
+/// guard page) costs system calls, and a thread that runs many short fibers would make them for
+/// every one.
+const STACK_POOL: usize = 256;
 
 /// ThreadSanitizer fiber annotations. Every stack switch is bracketed: the main context calls
 /// [`tsan::enter`] just before resuming a fiber, and the fiber calls [`tsan::leave`] just before
@@ -183,7 +188,8 @@ struct Ctl {
 }
 
 struct Fiber {
-    coro: Coroutine<(), (), (), DefaultStack>,
+    /// Taken out (for its stack) once the fiber has finished.
+    coro: Option<Coroutine<(), (), (), DefaultStack>>,
     vm: *mut Vm,
     flag: Arc<AtomicBool>,
     yielder: Cell<*const Yielder<(), ()>>,
@@ -197,7 +203,7 @@ impl Drop for Fiber {
     fn drop(&mut self) {
         // Dropping a suspended coroutine resumes it to unwind its stack; the body's
         // `LeaveOnExit` switches back.
-        if self.coro.started() && !self.coro.done() {
+        if self.coro.as_ref().is_some_and(|c| c.started() && !c.done()) {
             tsan::enter(&self.tsan);
         }
     }
@@ -214,6 +220,8 @@ struct Scheduler {
     /// (deadline, id) min-heap via `Reverse`.
     timers: BinaryHeap<std::cmp::Reverse<(Instant, u64)>>,
     ctl: HashMap<u64, Arc<Ctl>>,
+    /// Native stacks of finished fibers, for reuse (at most [`STACK_POOL`]).
+    stacks: Vec<DefaultStack>,
 }
 
 impl Scheduler {
@@ -238,6 +246,7 @@ impl Scheduler {
             queued: std::collections::HashSet::new(),
             timers: BinaryHeap::new(),
             ctl: HashMap::new(),
+            stacks: Vec::new(),
         }
     }
 }
@@ -302,19 +311,28 @@ pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
     catallaxy_runtime::ownership::check_write(&vm.m, h)?;
     unsafe { catallaxy_runtime::object::as_instance(handle) }.set(ID_FIELD, Value::small_int(id as i64));
     // Both stacks come first, so a refusal (a MemoryError) leaves nothing to undo.
-    let stack = match DefaultStack::new(FIBER_NATIVE_STACK) {
-        Ok(s) => s,
-        Err(e) => {
-            catallaxy_gc::limits::release_headroom();
-            return Err(Trap::Panic(format!(
-                "MemoryError: cannot allocate a {} KB fiber stack ({e})",
-                FIBER_NATIVE_STACK / 1024
-            )));
-        }
+    let stack = match with_sched(|s| s.stacks.pop()) {
+        Some(s) => s,
+        None => match DefaultStack::new(FIBER_NATIVE_STACK) {
+            Ok(s) => s,
+            Err(e) => {
+                catallaxy_gc::limits::release_headroom();
+                return Err(Trap::Panic(format!(
+                    "MemoryError: cannot allocate a {} KB fiber stack ({e})",
+                    FIBER_NATIVE_STACK / 1024
+                )));
+            }
+        },
     };
     // The stack's lowest address includes its guard page, which the guard's margin covers.
     let stack_limit = catallaxy_runtime::stack::limit_for(stack.limit().get(), stack.base().get());
-    let fvm = Box::into_raw(vm.new_fiber(FIBER_REGISTERS)?);
+    let fvm = match vm.new_fiber(FIBER_REGISTERS_INITIAL, FIBER_REGISTERS) {
+        Ok(v) => Box::into_raw(v),
+        Err(e) => {
+            with_sched(|s| s.stacks.push(stack));
+            return Err(e);
+        }
+    };
     unsafe {
         (*fvm).extra_roots().push(closure);
         (*fvm).extra_roots().push(handle);
@@ -377,7 +395,7 @@ pub fn spawn(vm: &mut Vm, handle: Value, closure: Value) -> RtResult<u64> {
         s.fibers.insert(
             id,
             Fiber {
-                coro,
+                coro: Some(coro),
                 vm: fvm,
                 flag: Arc::new(AtomicBool::new(false)),
                 yielder: Cell::new(std::ptr::null()),
@@ -400,7 +418,7 @@ fn resume(id: u64) {
     let mut fiber = fiber;
     let prev_limit = catallaxy_runtime::stack::set_limit(fiber.stack_limit);
     tsan::enter(&fiber.tsan);
-    let r = fiber.coro.resume(());
+    let r = fiber.coro.as_mut().expect("unfinished fiber").resume(());
     catallaxy_runtime::stack::set_limit(prev_limit);
     fiber.yielder.set(YIELDER.with(|c| c.get()));
     RUNNING_FLAG.with(|f| *f.borrow_mut() = None);
@@ -418,7 +436,15 @@ fn resume(id: u64) {
         }
         CoroutineResult::Return(()) => {
             let vm = fiber.vm;
+            let stack = fiber.coro.take().map(|c| c.into_stack());
             drop(fiber);
+            if let Some(stack) = stack {
+                with_sched(|s| {
+                    if s.stacks.len() < STACK_POOL {
+                        s.stacks.push(stack);
+                    }
+                });
+            }
             // SAFETY: the coroutine finished; nothing else references its VM.
             Vm::release_fiber(unsafe { Box::from_raw(vm) });
         }
