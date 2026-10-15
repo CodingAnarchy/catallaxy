@@ -576,6 +576,7 @@ mod tests {
     }
 
     /// Buffers of at least `CARD_MIN` slots record writes per card (issue #144).
+    #[allow(clippy::single_range_in_vec_init)] // one run is the expected result
     #[test]
     fn large_buffers_record_written_cards() {
         let cap = 70 * CARD + 77; // a partial last card, and cards in two words of the table
