@@ -2,14 +2,15 @@
 
 Syntax highlighting for Catallaxy (`.cx`) files, plus the `catx lsp` language server:
 
-- diagnostics as you type
+- diagnostics as you type, for open files and for every other `.cx` file in the workspace folders (so the files importing an edited one show their errors too)
 - hover: types (including pattern bindings and block parameters), signatures with default values, and documentation comments
 - go to definition (into a read-only copy of the prelude for built-in functions and types), and find references and rename across every `.cx` file in the workspace folders, open or not (a rename that would collide with an existing name, or change what any name refers to, is refused)
-- completion, with documentation comments
+- completion, with documentation comments, including module paths and names after `import`
+- highlights of the name under the cursor, folding, and semantic highlighting
 - signature help
 - inlay hints with inferred types
 - document symbols, and workspace symbols over the workspace folders
-- formatting (`catx fmt`)
+- formatting (`catx fmt`) of the document or a selection
 
 ## Install
 
@@ -27,7 +28,8 @@ from `PATH`. To use another binary, set **`catallaxy.serverPath`**, for example
 `"catallaxy.serverPath": "~/src/catallaxy/target/release/catx"`. If you change the setting, or
 rebuild `catx` and run **Catallaxy: Restart Language Server**, the server restarts.
 `catallaxy.trace.server` (`messages` or `verbose`) logs the protocol traffic to the **Catallaxy**
-output channel.
+output channel. Setting the environment variable `CATX_LSP_DEBUG=1` before starting VS Code makes
+the server log how many files each request compiled to the same channel.
 
 When it starts, and when a workspace folder is added, the server checks the workspace's `.cx` files
 in the background so that references, rename and workspace symbols answer quickly. VS Code shows

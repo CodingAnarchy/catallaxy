@@ -417,8 +417,12 @@ fn resume(id: u64) {
     RUNNING_FLAG.with(|f| *f.borrow_mut() = Some(fiber.flag.clone()));
     let mut fiber = fiber;
     let prev_limit = catallaxy_runtime::stack::set_limit(fiber.stack_limit);
+    // SAFETY: the VM lives until the fiber finishes, below.
+    unsafe { (*fiber.vm).set_fiber_running(true) };
     tsan::enter(&fiber.tsan);
     let r = fiber.coro.as_mut().expect("unfinished fiber").resume(());
+    // Parked or finished: minor collections scan it once more, then skip it until it runs.
+    unsafe { (*fiber.vm).set_fiber_running(false) };
     catallaxy_runtime::stack::set_limit(prev_limit);
     fiber.yielder.set(YIELDER.with(|c| c.get()));
     RUNNING_FLAG.with(|f| *f.borrow_mut() = None);
