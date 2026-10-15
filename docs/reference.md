@@ -229,6 +229,13 @@ A generic type named without arguments is the erased test (`x is Box`, `x as? Bo
 `Box =>`): it narrows to the members of the static type that are a `Box` (with their own arguments), or
 to `Box[Dyn]` when the static type does not say (`Dyn`, an interface, a superclass). `List`, `Set`,
 `Dict` and tuple types are checked element by element, so `x is List[Int]` is allowed on any value.
+A test for an interface (`x is Shape`) passes for values of the classes that satisfy it by the rules of
+§3.1 (every required method, with compatible parameters and result), not just for classes with methods
+of those names; methods from every extension count, as at run time. Since only the class is checked, a
+generic class that satisfies the interface only for some type arguments (`Box[T]` with
+`fn area(self) -> T`, for `Shape`'s `fn area(self) -> Float`) makes the test an error (E0374) where a
+value of such a class could reach it with other arguments: on a `Box[Int]`, or on a `Dyn`, an interface
+value or a type parameter. Tuples and functions pass no interface test.
 A variant pattern (`Ok(v)`) binds its payload with every instantiation the subject may have: on
 `Result[Int, String] | Result[String, Int]`, `v` is an `Int | String`, and on a `Dyn` it is a `Dyn`.
 
@@ -507,7 +514,12 @@ Annotate the parameter to use any of these.
   Deeper nesting panics with `LockError:`.
 - An internal error of the runtime (a bug in Catallaxy, or in a native extension) is a panic whose
   message starts `internal error:`. It ends only the thread, fiber or `par_*` call it happened in, like
-  any panic, and releases the locks that thread held.
+  any panic, and releases the locks that thread held. Its report gives the Rust source location as
+  its first `at` line, marked `(Rust)`; Rust's own panic report is printed too with
+  `CATX_RUST_PANIC=1`. One that happens inside a garbage collection cannot be recovered from (the
+  heap's state is unknown, and other threads may be stopped for it): the program's output is
+  flushed, the message is printed, followed by `during a garbage collection; the program cannot
+  continue`, and the process exits with status 101.
 - Running out of memory panics with a message starting `MemoryError:`, like any other panic (so on another
   thread `join` returns it as `Err`, and the program can carry on once the data is dropped):
   - A single request larger than physical memory (or than `CATX_MAX_HEAP`), such as `List.filled(n, x)`,
@@ -641,7 +653,7 @@ and any list is a `List[Dyn]`. A `List[Dyn]` converted to `Dyn` takes any elemen
 Generic types are otherwise erased at runtime, so a value of the wrong type can still reach typed data
 through `Dyn` where the element types are not known: a collection that reached `Dyn` inside generic code
 (where its element type is a type parameter), one nested in another collection, one from `Json.parse`
-narrowed by a test, or an instance of a generic class. Such a value is caught where it is used as its
+narrowed by a test, or an instance of a generic class (#219). Such a value is caught where it is used as its
 static type (a standard-library method's receiver or argument, a field access, a list or tuple access, a
 method call), with a `TypeError` panic that names the expected and actual types:
 `xs[0].length` panics with `TypeError: expected String, got Int`.

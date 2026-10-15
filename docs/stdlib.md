@@ -331,6 +331,8 @@ Everything here is available in every module without an import.
 - `fn chunk(self, size: Int) -> List[List[T]]`
 - `fn sort_by_keys[K: Comparable](self, keys: List[K]) -> List[T]`
 - `fn sort_with(self, f: fn(T, T) -> Int) -> List[T]`
+- `fn min_by[K: Comparable](self, f: fn(T) -> K) -> T?`
+- `fn max_by[K: Comparable](self, f: fn(T) -> K) -> T?`
 - `fn par_map[U](self, f: fn(T) -> U) -> List[U]`
 - `fn par_each(self, f: fn(T))`
 - `fn par_reduce(self, identity: T, f: fn(T, T) -> T) -> T`

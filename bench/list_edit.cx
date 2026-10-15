@@ -1,0 +1,20 @@
+# In-place list edits on a 100k-item list (#172): concat, shift, insert at the front,
+# remove_at and truncate at the end. Each used to copy the whole list twice.
+n = 100000
+xs: List[Int] = []
+for i in 0...n { xs.push(i) }
+
+# 10k concats of 3 items each.
+for i in 0...10000 { xs.concat([i, i, i]) }
+
+# insert(0, x) 20k times.
+for i in 0...20000 { xs.insert(0, i) }
+
+# remove_at(len - 1) and truncate(len - 1), 1000 times each.
+for i in 0...1000 { xs.remove_at(xs.length - 1) }
+for i in 0...1000 { xs.truncate(xs.length - 1) }
+
+# shift until empty.
+total = 0
+while xs.length > 0 { total += xs.shift() ?? 0 }
+puts(total)

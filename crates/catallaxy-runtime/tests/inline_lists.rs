@@ -257,6 +257,7 @@ fn shared_inline_list_spills_safely_under_lock_free_readers() {
                         if stop.load(Ordering::Relaxed) {
                             break;
                         }
+                        pause(&w.m.rec);
                     }
                     assert!(reads > 0);
                     w.finish();

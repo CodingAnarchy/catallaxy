@@ -377,34 +377,12 @@ extend List[T] {
     out
   }
   native fn sort_by_keys[K: Comparable](self, keys: List[K]) -> List[T]
-  fn sort_with(self, f: fn(T, T) -> Int) -> List[T] {
-    # Merge sort using the comparator.
-    if self.length <= 1 { return self.dup() }
-    mid = self.length / 2
-    left = self.slice(0, mid).sort_with(f)
-    right = self.slice(mid, self.length - mid).sort_with(f)
-    out: List[T] = List.with_capacity(self.length)
-    i = 0
-    j = 0
-    while i < left.length and j < right.length {
-      if f(left[i], right[j]) <= 0 {
-        out.push(left[i])
-        i += 1
-      } else {
-        out.push(right[j])
-        j += 1
-      }
-    }
-    while i < left.length {
-      out.push(left[i])
-      i += 1
-    }
-    while j < right.length {
-      out.push(right[j])
-      j += 1
-    }
-    out
-  }
+  # A stable sort by the comparator `f`: negative, zero or positive as its first argument sorts
+  # before, with or after its second.
+  native fn sort_with(self, f: fn(T, T) -> Int) -> List[T]
+  # As `Enumerable`'s, natively: the first item with the smallest (largest) key.
+  native fn min_by[K: Comparable](self, f: fn(T) -> K) -> T?
+  native fn max_by[K: Comparable](self, f: fn(T) -> K) -> T?
   native fn par_map[U](self, f: fn(T) -> U) -> List[U]
   native fn par_each(self, f: fn(T))
   native fn par_reduce(self, identity: T, f: fn(T, T) -> T) -> T
@@ -563,6 +541,8 @@ pub class Deque[T] {
 native fn __vacant[T](witness: List[T]) -> T
 # Internal: the structural hash `Dict` and `Set` use for any value.
 native fn __hash_of(value: Dyn) -> Int
+# Internal: `zero` plus the items of `xs` if it is a list of numbers of `zero`'s kind, else nil.
+native fn __list_sum(xs: Dyn, zero: Dyn) -> Dyn
 
 extend Dict[K, V] {
   native fn new() -> Dict[K, V]

@@ -403,12 +403,23 @@ extend[T: Comparable] Enumerable[T] {
 }
 
 extend Enumerable[Int] {
-  fn sum(self) -> Int { self.reduce(0) { |a, b| a + b } }
+  fn sum(self) -> Int {
+    # A list is summed natively; other sequences item by item.
+    if let s = __list_sum(self, 0) as? Int { return s }
+    total = 0
+    self.each { |x| total += x }
+    total
+  }
   fn product(self) -> Int { self.reduce(1) { |a, b| a * b } }
 }
 
 extend Enumerable[Float] {
-  fn sum(self) -> Float { self.reduce(0.0) { |a, b| a + b } }
+  fn sum(self) -> Float {
+    if let s = __list_sum(self, 0.0) as? Float { return s }
+    total = 0.0
+    self.each { |x| total += x }
+    total
+  }
   fn product(self) -> Float { self.reduce(1.0) { |a, b| a * b } }
 }
 

@@ -78,7 +78,7 @@ impl<'a> Codegen<'a> {
         let ck = self.ck;
         self.prog.files = self.sm.files.iter().map(|f| f.path.clone()).collect();
         self.prog.rt_types = ck.rt_types.clone();
-        self.prog.ifaces = ck.rt_ifaces.clone();
+        self.prog.ifaces = ck.rt_iface_sets.clone();
         self.prog.funcs = vec![FuncProto::default(); ck.fns.len()];
         for fid in 0..ck.fns.len() as FnId {
             if matches!(ck.fns[fid as usize].decl, DeclRef::Closure(_)) {

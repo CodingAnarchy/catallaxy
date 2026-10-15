@@ -246,6 +246,88 @@ fn shared_list_is_safe_under_concurrent_pushes() {
     h.finish();
 }
 
+/// In-place edits of a shared list (insert, remove, replace a run, truncate, clear, reverse;
+/// issue #172) move items with atomic stores while other threads read it without locking: every
+/// read sees an item that was in the list or nil, and the writer's view matches a model.
+#[test]
+fn shared_list_in_place_edits_stay_safe_for_lock_free_readers() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let list = h.m.alloc_list(Vec::new());
+    h.m.root(list);
+    ownership::share_deep(h.m, list, false).unwrap();
+    let addr = list.0;
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let readers: Vec<_> = (0..2)
+        .map(|_| {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                let w = Host::new();
+                let l = Value(addr);
+                let mut reads = 0usize;
+                loop {
+                    let list = ownership::read_list(w.m, l).unwrap();
+                    for i in 0..list.len() + 2 {
+                        if let Some(v) = list.get(i) {
+                            assert!(v.is_nil() || str_of(v).is_some_and(|s| s.starts_with('s')));
+                        }
+                    }
+                    for v in list.to_vec() {
+                        assert!(v.is_nil() || str_of(v).is_some_and(|s| s.starts_with('s')));
+                    }
+                    reads += 1;
+                    catallaxy_gc::safepoint(&w.m.rec);
+                    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
+                }
+                assert!(reads > 0);
+                w.finish();
+            })
+        })
+        .collect();
+    let mut model: Vec<Value> = Vec::new();
+    for r in 0..n(300) {
+        let s = h.m.alloc_str(&format!("s{r}"));
+        h.m.root(s);
+        ownership::publish_into_shared(h.m, s).unwrap();
+        let len = model.len();
+        let (at, remove, items): (usize, usize, Vec<Value>) = match r % 8 {
+            0 | 1 => (len, 0, vec![s; 1 + r % 13]),
+            2 => (0, 0, vec![s]),
+            3 => (len / 2, 0, vec![s, s, s]),
+            4 if len > 0 => (0, 1, vec![]),
+            5 if len > 2 => (len / 3, 2, vec![s, s, s]),
+            6 if len > 4 => (1, len / 2, vec![]),
+            7 if r % 5 == 0 => (0, len, vec![]),
+            _ => (len, 0, vec![s]),
+        };
+        ownership::write_list(h.m, list, |l, access| {
+            assert_eq!(access, Access::Shared);
+            unsafe { l.try_splice(at, remove, &items, access) }.unwrap();
+            if r % 17 == 0 {
+                unsafe { l.reverse() };
+            }
+        })
+        .unwrap();
+        model.splice(at..at + remove, items);
+        if r % 17 == 0 {
+            model.reverse();
+        }
+        assert_eq!(ownership::read_list(h.m, list).unwrap().to_vec(), model);
+        if r % 40 == 0 {
+            h.gc();
+        }
+    }
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    catallaxy_gc::blocking(&h.m.rec, || {
+        for t in readers {
+            t.join().unwrap();
+        }
+    });
+    h.finish();
+}
+
 #[test]
 fn shared_list_reads_do_not_lock_and_stay_safe() {
     let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -288,6 +370,7 @@ fn shared_list_reads_do_not_lock_and_stay_safe() {
                     if stop.load(std::sync::atomic::Ordering::Relaxed) {
                         break;
                     }
+                    pause(&w.m.rec);
                 }
                 assert!(reads > 0);
                 w.finish();
@@ -371,6 +454,7 @@ fn shared_dict_seqlock_reads_stay_consistent() {
                     if done {
                         break;
                     }
+                    pause(&w.m.rec);
                 }
                 assert!(hits > 0, "no key was ever found");
                 w.finish();

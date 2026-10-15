@@ -417,7 +417,7 @@ pub enum RtType {
     Optional(Box<RtType>),
     Union(Vec<RtType>),
     Fn,
-    /// Structural interface (method names).
+    /// Interface: the value's class is one of those listed in `Program::ifaces`.
     Iface(u32),
     /// In a write check (`Program::write_checks`): the element type of the collection written
     /// to (0: a list's or set's elements, a dict's keys; 1: a dict's values), from its tags.
@@ -461,8 +461,9 @@ pub struct Program {
     pub rt_parts: Vec<Vec<u32>>,
     /// Argument checks for calls that write into a collection through `Dyn` (`Op::CheckArgs`).
     pub write_checks: Vec<WriteCheck>,
-    /// Interfaces for runtime checks: required method names.
-    pub ifaces: Vec<Vec<String>>,
+    /// Interfaces for runtime checks: for each, the sorted ids of the classes whose methods
+    /// satisfy it (the checker decides, with the rules of a static conversion).
+    pub ifaces: Vec<Vec<u32>>,
     pub files: Vec<String>,
     /// Functions to run, in order, the last being the entry module's main body.
     pub entry: Vec<u32>,
