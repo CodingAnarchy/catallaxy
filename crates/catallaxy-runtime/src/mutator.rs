@@ -510,7 +510,11 @@ impl Mutator {
 
     pub fn alloc_string_builder(&mut self, s: String) -> Value {
         let h = self.alloc_raw(std::mem::size_of::<StringBuilderObj>(), BUILTINS.string_builder);
-        unsafe { std::ptr::write((*(h as *mut StringBuilderObj)).buf.get(), s) };
+        let chars = s.chars().count();
+        unsafe {
+            std::ptr::write((*(h as *mut StringBuilderObj)).chars.get(), chars);
+            std::ptr::write((*(h as *mut StringBuilderObj)).buf.get(), s);
+        }
         Value::from_ptr(h)
     }
 

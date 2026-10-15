@@ -112,11 +112,23 @@ struct Registry {
     lock: parking_lot::Mutex<()>,
 }
 
-static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
-    slots: (0..MAX_CLASSES).map(|_| AtomicPtr::new(std::ptr::null_mut())).collect(),
-    len: AtomicUsize::new(0),
-    lock: parking_lot::Mutex::new(()),
-});
+static REGISTRY: LazyLock<Registry> =
+    LazyLock::new(|| Registry { slots: null_slots(), len: AtomicUsize::new(0), lock: parking_lot::Mutex::new(()) });
+
+/// `MAX_CLASSES` null slots, as one zeroed allocation: building them one at a time took most
+/// of a second natively and about 20 s under Miri, in every test binary (issue #146).
+fn null_slots() -> Box<[AtomicPtr<Class>]> {
+    let layout = std::alloc::Layout::array::<AtomicPtr<Class>>(MAX_CLASSES).expect("slot table layout");
+    // SAFETY: the layout has a nonzero size; an all-zero `AtomicPtr` is a null pointer, and the
+    // allocation has the layout `Box<[AtomicPtr<Class>]>` frees with.
+    unsafe {
+        let p = std::alloc::alloc_zeroed(layout) as *mut AtomicPtr<Class>;
+        if p.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        Box::from_raw(std::ptr::slice_from_raw_parts_mut(p, MAX_CLASSES))
+    }
+}
 
 /// Fields of a class under construction. `register_class` assigns the id and the GC vtable.
 pub struct ClassSpec {
