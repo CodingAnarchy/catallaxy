@@ -638,6 +638,23 @@ to code that does not hold the lock:
 
 `Atomic.add(n)` returns the new value. `Channel.recv()` blocks until a value arrives and returns
 `nil` once the channel is closed and drained; `for x in ch` iterates until then.
+`ch.recv_timeout(secs)` waits at most `secs` seconds and returns `nil` if nothing came.
+`ch.try_send(move v)` queues `v` only if that needs no wait. It returns `false` if a bounded
+channel is full or the channel is closed, and the moved value is then dropped.
+
+`Channel.select` waits on several channels at once:
+
+```
+r = Channel.select([
+  jobs.on_recv { |job| run(job) },          # job is nil once `jobs` is closed and drained
+  quit.on_recv { |_| "stop" },
+], timeout: 1.0)                             # nil if no case was ready within a second
+```
+
+It receives from the first case whose channel has an item, or is closed and drained (then the
+block gets `nil`). It returns that case's block result. Among several ready cases it picks one at
+random, so no channel starves. `timeout: 0.0` polls. Every wait here (`recv_timeout`, `select`) parks
+a fiber the way `recv` does, and blocks a thread that has no fibers. A sender on any thread wakes it.
 
 ### 8.2 Fibers
 
