@@ -1,0 +1,63 @@
+{"a":[true,false,null],"b":2,"c":{"y":-5.0,"z":"é😀\n"}}
+2
+[0,0,100.0,0.01,123456789012345678901234567890,1.5,"\"\\/\b\f\r\t"]
+top
+42
+invalid JSON: EOF while parsing a value at line 1 column 0
+invalid JSON: trailing comma at line 1 column 4
+invalid JSON: expected `:` at line 1 column 6
+invalid JSON: invalid number at line 1 column 2
+invalid JSON: number out of range at line 1 column 5
+invalid JSON: unexpected end of hex escape at line 1 column 8
+invalid JSON: control character (\u0000-\u001F) found while parsing a string at line 1 column 3
+invalid JSON: trailing characters at line 1 column 5
+invalid JSON: key must be a string at line 1 column 2
+invalid JSON: recursion limit exceeded at line 1 column 128
+invalid JSON: EOF while parsing a value at line 1 column 3
+true
+c
+[{"id":1,"name":"a"},{"id":2,"name":"b"},{"id":3,"name":"c"}]
+{"1":"string one","10":"ten","2":"two","a":{},"b":[]}
+{
+  "1": "string one",
+  "10": "ten",
+  "2": "two",
+  "a": {},
+  "b": []
+}
+{"label":"tab\there  é 😀","x":1,"y":2}
+[
+  {
+    "label": "tab\there  é 😀",
+    "x": 1,
+    "y": 2
+  },
+  {
+    "label": "tab\there  é 😀",
+    "x": 1,
+    "y": 2
+  }
+]
+["$12.34","$0.5"]
+["Circle(1.5)","Square(2.0)"]
+[1,"two",null]
+[1.0,0.1,-0.0,1e+21,1e-7,1.1805916207174113e+21,null,null]
+["\u0001\u001f\"\\/","日本語"]
+[]
+[
+  [],
+  {},
+  [
+    1,
+    [
+      2,
+      [
+        3
+      ]
+    ]
+  ]
+]
+{"q":[1,2]}
+246040
+true
+true
