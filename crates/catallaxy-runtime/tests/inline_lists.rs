@@ -7,6 +7,7 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use catallaxy_runtime::dict::DictTable;
 use catallaxy_runtime::object::*;
 use catallaxy_runtime::ownership::{self, Access};
 use catallaxy_runtime::Value;
@@ -298,5 +299,37 @@ fn shared_inline_list_spills_safely_under_lock_free_readers() {
         h.m.set(hl, Value::NIL);
     }
     h.gc();
+    h.finish();
+}
+
+#[test]
+fn element_tags_survive_growth_and_leave_capacities_alone() {
+    let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut h = Host::new();
+    let l = |v: Value| unsafe { as_list(v) };
+    let list = h.m.alloc_list(Vec::new());
+    assert_eq!(l(list).elem_tag(), 0);
+    // Only an untagged list takes a tag; the capacity reads as before.
+    assert!(l(list).set_elem_tag(0, 7));
+    assert!(!l(list).set_elem_tag(0, 9));
+    assert_eq!((l(list).elem_tag(), l(list).capacity()), (7, ListObj::INLINE_MIN));
+    // Growing out of line and collecting keep the tag (it lives in the object, not the buffer).
+    let hl = h.m.root(list);
+    for i in 0..(ListObj::INLINE_MAX + 2) as i64 {
+        let v = h.m.get(hl);
+        unsafe { as_list(v).push(Value::small_int(i), Access::Local) };
+    }
+    h.minor();
+    h.gc();
+    let list = h.m.get(hl);
+    assert!(!l(list).is_inline() && l(list).len() == ListObj::INLINE_MAX + 2);
+    assert_eq!(l(list).elem_tag(), 7);
+    assert!(l(list).set_elem_tag(7, 8) && l(list).elem_tag() == 8);
+    // Dicts and sets keep a key and a value tag.
+    let d = h.m.alloc_dict(DictTable::new());
+    let dict = unsafe { as_dict(d) };
+    assert_eq!(dict.tags(), (0, 0));
+    assert!(dict.set_tags((0, 0), (3, 4)) && !dict.set_tags((0, 0), (5, 6)));
+    assert_eq!(dict.tags(), (3, 4));
     h.finish();
 }

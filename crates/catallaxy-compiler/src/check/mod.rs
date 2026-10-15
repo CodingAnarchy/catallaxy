@@ -172,6 +172,12 @@ pub struct Checker {
     pub assigns: FxHashMap<NodeId, AssignRes>,
     pub pats: FxHashMap<NodeId, PatRes>,
     pub coerce: FxHashMap<NodeId, Coercion>,
+    /// Expressions of a collection type converted to `Dyn`, with their static types: the
+    /// collection gets that type's element types as run-time tags (`Op::TagElems`), so writes
+    /// through `Dyn` can be checked. Turned into `tag_elems` once types are known.
+    pub dyn_conversions: FxHashMap<NodeId, TyId>,
+    /// The run-time type to tag each such expression's value with (see `dyn_conversions`).
+    pub tag_elems: FxHashMap<NodeId, RtType>,
     pub closures: FxHashMap<NodeId, ClosureInfo>,
     /// `for` loops whose body is a block: the loop node → closure info.
     pub for_bodies: FxHashMap<NodeId, ClosureInfo>,
@@ -326,6 +332,8 @@ impl Checker {
             assigns: FxHashMap::default(),
             pats: FxHashMap::default(),
             coerce: FxHashMap::default(),
+            dyn_conversions: FxHashMap::default(),
+            tag_elems: FxHashMap::default(),
             closures: FxHashMap::default(),
             for_bodies: FxHashMap::default(),
             decl_locals: FxHashMap::default(),
@@ -491,6 +499,48 @@ impl Checker {
         self.rt_ifaces.push(names);
         self.ifaces[iid as usize].rt_index = Some(i);
         i
+    }
+
+    /// Whether a value of static type `t` holds a collection whose element types are fully
+    /// known (no type parameters or inference variables), so converting it to `Dyn` tags it:
+    /// a `List`, `Set` or `Dict`, a tuple with one, or an optional one.
+    pub fn taggable(&self, t: TyId) -> bool {
+        let t = self.types.shallow_resolve(t);
+        match self.types.get(t) {
+            Ty::Class(builtin::LIST | builtin::SET | builtin::DICT, args) => args.iter().all(|&a| self.concrete(a)),
+            Ty::Tuple(ts) => ts.iter().any(|&x| self.taggable(x)) && ts.iter().all(|&x| self.concrete(x)),
+            Ty::Union(ts) => {
+                ts.len() == 2
+                    && ts.contains(&self.types.nil)
+                    && ts.iter().any(|&x| x != self.types.nil && self.taggable(x))
+            }
+            Ty::Frozen(inner) => self.taggable(*inner),
+            _ => false,
+        }
+    }
+
+    /// No type parameters, inference variables or other types without a run-time descriptor.
+    fn concrete(&self, t: TyId) -> bool {
+        let t = self.types.shallow_resolve(t);
+        match self.types.get(t) {
+            Ty::Class(_, args) | Ty::Enum(_, args) | Ty::Iface(_, args) => args.iter().all(|&a| self.concrete(a)),
+            Ty::Tuple(ts) | Ty::Union(ts) => ts.iter().all(|&x| self.concrete(x)),
+            Ty::Frozen(inner) => self.concrete(*inner),
+            Ty::Fn(..) | Ty::Dyn => true,
+            _ => false,
+        }
+    }
+
+    /// Fills `tag_elems` from `dyn_conversions`, once every body is checked.
+    pub fn finish_tag_elems(&mut self) {
+        let mut convs: Vec<(NodeId, TyId)> = self.dyn_conversions.iter().map(|(&k, &v)| (k, v)).collect();
+        convs.sort_unstable();
+        for (id, t) in convs {
+            if self.taggable(t) {
+                let rt = self.rt_of(t);
+                self.tag_elems.insert(id, rt);
+            }
+        }
     }
 
     /// Runtime descriptor for a static type (used by `is`, `as?` and type patterns).

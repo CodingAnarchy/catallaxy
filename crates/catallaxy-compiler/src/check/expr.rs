@@ -33,6 +33,10 @@ impl Checker {
     /// Reports a mismatch if `t` (the type of `e`) is not assignable to `ty`.
     pub fn require_assignable(&mut self, e: &Expr, t: TyId, ty: TyId, what: &str) -> bool {
         if self.assignable(t, ty) {
+            if matches!(self.types.get(self.types.shallow_resolve(ty)), Ty::Dyn) && self.suppress_diags == 0 {
+                // A collection converted to `Dyn` keeps its element types as run-time tags.
+                self.dyn_conversions.insert(e.id, t);
+            }
             return true;
         }
         if self.try_int_to_float(t, ty) {

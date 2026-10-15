@@ -92,11 +92,24 @@ static GLOBALS: LazyLock<Box<[AtomicU64]>> =
     LazyLock::new(|| (0..MAX_GLOBALS).map(|_| AtomicU64::new(Value::NIL.0)).collect());
 static GLOBAL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static RT_TYPES: LazyLock<Table<RtType>> = LazyLock::new(|| Table::new(1 << 16));
+static RT_PARTS: LazyLock<Table<Vec<u32>>> = LazyLock::new(|| Table::new(1 << 16));
+static WRITE_CHECKS: LazyLock<Table<WriteCheck>> = LazyLock::new(|| Table::new(1 << 14));
 static IFACES: LazyLock<Table<Vec<Sym>>> = LazyLock::new(|| Table::new(1 << 14));
 
 #[inline]
 pub fn rt_type(id: u32) -> &'static RtType {
     RT_TYPES.get(id as usize)
+}
+
+/// The ids of the direct parts of run-time type `id` (see `Program::rt_parts`).
+#[inline]
+pub fn rt_parts(id: u32) -> &'static [u32] {
+    RT_PARTS.get(id as usize)
+}
+
+#[inline]
+pub fn write_check(id: u32) -> &'static WriteCheck {
+    WRITE_CHECKS.get(id as usize)
 }
 
 #[inline]
@@ -108,6 +121,7 @@ pub struct ProgramMeta {
     pub files: Vec<String>,
     pub globals: Vec<GlobalProto>,
     pub rt_types: Vec<RtType>,
+    pub write_checks: usize,
     pub ifaces: Vec<Vec<Sym>>,
     pub loaded_funcs: usize,
     pub loaded_classes: usize,
@@ -123,6 +137,7 @@ pub static META: LazyLock<RwLock<ProgramMeta>> = LazyLock::new(|| {
         files: Vec::new(),
         globals: Vec::new(),
         rt_types: Vec::new(),
+        write_checks: 0,
         ifaces: Vec::new(),
         loaded_funcs: 0,
         loaded_classes: 0,
@@ -325,8 +340,13 @@ fn load_inner(p: &Program, m: &mut Mutator, natives: &NativeLookup) -> Result<()
     GLOBAL_COUNT.store(p.globals.len(), Ordering::Release);
     for i in meta.rt_types.len()..p.rt_types.len() {
         RT_TYPES.push_at(i, p.rt_types[i].clone());
+        RT_PARTS.push_at(i, p.rt_parts.get(i).cloned().unwrap_or_default());
     }
     meta.rt_types = p.rt_types.clone();
+    for i in meta.write_checks..p.write_checks.len() {
+        WRITE_CHECKS.push_at(i, p.write_checks[i].clone());
+    }
+    meta.write_checks = p.write_checks.len();
     for i in meta.ifaces.len()..p.ifaces.len() {
         IFACES.push_at(i, p.ifaces[i].iter().map(|n| intern(n)).collect());
     }
