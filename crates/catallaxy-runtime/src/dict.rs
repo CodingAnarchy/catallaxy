@@ -261,14 +261,18 @@ impl DictTable {
     pub fn trace_written(&self, t: &mut Tracer) {
         // SAFETY: the entry buffer is allocated by `WordBuf` (never in place), and the caller is
         // the owner's minor collection, so no other thread writes the table.
-        let r = unsafe { WordBuf::take_written(self.entries.load(Ordering::Relaxed)) };
         let w = if self.shape().is_some() { 1 } else { W };
-        for i in r.start / w..r.end.div_ceil(w).min(self.raw_len()) {
-            if let Some(e) = self.raw_entry(i) {
-                mark_value(t, e.key);
-                mark_value(t, e.value);
-            }
-        }
+        let n = self.raw_len();
+        unsafe {
+            WordBuf::take_written(self.entries.load(Ordering::Relaxed), |r| {
+                for i in r.start / w..r.end.div_ceil(w).min(n) {
+                    if let Some(e) = self.raw_entry(i) {
+                        mark_value(t, e.key);
+                        mark_value(t, e.value);
+                    }
+                }
+            })
+        };
     }
 
     /// The words of the entry buffer recorded as written since the last minor collection that
