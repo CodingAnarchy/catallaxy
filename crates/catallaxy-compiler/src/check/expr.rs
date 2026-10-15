@@ -82,7 +82,19 @@ impl Checker {
         if self.may_mutate(e) {
             self.clear_unstable_paths();
         }
+        if let Some(span) = self.runner_called(e) {
+            self.clear_runner(span);
+        }
         t
+    }
+
+    /// For a direct call `f(...)` of a local closure, the span declaring `f`.
+    fn runner_called(&self, e: &Expr) -> Option<Span> {
+        let ExprKind::Call { callee, .. } = &e.kind else { return None };
+        match (&callee.kind, self.names.get(&callee.id)) {
+            (ExprKind::Ident(_), Some(NameRes::Local(f))) => Some(self.locals[*f as usize].span),
+            _ => None,
+        }
     }
 
     /// Before a loop: what its body may do on one iteration happens before the next, so field
@@ -114,6 +126,16 @@ impl Checker {
         if calls {
             self.clear_unstable_paths();
         }
+        // Locals that contained closures assign, when the body calls one of them.
+        let narrowed: Vec<LocalId> = self.ctxs.last().map_or(Vec::new(), |c| {
+            let mut v: Vec<LocalId> = c.narrow.iter().flat_map(|l| l.keys().copied()).collect();
+            v.extend(c.path_narrow.iter().flat_map(|l| l.keys().map(|p| p.0)));
+            v
+        });
+        let run: Vec<LocalId> = narrowed.into_iter().filter(|&l| self.loop_calls_runner(l, body, None)).collect();
+        for &l in &run {
+            self.clear_narrowing(l);
+        }
         let roots: Vec<LocalId> = locals.iter().filter_map(|n| self.lookup_local_quiet(n)).collect();
         self.clear_paths(|p, _| roots.contains(&p.0) || p.1.iter().any(|f| fields.contains(f)));
     }
@@ -125,8 +147,11 @@ impl Checker {
     /// visibly keeps the value within it; otherwise the narrowing is dropped for the loop. A kept
     /// narrowing is recorded in `loop_facts`, so each assignment is checked against it, and holds
     /// again after the loop. Returns the mark to pass to `loop_exit`.
-    fn loop_enter(&mut self, cond: Option<&Expr>, body: &Block) -> (usize, usize) {
+    fn loop_enter(&mut self, cond: Option<&Expr>, body: &Block, iter_calls: bool) -> (usize, usize) {
         let mark = (self.loop_facts.len(), self.loop_dropped.len());
+        // Whether an iteration may run a closure: a call in the body or condition, or a user
+        // `each` driving a `for`.
+        let calls = iter_calls || self.block_may_call(body, cond);
         let mut assigns: Vec<(&str, Option<BinOp>, &Expr, bool)> = Vec::new();
         let mut stack: Vec<(&Expr, bool)> = body.stmts.iter().chain(cond).map(|x| (x, false)).collect();
         while let Some((x, deferred)) = stack.pop() {
@@ -146,7 +171,7 @@ impl Checker {
                 continue;
             }
             seen.push(l);
-            if self.dies_at_calls(l) {
+            if (self.dies_at_calls(l) && calls) || self.loop_calls_runner(l, body, cond) {
                 // Already dropped at each call; a loop fact would outlive those.
                 if self.local_ty(l) != self.locals[l as usize].ty {
                     self.clear_narrowing(l);
@@ -160,7 +185,14 @@ impl Checker {
             if narrowed == declared || !self.trial(|c| c.assignable(narrowed, declared)) {
                 continue;
             }
-            let mine: Vec<_> = assigns.iter().filter(|a| self.lookup_local_quiet(a.0) == Some(l)).copied().collect();
+            // An assignment in a closure is to `l` only if the pre-scan found that some closure
+            // assigns `l` (by binding); otherwise it is to a local of the closure.
+            let by_closure = self.locals[l as usize].closure_assigned || !self.locals[l as usize].runners.is_empty();
+            let mine: Vec<_> = assigns
+                .iter()
+                .filter(|a| self.lookup_local_quiet(a.0) == Some(l) && (!a.3 || by_closure))
+                .copied()
+                .collect();
             let keeps = mine
                 .into_iter()
                 .all(|(_, op, value, deferred)| !deferred && self.assign_keeps(op, value, declared, narrowed));
@@ -254,7 +286,16 @@ impl Checker {
             ));
         }
         if !self.dies_at_calls(l) {
-            return None;
+            let runners = &self.locals[l as usize].runners;
+            let mut names: Vec<String> = runners.iter().map(|r| format!("`{}`", r.1)).collect();
+            names.dedup();
+            if names.is_empty() {
+                return None;
+            }
+            return Some(format!(
+                "the closure in {} assigns `{n}`, so a nil test on it holds only until that closure is called; bind the value instead: `if let v = {n} {{ ... }}`",
+                names.join(" or ")
+            ));
         }
         let why = if self.locals[l as usize].closure_assigned {
             format!("a closure assigns `{n}`, so a nil test on it holds only until the next call, which may run the closure")
@@ -386,7 +427,7 @@ impl Checker {
             }
             ExprKind::While { cond, body } => {
                 self.loop_invalidate(body);
-                let mark = self.loop_enter(Some(cond), body);
+                let mark = self.loop_enter(Some(cond), body, false);
                 let (tn, _) = self.check_cond(cond);
                 self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: false });
                 self.push_scope();
@@ -401,7 +442,7 @@ impl Checker {
             }
             ExprKind::Loop { body } => {
                 self.loop_invalidate(body);
-                let mark = self.loop_enter(None, body);
+                let mark = self.loop_enter(None, body, false);
                 self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: false });
                 self.check_block(body, None);
                 let lp = self.ctx().loops.pop().unwrap();
@@ -1257,12 +1298,24 @@ impl Checker {
                     self.narrow(id, t);
                 }
                 let epoch = self.path_epoch;
+                let ran = self.runner_log.len();
                 let (rt, rf) = self.check_cond(r);
                 self.pop_scope();
                 if self.path_epoch != epoch {
                     // A call on the right may have changed what the left found.
                     self.retain_past_calls(&mut lt);
                     self.retain_past_calls(&mut lf);
+                }
+                if self.runner_log.len() > ran {
+                    // So may a contained closure called on the right.
+                    let called: Vec<Span> = self.runner_log[ran..].to_vec();
+                    let hit = |c: &Self, l: LocalId| c.locals[l as usize].runners.iter().any(|r| called.contains(&r.0));
+                    let keep = |c: &Self, k: &NKey| match k {
+                        NKey::Local(l) => !hit(c, *l),
+                        NKey::Path(p, _) => !hit(c, p.0),
+                    };
+                    lt.retain(|(k, _)| keep(self, k));
+                    lf.retain(|(k, _)| keep(self, k));
                 }
                 self.bins.insert(e.id, BinRes::Logic);
                 self.record_ty(e.id, bool_);
@@ -1515,6 +1568,7 @@ impl Checker {
             captured: false,
             assigns: 1,
             closure_assigned: false,
+            runners: Vec::new(),
             reassigned: false,
             is_param: false,
             span: Span::default(),
@@ -1780,7 +1834,12 @@ impl Checker {
                         self.check_loop_facts(l, stored, value);
                     }
                     self.locals[l as usize].assigns += 1;
-                    if owner + 1 < self.ctxs.len() {
+                    // From a closure or a `for` body over a user type. The pre-scan has seen the
+                    // closures: those that run only at direct calls of their local keep it so.
+                    let info = &self.locals[l as usize];
+                    let contained = !info.runners.is_empty()
+                        && self.ctxs[owner + 1..].iter().all(|c| matches!(c.kind, CtxKind::Closure));
+                    if owner + 1 < self.ctxs.len() && !contained {
                         self.locals[l as usize].closure_assigned = true;
                     }
                     for c in self.ctxs.iter_mut() {
@@ -4159,7 +4218,9 @@ impl Checker {
         let ret_is_nil = self.types.shallow_resolve(ret_ty) == nil;
         let body_ret = if ret_is_nil { self.types.fresh_var() } else { ret_ty };
         self.push_ctx(fid, kind, body_ret, e.span);
-        self.ctx().scan = std::sync::Arc::new(AssignScan::new(&body.stmts));
+        let pnames: Vec<&str> =
+            if implicit_it { vec!["it"] } else { params.iter().map(|p| p.name.name.as_str()).collect() };
+        self.ctx().scan = std::sync::Arc::new(AssignScan::new(&body.stmts, &pnames));
         let mut plocals = Vec::new();
         if implicit_it {
             plocals.push(self.new_local("it", ptys[0], e.span, true));
@@ -4307,7 +4368,20 @@ impl Checker {
     fn check_for(&mut self, e: &Expr, pattern: &ast::Pattern, iter: &Expr, body: &Block) -> TyId {
         let it = self.check_expr(iter, None);
         self.loop_invalidate(body);
-        let mark = self.loop_enter(None, body);
+        // Iterating a builtin collection runs no user code; a user `each` may.
+        let builtin_iter = {
+            let r = self.types.shallow_resolve(it);
+            let r = match self.types.get(r) {
+                Ty::Frozen(i) => self.types.shallow_resolve(*i),
+                _ => r,
+            };
+            matches!(
+                self.types.get(r),
+                Ty::Class(builtin::LIST | builtin::RANGE | builtin::DICT | builtin::SET | builtin::STRING, _)
+                    | Ty::Error
+            )
+        };
+        let mark = self.loop_enter(None, body, !builtin_iter);
         let itr = self.types.shallow_resolve(it);
         let (kind, elem) = match self.types.get(itr).clone() {
             Ty::Class(builtin::LIST, a) => (ForKind::List, a[0]),
@@ -4357,7 +4431,9 @@ impl Checker {
             let fid = self.new_closure_fn(e, None);
             let nil = self.types.nil;
             self.push_ctx(fid, CtxKind::ForBody, nil, e.span);
-            self.ctx().scan = std::sync::Arc::new(AssignScan::new(&body.stmts));
+            let pnames = crate::check::scan::pattern_names_of(pattern);
+            let pnames: Vec<&str> = pnames.iter().map(String::as_str).collect();
+            self.ctx().scan = std::sync::Arc::new(AssignScan::new(&body.stmts, &pnames));
             self.ctx().loops.push(LoopCtx { breaks: Vec::new(), is_foreach: true });
             let param = self.new_local("$item", elem, pattern.span, true);
             self.bind_irrefutable(pattern, elem);

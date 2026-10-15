@@ -378,6 +378,10 @@ pub struct LocalInfo {
     /// the next call (`Checker::drop_call_narrowings`). Found by the function's pre-scan
     /// (`AssignScan`) or when such an assignment is checked.
     pub closure_assigned: bool,
+    /// Assigned only by contained closures (see `check::scan`): the declaring spans of the
+    /// locals holding them, and their names. Its narrowing ends at a direct call of one of
+    /// those locals.
+    pub runners: Vec<(Span, String)>,
     /// Assigned more than once somewhere in its function (by name, from the pre-scan, so later
     /// assignments count too): a closure cannot rely on a narrowing of it.
     pub reassigned: bool,
