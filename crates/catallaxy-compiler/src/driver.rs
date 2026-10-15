@@ -222,7 +222,17 @@ fn compile_entry(
     };
 
     let Some(src) = src else {
-        diags.push(Diagnostic::error("E0001", format!("cannot read `{}`", path.display()), Span::new(u32::MAX, 0, 0)));
+        // The loader only says the file is not there to read; the file system says why.
+        let why = match std::fs::metadata(path) {
+            Ok(m) if m.is_dir() => ": it is a directory".to_string(),
+            _ => match std::fs::read_to_string(path) {
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => ": it is not UTF-8 text".to_string(),
+                Err(e) => format!(": {e}"),
+                Ok(_) => String::new(),
+            },
+        };
+        let msg = format!("cannot read `{}`{why}", path.display());
+        diags.push(Diagnostic::error("E0001", msg, Span::new(u32::MAX, 0, 0)));
         return Compilation { sm, ck, diags, program: None, module_files: FxHashMap::default() };
     };
     let root = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));

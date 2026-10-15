@@ -662,9 +662,30 @@ method call), with a `TypeError` panic that names the expected and actual types:
 
 ## 10. Tooling
 
-`catx run file.cx [args]`, `catx check [--json] paths...`, `catx fmt [--check] paths...`, `catx repl`,
-`catx lsp`, `catx test [paths...]`. `check` and `fmt` take files and directories; a directory stands for
-every `*.cx` file under it, skipping hidden directories and `target/`.
+`catx run file.cx [args]`, `catx check [--json] paths...`, `catx fmt [--check] paths...`,
+`catx fix [--dry-run] paths...`, `catx test [paths...]`, `catx repl`, `catx lsp`,
+`catx disasm file.cx [function]`, `catx version`. `check`, `fmt` and `fix` take files and
+directories; a directory stands for every `*.cx` file under it, skipping hidden directories,
+`target/`, and programs meant to fail: `reject/` directories and files whose first line is
+`# expect: ...` (see `catx test` below). A file named on the command line is always processed.
+
+Every command describes itself with `--help` (or `-h`, or `catx help <command>`) on standard output
+and exits with status 0. For `catx run`, `--help` counts only before the file; after it, arguments
+belong to the program. An unknown option or an argument a command does not take is an error
+(status 2). A file that cannot be read is diagnostic E0001 with the reason (`No such file or
+directory`, `it is a directory`, `it is not UTF-8 text`).
+
+The exit status means the same for every command:
+
+| Status | Meaning |
+|---|---|
+| 0 | success (`check`: no errors, warnings allowed; `test`: every test passed) |
+| 1 | problems found: errors (`check`, and `fix` when errors remain), failed tests (`test`), files that would change (`fmt --check`) |
+| 2 | the command could not do its job: a usage error, a file that cannot be read or written, a file `fmt` cannot parse, `catx test` finding no tests, or a program `catx run` cannot compile |
+| other | `catx run` exits with the program's status: `exit(n)`, 101 after a panic, 141 when its standard output is closed (see below), 70 if it cannot be loaded, and 128 + N (as a shell shows it) after signal N |
+
+The `help:` line after errors links to the error index (`docs/errors.md`) at the tag of the
+running version, so an installed release explains exactly the codes it reports.
 
 A program's standard output (`puts`, `print`) is buffered: it is written when 64 KB have collected,
 when the program ends, before it reads standard input, sleeps or waits for I/O, and before anything

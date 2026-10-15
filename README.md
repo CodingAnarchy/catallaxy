@@ -92,6 +92,10 @@ catx repl                       interactive session
 catx lsp                        language server (stdio)
 ```
 
+`catx <command> --help` describes each command. The exit status is 0 on success, 1 when problems
+were found (errors, failed tests, unformatted files) and 2 for usage errors and unreadable files;
+`catx run` exits with the program's status. See the reference, §10.
+
 For VS Code, [`editors/vscode`](editors/vscode) has an extension with syntax highlighting that runs
 `catx lsp`.
 

@@ -1226,7 +1226,7 @@ fn fmt_and_check_walk_directories() {
     // A file named directly is never skipped.
     assert_eq!(catx(&["fmt".as_ref(), "--check".as_ref(), dir.join("reject/bad.cx").as_os_str()]).0, 2);
 
-    // `check` walks everything, `reject/` included.
+    // `check` skips `reject/` too (see `cli.rs`); without the file the directory is clean.
     std::fs::remove_file(dir.join("reject/bad.cx")).unwrap();
     let (code, _, err) = catx(&["check".as_ref(), dir.as_os_str()]);
     assert_eq!(code, 0, "{err}");

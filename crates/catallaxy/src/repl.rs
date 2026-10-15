@@ -39,7 +39,10 @@ const REPL_PATH: &str = "<repl>";
 /// Exit status of `__repl-exec` when the program does not compile.
 const EXEC_COMPILE_FAILED: i32 = 125;
 
-pub fn cmd_repl(_args: &[String]) -> i32 {
+pub fn cmd_repl(args: &[String]) -> i32 {
+    if let Some(a) = args.first() {
+        return crate::unexpected("repl", a);
+    }
     let mut r = Repl::new();
     if std::io::stdin().is_terminal() {
         r.interactive()

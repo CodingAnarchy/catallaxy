@@ -7,10 +7,6 @@ use catallaxy_compiler::fmt::format_source;
 
 const USAGE: &str = "usage: catx fmt [--check] <file.cx|dir>...\n       catx fmt -    (stdin to stdout)";
 
-/// Directories `fmt` skips while walking: conformance `reject/` programs are deliberately wrong,
-/// and their layout is part of the test.
-const SKIP_DIRS: &[&str] = &["reject"];
-
 fn report(path: &str, text: &str, diags: &[Diagnostic]) {
     let mut sm = SourceMap::default();
     sm.add(path.to_string(), text.to_string());
@@ -48,7 +44,7 @@ pub fn cmd_fmt(args: &[String]) -> i32 {
     }
     let mut changed = 0;
     let mut failed = false;
-    for path in crate::files::expand(&files, SKIP_DIRS) {
+    for path in crate::files::expand(&files, crate::files::MEANT_TO_FAIL) {
         let path = &*path.to_string_lossy();
         let src = match std::fs::read_to_string(path) {
             Ok(s) => s,
