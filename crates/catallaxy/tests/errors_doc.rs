@@ -13,6 +13,7 @@ const CATX: &str = env!("CARGO_BIN_EXE_catx");
 const NO_EXAMPLE: &[(&str, &str)] = &[
     ("E0801", "reports a bug in `catx fmt`; no correct formatter produces it"),
     ("E0900", "needs a function with more than 250 live values, too long to show"),
+    ("E0901", "needs an expression nested a thousand levels deep, too long to show"),
 ];
 
 fn repo() -> PathBuf {

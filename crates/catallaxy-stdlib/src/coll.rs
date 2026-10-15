@@ -168,6 +168,17 @@ pub fn lookup(name: &str) -> Option<NativeFn> {
             out.extend(order.into_iter().map(|i| items[i]));
             new_list(vm, out)
         },
+        "__list_sum" => |vm, a| list_sum(vm, a[0], a[1]),
+        "List.min_by" => |vm, a| list_best_by(vm, a[0], a[1], CmpOrdering::Less),
+        "List.max_by" => |vm, a| list_best_by(vm, a[0], a[1], CmpOrdering::Greater),
+        "List.sort_with" => |vm, a| {
+            // A snapshot: the comparator may change the list.
+            let items = list_items(vm, a[0])?;
+            let order = sort_indices_with(vm, &items, a[1])?;
+            let mut out = try_vec(order.len())?;
+            out.extend(order.into_iter().map(|i| items[i]));
+            new_list(vm, out)
+        },
 
         "Dict.new" => |vm, _| Ok(vm.m.alloc_dict(DictTable::new())),
         "Set.new" => |vm, _| Ok(vm.m.alloc_set(DictTable::new())),
@@ -455,6 +466,78 @@ pub(crate) fn sort_values(vm: &mut Vm, mut items: Vec<Value>) -> RtResult<Vec<Va
     Ok(out)
 }
 
+/// The first item of list `l` whose key `f(item)` compares `want` against the best key so far
+/// (`min_by`, `max_by`), or nil if the list is empty. The snapshot of the items, `f` and the best
+/// key stay rooted while `f` runs.
+fn list_best_by(vm: &mut Vm, l: Value, f: Value, want: CmpOrdering) -> RtResult<Value> {
+    let items = list_items(vm, l)?;
+    let base = vm.extra_roots().len();
+    vm.extra_roots().push(f);
+    vm.extra_roots().push(Value::NIL);
+    vm.extra_roots().extend_from_slice(&items);
+    let r = (|| {
+        let mut best: Option<(Value, Value)> = None;
+        for &x in &items {
+            let k = vm.call_value(f, &[x])?;
+            let better = match best {
+                None => true,
+                Some((_, bk)) => ops::compare_or_panic(vm, k, bk)? == want,
+            };
+            if better {
+                best = Some((x, k));
+                vm.extra_roots()[base + 1] = k;
+            }
+        }
+        Ok(best.map_or(Value::NIL, |(x, _)| x))
+    })();
+    vm.extra_roots().truncate(base);
+    r
+}
+
+/// `zero` plus the items of `l` in order, if `l` is a list of numbers of `zero`'s kind (`Int`
+/// or `Float`); nil otherwise, for the caller to add them up itself. The sum is the one `+`
+/// gives (integers grow into big integers; floats add left to right).
+fn list_sum(vm: &mut Vm, l: Value, zero: Value) -> RtResult<Value> {
+    if kind_of(l) != ObjKind::List {
+        return Ok(Value::NIL);
+    }
+    let list = list_read(vm, l)?;
+    let n = list.len();
+    if zero.is_float() {
+        let mut t = zero.as_f64();
+        for i in 0..n {
+            match list.get(i) {
+                Some(v) if v.is_float() => t += v.as_f64(),
+                _ => return Ok(Value::NIL),
+            }
+        }
+        return Ok(Value::from_f64(t));
+    }
+    if !ops::is_int(zero) {
+        return Ok(Value::NIL);
+    }
+    // Small integers add up in an i128, which no list can overflow; big ones as big integers.
+    let mut small: i128 = 0;
+    let mut big: Option<num_bigint::BigInt> = (!zero.is_small_int()).then(|| ops::to_bigint(zero));
+    if zero.is_small_int() {
+        small = zero.as_small_int() as i128;
+    }
+    for i in 0..n {
+        match list.get(i) {
+            Some(v) if v.is_small_int() => small += v.as_small_int() as i128,
+            Some(v) if ops::is_int(v) => *big.get_or_insert_with(Default::default) += ops::to_bigint(v),
+            _ => return Ok(Value::NIL),
+        }
+    }
+    Ok(match big {
+        None => match i64::try_from(small) {
+            Ok(s) => vm.m.int(s),
+            Err(_) => vm.m.int_from_big(small.into()),
+        },
+        Some(b) => vm.m.int_from_big(b + small),
+    })
+}
+
 /// Raises a `MemoryError` if a stable sort of `n` values could not have its buffer now. The
 /// standard library's sort allocates it without a way to report refusal: this takes and frees
 /// one as large first (sorts of up to 512 values use a buffer on the stack).
@@ -486,51 +569,72 @@ pub(crate) fn sort_indices(vm: &mut Vm, keys: &[Value]) -> RtResult<Vec<usize>> 
         idx.sort_unstable_by(|&a, &b| str_of(keys[a]).unwrap().cmp(str_of(keys[b]).unwrap()).then(a.cmp(&b)));
         return Ok(idx);
     }
-    let mut buf = try_vec(idx.len())?;
-    buf.extend_from_slice(&idx);
     // Keys may be compared by user code, which can run the collector: root them.
-    let base = vm.extra_roots().len();
-    vm.extra_roots().extend_from_slice(keys);
-    let mut error: Option<Trap> = None;
-    // Merge sort on indices (no unsafe partial states visible to the collector).
-    let r = merge_sort(vm, keys, &mut idx, buf, &mut error);
-    vm.extra_roots().truncate(base);
-    let _ = r;
-    match error {
-        Some(e) => Err(e),
-        None => Ok(idx),
-    }
+    with_rooted(vm, keys, |vm| {
+        merge_sort(vm, idx, |vm, a, b| Ok(ops::compare_or_panic(vm, keys[b], keys[a])? == CmpOrdering::Less))
+    })
 }
 
-/// Sorts `idx` by `keys`; `buf` is scratch space holding a copy of `idx`.
+/// Stable sort order of `items` by the comparator closure `f` (`f(a, b)` is negative, zero or
+/// positive as `a` sorts before, with or after `b`). Items that compare equal keep their order.
+/// The items and `f` stay rooted while `f` runs.
+pub(crate) fn sort_indices_with(vm: &mut Vm, items: &[Value], f: Value) -> RtResult<Vec<usize>> {
+    let mut idx: Vec<usize> = try_vec(items.len())?;
+    idx.extend(0..items.len());
+    vm.extra_roots().push(f);
+    let r = with_rooted(vm, items, |vm| {
+        merge_sort(vm, idx, |vm, a, b| {
+            let r = vm.call_value(f, &[items[a], items[b]])?;
+            if r.is_small_int() {
+                Ok(r.as_small_int() > 0)
+            } else {
+                Ok(ops::compare_or_panic(vm, r, Value::small_int(0))? == CmpOrdering::Greater)
+            }
+        })
+    });
+    vm.extra_roots().pop();
+    r
+}
+
+/// Runs `f` with `vals` pushed on the VM's extra roots.
+fn with_rooted<R>(vm: &mut Vm, vals: &[Value], f: impl FnOnce(&mut Vm) -> RtResult<R>) -> RtResult<R> {
+    let base = vm.extra_roots().len();
+    vm.extra_roots().extend_from_slice(vals);
+    let r = f(vm);
+    vm.extra_roots().truncate(base);
+    r
+}
+
+/// Sorts the indices `idx` with a stable bottom-up merge sort. `after(vm, a, b)` says whether
+/// the item at index `b` must come before the one at index `a`, which precedes it; an error
+/// from it ends the sort. Two adjacent runs already in order are copied instead of merged, at
+/// the cost of one comparison, so sorted input takes about one comparison per item and level.
 fn merge_sort(
     vm: &mut Vm,
-    keys: &[Value],
-    idx: &mut Vec<usize>,
-    mut buf: Vec<usize>,
-    error: &mut Option<Trap>,
-) -> bool {
+    mut idx: Vec<usize>,
+    mut after: impl FnMut(&mut Vm, usize, usize) -> RtResult<bool>,
+) -> RtResult<Vec<usize>> {
     let n = idx.len();
+    if n < 2 {
+        return Ok(idx);
+    }
+    let mut buf = try_vec(n)?;
+    buf.extend_from_slice(&idx);
     let mut width = 1;
     while width < n {
         let mut i = 0;
         while i < n {
             let mid = (i + width).min(n);
             let hi = (i + 2 * width).min(n);
+            if mid == hi || !after(vm, idx[mid - 1], idx[mid])? {
+                // One run, or two already in order.
+                buf[i..hi].copy_from_slice(&idx[i..hi]);
+                i += 2 * width;
+                continue;
+            }
             let (mut a, mut b, mut k) = (i, mid, i);
             while a < mid && b < hi {
-                let ord = if error.is_some() {
-                    CmpOrdering::Equal
-                } else {
-                    match ops::compare_or_panic(vm, keys[idx[b]], keys[idx[a]]) {
-                        Ok(o) => o,
-                        Err(e) => {
-                            *error = Some(e);
-                            CmpOrdering::Equal
-                        }
-                    }
-                };
-                if ord == CmpOrdering::Less {
+                if after(vm, idx[a], idx[b])? {
                     buf[k] = idx[b];
                     b += 1;
                 } else {
@@ -539,20 +643,13 @@ fn merge_sort(
                 }
                 k += 1;
             }
-            while a < mid {
-                buf[k] = idx[a];
-                a += 1;
-                k += 1;
-            }
-            while b < hi {
-                buf[k] = idx[b];
-                b += 1;
-                k += 1;
-            }
+            buf[k..k + (mid - a)].copy_from_slice(&idx[a..mid]);
+            k += mid - a;
+            buf[k..k + (hi - b)].copy_from_slice(&idx[b..hi]);
             i += 2 * width;
         }
-        std::mem::swap(idx, &mut buf);
+        std::mem::swap(&mut idx, &mut buf);
         width *= 2;
     }
-    error.is_none()
+    Ok(idx)
 }

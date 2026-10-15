@@ -1,0 +1,86 @@
+# sort_with is a native stable merge sort calling the comparator; sum, min_by and max_by on
+# lists run natively too (#175). Results must match the prelude versions they replace.
+class Rec {
+  name: String
+  rank: Int
+  fn <=>(self, other: Rec) -> Int { self.rank <=> other.rank }
+}
+
+puts([5, 3, 9, 1, 3].sort_with { |a, b| a <=> b })
+puts([5, 3, 9, 1, 3].sort_with { |a, b| b <=> a })
+empty: List[Int] = []
+puts(empty.sort_with { |a, b| a <=> b })
+puts([7].sort_with { |a, b| a <=> b })
+
+# Stable: equal keys keep their order.
+recs = (0...40).map { |i| Rec.new("r#{i}", i % 4) }
+sorted = recs.sort_with { |a, b| a.rank <=> b.rank }
+puts(sorted.map { |r| r.name }.join(","))
+desc = recs.sort_with { |a, b| b.rank <=> a.rank }
+puts(desc.map { |r| r.name }.take(12).join(","))
+
+# Already sorted and reversed input, and comparators that allocate (so collections run).
+asc: List[Int] = (0...3000).to_list
+calls = 0
+s1 = asc.sort_with { |a, b|
+  calls += 1
+  a <=> b
+}
+puts("#{s1 == asc} #{calls < 3000 * 2}")
+s2 = asc.sort_with { |a, b| "#{b}".length <=> "#{a}".length }
+puts("#{s2[0]} #{s2[2999]} #{s2.take(3)}")
+words = ["pear", "fig", "banana", "kiwi", "apple", "date"]
+puts(words.sort_with { |a, b| a.length <=> b.length })
+puts(words.sort_with { |a, b|
+  (a.length * 100000000000000000000) <=> (b.length * 100000000000000000000)
+})
+big = [3, 1, 2].sort_with { |a, b| (b - a) * 100000000000000000000 }
+puts(big)
+
+# The comparator may change the list; the sort uses a snapshot.
+xs = [3, 1, 2]
+ys = xs.sort_with { |a, b|
+  xs.push(0)
+  a <=> b
+}
+puts("#{ys} #{xs.length > 3}")
+
+# A panic in the comparator ends the sort and propagates.
+t = spawn {
+  [3, 1, 2].sort_with { |a, b| if a == 2 or b == 2 { panic("bad compare") } else { a <=> b } }
+}
+match t.join() {
+  Ok(_) => puts("no error")
+  Err(e) => puts(e)
+}
+
+# sum: lists natively, other enumerables item by item.
+ints = [1, 2, 3, 4]
+puts(ints.sum())
+puts(empty.sum())
+puts([4611686018427387903, 4611686018427387903, 1].sum())
+puts([100000000000000000000, -1, 5].sum())
+puts([0.1, 0.2, 0.3].sum())
+fs: List[Float] = []
+puts(fs.sum())
+puts((1..10).sum())
+puts(Set.from([1, 2, 3]).sum())
+d = Deque.new()
+d.push(5)
+d.push(6)
+puts(d.sum())
+e: Enumerable[Int] = ints
+puts(e.sum())
+
+# min_by / max_by: the first of equal keys; nil on empty; user Comparable keys.
+nums = [15, 22, 31, 42, 55, 62]
+puts(nums.min_by { |n| n % 10 })
+puts(nums.max_by { |n| n % 10 })
+puts(nums.min_by { |n| "#{n % 3}" })
+puts(nums.max_by { |n| -(n % 3) })
+puts(empty.min_by { |n| n })
+puts(empty.max_by { |n| n })
+puts(recs.min_by { |r| r }!.name)
+puts(recs.max_by { |r| r }!.name)
+puts(Set.from([4, 9, 2]).min_by { |n| n })
+puts((1..9).max_by { |n| n % 5 })

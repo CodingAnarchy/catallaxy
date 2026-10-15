@@ -48,6 +48,10 @@ fn uses_crlf(src: &str) -> bool {
 }
 
 fn format_lf(src: &str) -> Result<String, Vec<Diagnostic>> {
+    crate::util::on_compiler_stack(|| format_on_this_stack(src))
+}
+
+fn format_on_this_stack(src: &str) -> Result<String, Vec<Diagnostic>> {
     let mut next_id = 0;
     let (_, diags) = parser::parse(src, 0, &mut next_id);
     let errors: Vec<Diagnostic> = diags.into_iter().filter(|d| d.is_error()).collect();

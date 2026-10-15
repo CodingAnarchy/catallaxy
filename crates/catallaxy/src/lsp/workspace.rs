@@ -15,7 +15,6 @@
 //! After `initialized`, and when workspace folders change, the cache is warmed in the background
 //! on half the cores (see [`Workspace::warm`]), so the first request seldom compiles anything.
 
-use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -204,18 +203,18 @@ type Load = (PathBuf, Option<u64>, Option<Stamp>);
 /// A loader that reads open documents from the overlay and records every path asked for.
 struct Recording<'a> {
     overlay: &'a Overlay,
-    log: RefCell<Vec<Load>>,
+    log: Mutex<Vec<Load>>,
 }
 
 impl SourceLoader for Recording<'_> {
     fn load(&self, path: &Path) -> Option<String> {
         if let Some((t, h)) = self.overlay.get(path) {
-            self.log.borrow_mut().push((path.to_path_buf(), Some(*h), None));
+            self.log.lock().unwrap().push((path.to_path_buf(), Some(*h), None));
             return Some(t.clone());
         }
         let st = stamp(path);
         let text = st.and_then(|_| std::fs::read_to_string(path).ok());
-        self.log.borrow_mut().push((path.to_path_buf(), text.as_deref().map(hash_text), st));
+        self.log.lock().unwrap().push((path.to_path_buf(), text.as_deref().map(hash_text), st));
         text
     }
 }
@@ -568,7 +567,11 @@ impl Workspace {
         let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let ws = self.clone();
         let spawned =
-            std::thread::Builder::new().name("catx-warm".into()).spawn(move || ws.run_warm(gen, &send, progress));
+            // Indexing walks syntax trees as deep as the parser allows (see `parser::MAX_DEPTH`).
+            std::thread::Builder::new()
+                .name("catx-warm".into())
+                .stack_size(64 << 20)
+                .spawn(move || ws.run_warm(gen, &send, progress));
         let mut warmers = self.warmers.lock().unwrap_or_else(|e| e.into_inner());
         warmers.retain(|h| !h.is_finished());
         warmers.extend(spawned.ok());
@@ -794,9 +797,9 @@ fn prelude() -> &'static Prelude {
 
 fn compile_one(overlay: &Overlay, path: &Path) -> Built {
     let run = || {
-        let loader = Recording { overlay, log: RefCell::new(Vec::new()) };
+        let loader = Recording { overlay, log: Mutex::new(Vec::new()) };
         let comp = compile_path_from(prelude(), path, &loader, &Options { check_only: true });
-        let log = loader.log.into_inner();
+        let log = loader.log.into_inner().unwrap();
         let stamps = log.iter().filter_map(|(p, h, st)| Some((p.clone(), ((*st)?, (*h)?)))).collect();
         let deps = log.into_iter().map(|(p, h, _)| (p, h)).collect();
         (Unit::new(comp, deps), stamps)
