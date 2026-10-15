@@ -280,7 +280,46 @@ impl Checker {
     /// Whether local `l` is, or may later be, assigned more than once in its function.
     pub fn is_reassigned(&self, l: LocalId) -> bool {
         let info = &self.locals[l as usize];
-        info.assigns > 1 || info.reassigned || info.closure_assigned
+        info.assigns > 1 || info.reassigned || info.closure_assigned || !info.runners.is_empty()
+    }
+
+    /// Whether `body` (or `cond`) directly calls, by name, a local holding a contained closure
+    /// that assigns `l`. Judged before the loop is checked, so a local of that name declared in
+    /// the body counts too.
+    pub fn loop_calls_runner(&self, l: LocalId, body: &Block, cond: Option<&Expr>) -> bool {
+        let runners = &self.locals[l as usize].runners;
+        if runners.is_empty() {
+            return false;
+        }
+        let mut stack: Vec<&Expr> = body.stmts.iter().chain(cond).collect();
+        while let Some(x) = stack.pop() {
+            if let ExprKind::Call { callee, .. } = &x.kind {
+                if let ExprKind::Ident(n) = &callee.kind {
+                    if runners.iter().any(|r| &r.1 == n) {
+                        return true;
+                    }
+                }
+            }
+            stack.extend(crate::query::children(x));
+        }
+        false
+    }
+
+    /// A direct call of the local declared at `span`, which may hold a contained closure: drop
+    /// the narrowings of the locals such closures assign, and of field paths rooted at them.
+    pub fn clear_runner(&mut self, span: Span) {
+        let Some(c) = self.ctxs.last() else { return };
+        let mut dying: FxHashSet<LocalId> = c.narrow.iter().flat_map(|l| l.keys().copied()).collect();
+        dying.extend(c.path_narrow.iter().flat_map(|l| l.keys().map(|p| p.0)));
+        dying.retain(|&l| self.locals[l as usize].runners.iter().any(|r| r.0 == span));
+        if dying.is_empty() {
+            return;
+        }
+        self.runner_log.push(span);
+        for layer in self.ctx().narrow.iter_mut() {
+            layer.retain(|l, _| !dying.contains(l));
+        }
+        self.clear_paths(|p, _| dying.contains(&p.0));
     }
 
     /// Whether a narrowing of local `l` in the current context ends at any call: a closure that
@@ -445,7 +484,8 @@ impl Checker {
     fn check_decl_body(&mut self, fid: FnId, decl: &FnDecl, body: &Block) {
         let f = self.fns[fid as usize].clone();
         self.push_ctx(fid, CtxKind::Function, f.ret, decl.span);
-        self.ctx().scan = Arc::new(AssignScan::new(&body.stmts));
+        let pnames: Vec<&str> = f.params.iter().map(|p| p.name.as_str()).collect();
+        self.ctx().scan = Arc::new(AssignScan::new(&body.stmts, &pnames));
         if f.self_kind != SelfKind::None {
             let s = self.new_local("self", f.self_ty, decl.span, true);
             self.ctx().scopes[0].insert("self".into(), s);
@@ -555,7 +595,7 @@ impl Checker {
         self.push_ctx(fid, CtxKind::Function, nil, Span::default());
         let items = self.mods[m as usize].ast.items.clone();
         let stmts = items.iter().filter_map(|i| if let Item::Stmt(e) = i { Some(e) } else { None });
-        self.ctx().scan = Arc::new(AssignScan::new(stmts));
+        self.ctx().scan = Arc::new(AssignScan::new(stmts, &[]));
         let mut last = nil;
         for item in &items {
             match item {

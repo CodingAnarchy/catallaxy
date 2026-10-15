@@ -100,6 +100,8 @@ Generic type arguments use square brackets. Plain types never hold `nil`.
 - Generic classes are invariant: `List[Int]` is not a `List[Int?]`.
 - `Int` converts implicitly to `Float` only in arithmetic with a `Float` operand.
 - `frozen T` and `T` are distinct; `freeze(x: T) -> frozen T`. Frozen types allow only non-mutating methods.
+  A frozen type is usable as an interface only if none of the methods that implement the interface
+  mutates (E0614): `freeze([1])` is no `Pusher` with `fn push(self, x: Int)`.
   `Int`, `Float`, `Bool`, `Nil`, `String`, `Range` and tuples/enums of frozen types are already frozen.
 
 ### 3.2 Inference
@@ -266,7 +268,14 @@ returns an optional, say), the assignment is E0324.
 
 A closure (a `fn` literal, a block passed to a call, a `Fiber.start` block, the body of a `for` over a
 user `Enumerable`) may be stored and run during any later call, so a narrowing of a variable that some
-closure assigns ends at the next call, wherever the closure is written. Inside a closure, a captured
+closure assigns ends at the next call, wherever the closure is written. A closure that is only ever
+called directly through the variable it is assigned to, in the same function (`reset = fn() { x = nil }`
+and then only `reset()`), runs only there, so the narrowing ends only at those calls; passing, storing,
+copying or capturing `reset`, or calling it in a closure or a `for` body, counts as any call again.
+Assignments are matched to variables as the checker resolves them, so a closure's own variable or
+parameter that shares a name with an outer one does not count. A loop drops such a narrowing at its
+start only if an iteration may run the closure: a call in its body or condition, or a `for` over a
+user type. Inside a closure, a captured
 variable that is assigned anywhere else in its function keeps no narrowing from outside the closure,
 and a nil test inside the closure holds only until the next call (another fiber may run meanwhile).
 When the narrowing must outlive a call, bind the value: `if let v = x { ... }`.
@@ -611,7 +620,10 @@ Captured variables inside `spawn` and `par_*` blocks are copied (they cannot be 
 `freeze(x)` freezes the object in place, so `x` itself has the frozen type afterwards (until it is
 reassigned); moving a value (`move x`, `spawn move`) makes `x` unusable until reassigned. Both apply
 to every local the compiler knows refers to the same object (`b = a`). Aliases it cannot see, such as
-an object also stored in a field or list, are caught at run time by the ownership checks below.
+an object also stored in a field or list, or a variable captured by a closure created earlier, are
+caught at run time: the object itself is frozen or moved, so modifying it through the alias panics
+with `FrozenError`, and touching it while another thread owns it panics with `OwnershipError`. For
+example, `add = fn() { xs.push(3) }` followed by `freeze(xs)` makes a later `add()` panic.
 Only locals and fresh literals can be moved; a literal has no other reference, so `move` on it
 (`Mutex.new(move ["hits": 0])`) is accepted and optional.
 At runtime every object is owned (by one thread), frozen or shared. Touching another thread's owned
@@ -638,6 +650,23 @@ to code that does not hold the lock:
 
 `Atomic.add(n)` returns the new value. `Channel.recv()` blocks until a value arrives and returns
 `nil` once the channel is closed and drained; `for x in ch` iterates until then.
+`ch.recv_timeout(secs)` waits at most `secs` seconds and returns `nil` if nothing came.
+`ch.try_send(move v)` queues `v` only if that needs no wait. It returns `false` if a bounded
+channel is full or the channel is closed, and the moved value is then dropped.
+
+`Channel.select` waits on several channels at once:
+
+```
+r = Channel.select([
+  jobs.on_recv { |job| run(job) },          # job is nil once `jobs` is closed and drained
+  quit.on_recv { |_| "stop" },
+], timeout: 1.0)                             # nil if no case was ready within a second
+```
+
+It receives from the first case whose channel has an item, or is closed and drained (then the
+block gets `nil`). It returns that case's block result. Among several ready cases it picks one at
+random, so no channel starves. `timeout: 0.0` polls. Every wait here (`recv_timeout`, `select`) parks
+a fiber the way `recv` does, and blocks a thread that has no fibers. A sender on any thread wakes it.
 
 ### 8.2 Fibers
 
@@ -654,7 +683,10 @@ pages = fs.map { |f| f.join().unwrap() }
 - `Fiber.start { ... }` creates a fiber; `join()` waits for it and returns `Result[T, String]`
   (`Err` holds the message of a panic, which ends only that fiber); `is_done()`;
   `Fiber.yield()` lets the thread's other fibers run.
-- A fiber runs on the OS thread that started it, for its whole life. Fibers on one thread
+- A fiber runs on the OS thread that started it, for its whole life, and only that thread can
+  join it: a `Fiber`, or a value that holds one, cannot be sent, moved to a `spawn move` block or
+  a `Mutex`, or returned from a thread or `par_*` block (E0619). Send its result instead.
+- Fibers on one thread
   interleave only where one of them waits: channel `send`/`recv`, `join`, `sleep`, socket,
   file, directory, process and console I/O, HTTP requests, `Fiber.yield()`. Their blocks may therefore capture and mutate owned values (no
   capability rules apply), and code between two waits runs without interruption.

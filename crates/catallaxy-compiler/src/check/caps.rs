@@ -76,6 +76,69 @@ impl Checker {
         }
     }
 
+    /// The pinned type inside `t`, if any: a `Fiber`, which belongs to the thread that started
+    /// it, directly or in a collection, tuple, union, enum payload or class field. A value of such
+    /// a type cannot move to another thread. (`Dyn` and interface values are checked at run time.)
+    pub fn pinned_in(&mut self, t: TyId) -> Option<TyId> {
+        let fiber = self.well_known.fiber?;
+        let mut seen = rustc_hash::FxHashSet::default();
+        self.pinned_in_rec(t, fiber, &mut seen)
+    }
+
+    fn pinned_in_rec(&mut self, t: TyId, fiber: ClassId, seen: &mut rustc_hash::FxHashSet<TyId>) -> Option<TyId> {
+        let t = self.types.shallow_resolve(t);
+        if !seen.insert(t) {
+            return None;
+        }
+        match self.types.get(t).clone() {
+            Ty::Class(c, _) if c == fiber => Some(t),
+            Ty::Class(c, args) => {
+                for a in args {
+                    if let Some(p) = self.pinned_in_rec(a, fiber, seen) {
+                        return Some(p);
+                    }
+                }
+                // Field types, with the class's type parameters standing for the arguments
+                // (checked above).
+                let fields: Vec<TyId> = match self.classes.get(&c) {
+                    Some(ci) if !ci.is_builtin => ci.fields.iter().map(|f| f.ty).collect(),
+                    _ => Vec::new(),
+                };
+                fields.into_iter().find_map(|f| self.pinned_in_rec(f, fiber, seen))
+            }
+            Ty::Enum(e, args) => {
+                for a in args {
+                    if let Some(p) = self.pinned_in_rec(a, fiber, seen) {
+                        return Some(p);
+                    }
+                }
+                let fields: Vec<TyId> =
+                    self.enums[e as usize].variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1)).collect();
+                fields.into_iter().find_map(|f| self.pinned_in_rec(f, fiber, seen))
+            }
+            Ty::Tuple(ts) | Ty::Union(ts) => ts.into_iter().find_map(|x| self.pinned_in_rec(x, fiber, seen)),
+            Ty::Frozen(i) => self.pinned_in_rec(i, fiber, seen),
+            _ => None,
+        }
+    }
+
+    /// E0619 if a value of type `t` would move to another thread but holds a pinned `Fiber`.
+    pub fn check_not_pinned(&mut self, t: TyId, what: &str, span: Span) -> bool {
+        let Some(p) = self.pinned_in(t) else { return true };
+        let inner = if self.types.shallow_resolve(t) == p {
+            String::new()
+        } else {
+            format!(" (it holds a `{}`)", self.show(p))
+        };
+        let msg = format!("{what} of type `{}` cannot move to another thread{inner}", self.show(t));
+        self.emit(
+            Diagnostic::error("E0619", msg, span)
+                .note("a fiber runs on the thread that started it, and only that thread can join it")
+                .note("join it on this thread and send its result instead"),
+        );
+        false
+    }
+
     pub fn is_frozen_cap(&mut self, t: TyId) -> bool {
         self.cap_of(t) == Cap::Frozen
     }

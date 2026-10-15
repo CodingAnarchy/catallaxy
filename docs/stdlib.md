@@ -1290,6 +1290,31 @@ writes it as an array.
 
   Calls `f` with each item received until the channel is closed and drained.
 
+- `fn recv_timeout(self, secs: Float) -> T?`
+
+  The next item, waiting at most `secs` seconds for one; nil if none came in time, or once the
+  channel is closed and drained.
+
+- `fn try_send(self, move item: T) -> Bool`
+
+  Queues `item` if that needs no wait: true if it was queued, false if a bounded channel is full
+  or the channel is closed (the item is dropped either way, as `move` gave it away).
+
+- `fn on_recv[R](self, f: fn(T?) -> R) -> SelectCase[R]`
+
+  A case of `Channel.select`: receiving from this channel runs `f` with the item, or with nil
+  once the channel is closed and drained.
+
+- `fn select[R](cases: List[SelectCase[R]], timeout: Float? = nil) -> R?`
+
+  Waits until one of the cases' channels has an item (or is closed and drained), receives it
+  and returns what that case's block returns. Of several ready cases, one is chosen at random.
+  With a `timeout` (in seconds), returns nil if no case was ready in time; 0 polls.
+
+## SelectCase[R]
+
+One case of `Channel.select`, made by `Channel.on_recv`.
+
 ## Thread[T]
 
 - `fn join(self) -> Result[T, String]`
